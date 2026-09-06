@@ -239,6 +239,10 @@ export function CodeMirror(props: CodeMirrorProps) {
       doc: lsp.files()[props.path] ?? "",
       extensions: [
         basicSetup,
+        EditorView.theme({
+          "&": { height: "100%" },
+          ".cm-scroller": { overflow: "auto" },
+        }),
         javascript({
           typescript: true,
           jsx: true,
@@ -334,10 +338,13 @@ export function CodeMirror(props: CodeMirrorProps) {
         all: "initial",
         width: "100%",
         height: "100%",
-        overflow: "auto",
+        overflow: "hidden",
       }}
     >
-      <div ref={setContainer} />
+      <div
+        ref={setContainer}
+        style={{ width: "100%", height: "100%", overflow: "hidden" }}
+      />
     </div>
   );
 }
