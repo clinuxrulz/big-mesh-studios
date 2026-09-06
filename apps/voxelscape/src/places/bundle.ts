@@ -8,6 +8,7 @@
 // sandbox steps. Nothing here touches the interpreter: it turns a project into
 // the string a `ScriptSandbox.load` can evaluate.
 import type * as TS from "typescript";
+import { loadTypeScript } from "@big-mesh-studios/code-mirror/typescript-cdn";
 
 /** A place script that could not be compiled or bundled, in words a creator can act on. */
 export class PlaceBundleError extends Error {
@@ -18,9 +19,7 @@ export class PlaceBundleError extends Error {
 }
 
 /** The TypeScript compiler, loaded only when a script is first bundled. */
-let tsPromise: Promise<typeof TS> | undefined;
-const typescript = (): Promise<typeof TS> =>
-  (tsPromise ??= import("typescript"));
+const typescript = (): Promise<typeof TS> => loadTypeScript();
 
 /** The compiler options a bundle is pinned to, so output never drifts between runs. */
 const compilerOptions = (ts: typeof TS): TS.CompilerOptions => ({

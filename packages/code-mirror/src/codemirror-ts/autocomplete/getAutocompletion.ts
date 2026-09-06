@@ -1,13 +1,13 @@
 import type { CompletionContext } from "@codemirror/autocomplete";
 import type { VirtualTypeScriptEnvironment } from "@typescript/vfs";
-import ts from "typescript";
+import type ts from "typescript";
 import type { RawCompletion, RawCompletionItem } from "../types";
 import { DEFAULT_CODEMIRROR_TYPE_ICONS } from "./icons";
 import { matchBefore } from "./matchBefore";
 
-const TS_COMPLETE_BLOCKLIST: ts.ScriptElementKind[] = [
-  ts.ScriptElementKind.warning,
-];
+// Holds `ts.ScriptElementKind.warning` as a plain string so no bundled
+// TypeScript module is needed here; the enum value has never changed.
+const TS_COMPLETE_BLOCKLIST = ["warning"] as readonly string[];
 
 export interface AutocompletionInfo {
   start: number;

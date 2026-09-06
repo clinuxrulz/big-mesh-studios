@@ -37,7 +37,6 @@
   "license": "MIT",
   "devDependencies": {
     "@big-mesh-studios/atproto": "workspace:*",
-    "@big-mesh-studios/code-mirror": "workspace:*",
     "@big-mesh-studios/maths": "workspace:*",
     "@big-mesh-studios/stacker": "workspace:*",
     "@big-mesh-studios/utils": "workspace:*",
@@ -46,6 +45,7 @@
     "esbuild": "catalog:",
     "jsdom": "catalog:",
     "playwright": "^1.62.1",
+    "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plugin-solid": "catalog:",
     "vitest": "catalog:"
@@ -56,6 +56,7 @@
     "@atcute/identity-resolver": "catalog:",
     "@atcute/lexicons": "catalog:",
     "@atcute/oauth-browser-client": "catalog:",
+    "@big-mesh-studios/code-mirror": "workspace:*",
     "@fortawesome/fontawesome-free": "catalog:",
     "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
     "@random-mesh/rmsl": "catalog:",
@@ -67,7 +68,6 @@
     "peerjs": "^1.5.5",
     "quickjs-emscripten-core": "0.32.0",
     "solid-js": "catalog:",
-    "three": "catalog:",
-    "typescript": "catalog:"
+    "three": "catalog:"
   }
 }

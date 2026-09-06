@@ -5,9 +5,10 @@ import {
 } from "@typescript/vfs";
 import * as Comlink from "comlink";
 import { createMemo, createRoot, createSignal } from "solid-js";
-import TS from "typescript";
+import type TS from "typescript";
 import { createWorker } from "./codemirror-ts/worker";
 import type { LSPAPI } from "./types";
+import { loadTypeScript } from "./typescript-cdn";
 import { createDebug } from "./utils";
 
 const debug = createDebug("code-mirror worker");
@@ -25,7 +26,7 @@ Comlink.expose(
         ts: typeof TS;
         fs: Map<string, string>;
       }>(async (resolve) => {
-        const ts = await Promise.resolve(TS);
+        const ts = await loadTypeScript();
         const fs = await createDefaultMapFromCDN(
           {
             target: ts.ScriptTarget.ES2015,

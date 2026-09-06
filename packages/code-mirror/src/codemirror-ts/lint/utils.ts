@@ -1,5 +1,7 @@
 import type { Diagnostic } from "@codemirror/lint";
-import ts from "typescript";
+// Type-only: the module is never bundled into the built code, so the runtime
+// references below hold the stable DiagnosticCategory values as literals.
+import type ts from "typescript";
 
 /**
  * TypeScript has a set of diagnostic categories,
@@ -13,14 +15,17 @@ export function tsCategoryToSeverity(
     // Unreachable code detected
     return "warning";
   }
+  // DiagnosticCategory: Message = 0, Error = 1, Warning = 2, Suggestion = 3.
   switch (diagnostic.category) {
-    case ts.DiagnosticCategory.Error:
-      return "error";
-    case ts.DiagnosticCategory.Message:
+    case 0:
       return "info";
-    case ts.DiagnosticCategory.Warning:
+    case 1:
+      return "error";
+    case 2:
       return "warning";
-    case ts.DiagnosticCategory.Suggestion:
+    case 3:
+      return "info";
+    default:
       return "info";
   }
 }

@@ -11,7 +11,8 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": "./src/index.tsx"
+    ".": "./src/index.tsx",
+    "./typescript-cdn": "./src/typescript-cdn.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",
