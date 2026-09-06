@@ -5,10 +5,15 @@ import {
 } from "@codemirror/autocomplete";
 import { indentLess, indentMore } from "@codemirror/commands";
 import { javascript } from "@codemirror/lang-javascript";
-import { indentUnit } from "@codemirror/language";
+import {
+  indentUnit,
+  HighlightStyle,
+  syntaxHighlighting,
+} from "@codemirror/language";
 import type { Extension } from "@codemirror/state";
 import { keymap, type ViewUpdate } from "@codemirror/view";
 import { basicSetup, EditorView } from "codemirror";
+import { tags } from "@lezer/highlight";
 import type { Remote } from "comlink";
 import * as Comlink from "comlink";
 import {
@@ -36,6 +41,66 @@ import { createDebug, trackDeep } from "./utils";
 export * from "./use-ata";
 
 const debug = createDebug("code-mirror");
+
+/**
+ * A dark editor surface that leaves the background to the element behind it,
+ * so a caller's own panel colour shows through while the code text stays light.
+ */
+export const darkTheme: Extension = [
+  EditorView.theme({
+    "&": {
+      color: "#d6d6d6",
+      backgroundColor: "transparent",
+    },
+    ".cm-content": {
+      caretColor: "#e06c75",
+    },
+    ".cm-cursor, .cm-dropCursor": {
+      borderLeftColor: "#e06c75",
+    },
+    "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
+      {
+        backgroundColor: "rgba(111, 207, 151, 0.25)",
+      },
+    ".cm-gutters": {
+      backgroundColor: "transparent",
+      border: "none",
+      color: "#6b7c8c",
+    },
+    ".cm-activeLine": {
+      backgroundColor: "rgba(255, 255, 255, 0.05)",
+    },
+    ".cm-activeLineGutter": {
+      backgroundColor: "rgba(255, 255, 255, 0.05)",
+    },
+  }),
+  syntaxHighlighting(
+    HighlightStyle.define([
+      { tag: tags.keyword, color: "#c678dd" },
+      {
+        tag: [tags.function(tags.variableName), tags.labelName],
+        color: "#61afef",
+      },
+      {
+        tag: [tags.typeName, tags.className, tags.namespace],
+        color: "#e5c07b",
+      },
+      { tag: [tags.name, tags.propertyName], color: "#e06c75" },
+      {
+        tag: [tags.number, tags.constant(tags.name), tags.standard(tags.name)],
+        color: "#d19a66",
+      },
+      { tag: [tags.string, tags.special(tags.string)], color: "#98c379" },
+      { tag: [tags.regexp, tags.escape], color: "#56b6c2" },
+      {
+        tag: [tags.operator, tags.operatorKeyword, tags.bool, tags.null],
+        color: "#56b6c2",
+      },
+      { tag: [tags.comment, tags.meta], color: "#7f848e" },
+      { tag: tags.invalid, color: "#ff6b6b" },
+    ]),
+  ),
+];
 
 interface LSPContext {
   /** The remote handle to the language worker, from the surrounding provider. */

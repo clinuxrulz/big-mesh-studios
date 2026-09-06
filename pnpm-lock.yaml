@@ -239,6 +239,9 @@ importers:
       '@big-mesh-studios/atproto':
         specifier: workspace:*
         version: link:../../packages/atproto
+      '@big-mesh-studios/code-mirror':
+        specifier: workspace:*
+        version: link:../../packages/code-mirror
       '@big-mesh-studios/maths':
         specifier: workspace:*
         version: link:../../packages/maths

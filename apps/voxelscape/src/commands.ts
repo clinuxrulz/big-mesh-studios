@@ -101,6 +101,8 @@ export interface CommandsParams {
   places: PlaceLibrary;
   /** Publishing a place of your own, to the signed-in account. */
   placePublisher: PlacePublisher;
+  /** Opens whether the place script editor is showing, and reports the flip. */
+  togglePlaceEditor: () => string;
   /** Driving the place script loaded for this session, over the console. */
   script: {
     demo(): Promise<string>;
@@ -195,6 +197,7 @@ export const createCommands = ({
   modelAccount,
   places,
   placePublisher,
+  togglePlaceEditor,
   script,
   resolution,
   setView,
@@ -567,6 +570,10 @@ export const createCommands = ({
         input.click();
         return "pick a model zip — the monsters keep their look until one loads";
       },
+    },
+    "/place:editor": {
+      description: "open (or close) the place script editor",
+      run: () => togglePlaceEditor(),
     },
     "/place:publish": {
       description: "publish a place zip from this device to your account",

@@ -218,6 +218,18 @@ export {
 } from "./places/place";
 export { readPlaceZip } from "./places/package";
 export {
+  createDraftPersistence,
+  type DraftPersistence,
+} from "./places/draft-persistence";
+export {
+  emptyPlaceProject,
+  MAIN_SCRIPT_FILE,
+  readPlaceProject,
+  STARTER_SCRIPT,
+  writePlaceZip,
+  type PlaceProject,
+} from "./places/project";
+export {
   createPlaceLibrary,
   createPlacePublisher,
   type PlaceLibrary,

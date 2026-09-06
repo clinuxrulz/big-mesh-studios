@@ -75,28 +75,20 @@ export class ScriptConsole {
 
   /** Loads the bundled sample place script. */
   async loadSample(): Promise<string> {
-    if (this.host === null) {
-      this.host = new ScriptHost({
-        seed: 12_345,
-        now: () => Date.now(),
-        heightAt: this.heightAt,
-        onToast: (player, text) => {
-          if (player === "") {
-            this.report(text);
-          }
-        },
-        onDialog: (player, state) => this.onDialog(player, state),
-        onNotice: this.report,
-      });
-    }
-    await this.host.load(SAMPLE_PLACE_SCRIPT);
-    const npcs = this.host.npcList;
-    const where = npcs
-      .map((npc) => `${npc.name} at (${npc.x}, ${npc.z})`)
-      .join(", ");
-    return `sample script loaded — ${where}. Talk with /script:talk <id> (${npcs
-      .map((npc) => npc.id)
-      .join(" or ")})`;
+    await this.loadScript(SAMPLE_PLACE_SCRIPT, 12_345);
+    return `sample script loaded — ${this.loadedLine()}`;
+  }
+
+  /**
+   * Loads `source` as the running script. The interpreter is built fresh each
+   * load, so a creator iterating on a script starts from clean state — no NPC
+   * or dialog from a previous run survives — and `seed` seeds its randomness,
+   * the seed a place author means to publish.
+   */
+  async loadScript(source: string, seed: number): Promise<string> {
+    const host = await this.freshHost(seed);
+    await host.load(source);
+    return `script loaded — ${this.loadedLine()}`;
   }
 
   /** What the script has made so far: NPCs, dialogs, and any last problem. */
@@ -163,6 +155,38 @@ export class ScriptConsole {
   dispose(): void {
     this.host?.dispose();
     this.host = null;
+  }
+
+  /** A fresh host for `seed`, leaving the previous one's NPCs and dialogs behind. */
+  private async freshHost(seed: number): Promise<ScriptHost> {
+    this.host?.dispose();
+    this.host = new ScriptHost({
+      seed,
+      now: () => Date.now(),
+      heightAt: this.heightAt,
+      onToast: (player, text) => {
+        if (player === "") {
+          this.report(text);
+        }
+      },
+      onDialog: (player, state) => this.onDialog(player, state),
+      onNotice: this.report,
+    });
+    return this.host;
+  }
+
+  /** Where the loaded script's NPCs stand and how to talk to them, for a load line. */
+  private loadedLine(): string {
+    const npcs = this.host?.npcList ?? [];
+    const where = npcs
+      .map((npc) => `${npc.name} at (${npc.x}, ${npc.z})`)
+      .join(", ");
+    const ids = npcs.map((npc) => npc.id).join(" or ");
+    const tail =
+      npcs.length === 0
+        ? "no NPCs placed yet"
+        : `Talk with /script:talk <id> (${ids})`;
+    return `${where}. ${tail}`;
   }
 
   /** The open dialog as console lines, or null when nobody is talking. */

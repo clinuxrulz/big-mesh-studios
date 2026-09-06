@@ -7,6 +7,7 @@ import {
   WORLD_MODEL_ACCOUNT,
 } from "../atproto/models";
 import { createPlaceLibrary, createPlacePublisher } from "../atproto/places";
+import type { PlaceLibrary, PlacePublisher } from "../atproto/places";
 import type { ScriptConsole } from "../places/script-console";
 import { NpcFigures } from "../places/npc-figures";
 import { pickNpc } from "../places/npc-pick";
@@ -90,6 +91,23 @@ export interface Voxelscape {
   /** The player's hearts and the death fall that empties them. */
   health: PlayerHealth;
   commands: Commander;
+  /**
+   * The place script editor: opening it, running the draft's script, and
+   * reading and publishing places.
+   */
+  placeEditor: {
+    /** Whether the `/place:editor` panel is showing. */
+    open: Accessor<boolean>;
+    setOpen(open: boolean): void;
+    /** The signed-in account the editor publishes from, or null while signed out. */
+    accountDid: string | null;
+    /** The seed a freshly created place starts from: the world being played. */
+    defaultSeed: number;
+    places: PlaceLibrary;
+    publisher: PlacePublisher;
+    /** Loads `source` into the running place script host, seeded from the draft. */
+    runScript(source: string, seed: number): Promise<string>;
+  };
   /** Whether `onDebugStats` is being called, which `/render:perf` toggles. */
   debugPerf: Accessor<boolean>;
   /** Last strike or use result, so the HUD can show silent failures. */
@@ -150,6 +168,8 @@ export const createVoxelscape = ({
     {},
   );
   const [debugPerf, setDebugPerf] = createSignal(initialDebugPerf);
+  /** Whether the `/place:editor` panel is showing. */
+  const [placeEditorOpen, setPlaceEditorOpen] = createSignal(false);
   /** The id of the NPC last aimed at, so the aim signal only moves when it does. */
   let lastAimId: string | null = null;
 
@@ -590,6 +610,23 @@ export const createVoxelscape = ({
    */
   const resolution = new AdaptiveResolution();
 
+  /** The place script editor's door into the world: opening it, running the
+   * draft's script, and reading and publishing places. */
+  const placeEditor = {
+    open: placeEditorOpen,
+    setOpen: setPlaceEditorOpen,
+    /** The signed-in account the editor publishes from, or null while signed out. */
+    get accountDid(): string | null {
+      return atproto.did;
+    },
+    /** The seed a freshly created place starts from: the world being played. */
+    defaultSeed: terrain.seed,
+    places: placeLibrary,
+    publisher: placePublisher,
+    runScript: (source: string, seed: number) =>
+      scriptConsoleFor().then((console) => console.loadScript(source, seed)),
+  };
+
   const commands = createCommands({
     renderer: world.renderer,
     dayNight: environment.dayNight,
@@ -605,6 +642,13 @@ export const createVoxelscape = ({
     modelAccount,
     places: placeLibrary,
     placePublisher,
+    togglePlaceEditor: () => {
+      const next = !placeEditorOpen();
+      setPlaceEditorOpen(next);
+      return next
+        ? "place editor opened — write your place's scripts, run them, then publish"
+        : "place editor closed";
+    },
     script,
     resolution,
     setView: (mode) => {
@@ -845,6 +889,7 @@ export const createVoxelscape = ({
     inventory,
     health,
     commands,
+    placeEditor,
     debugPerf,
     editStatus,
     target,

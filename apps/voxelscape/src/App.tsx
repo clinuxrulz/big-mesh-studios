@@ -1,10 +1,20 @@
-import { Component, createSignal, onCleanup, onSettled, Show } from "solid-js";
+import {
+  Component,
+  createSignal,
+  lazy,
+  onCleanup,
+  onSettled,
+  Show,
+} from "solid-js";
 import styles from "./App.module.css";
 import { createPlaceLibrary } from "./atproto/places";
 import { placeWorld } from "./places/place";
 import { DEFAULT_TERRAIN, type TerrainConfig } from "./world/noise";
 import type { Dim3 } from "./world/level-data";
 import CoarseControls from "./ui/CoarseControls";
+/** The place script editor, pulled in only when `/place:editor` first needs it,
+ * so the code-mirror bundle is not loaded by every world. */
+const PlaceEditor = lazy(() => import("./ui/PlaceEditor"));
 import { Console } from "./ui/Console";
 import { DialogOverlay } from "./ui/Dialog";
 import { EditHud } from "./ui/EditHud";
@@ -80,6 +90,9 @@ const World: Component<{ launch: LaunchConfig }> = (props) => {
         <HealthHud />
         <PositionHud />
         <DialogOverlay />
+        <Show when={voxelscape.placeEditor.open()}>
+          <PlaceEditor />
+        </Show>
         <LoadingScreen />
         <Console
           onCommand={(line) => voxelscape.commands.run(line)}

@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { ScriptConsole } from "./script-console";
+import { SAMPLE_PLACE_SCRIPT } from "./sample";
 
 const console = (): {
   script: ScriptConsole;
@@ -55,6 +56,35 @@ describe("a script console", () => {
     expect(lines).toContain(
       "Sold! A potion of courage, fresh from the cellar.",
     );
+    script.dispose();
+  });
+
+  it("loads an arbitrary script and reports where its NPCs stand", async () => {
+    const { script } = console();
+    const line = await script.loadScript(SAMPLE_PLACE_SCRIPT, 99);
+    expect(line).toMatch(/script loaded — .*Sable.*Rook/);
+    expect(line).toMatch(/sable or rook/);
+    script.dispose();
+  });
+
+  it("replaces the previous script's NPCs when a new source loads", async () => {
+    const { script } = console();
+    await script.loadScript(SAMPLE_PLACE_SCRIPT, 99);
+    expect(script.npcs()).toHaveLength(2);
+    await script.loadScript(
+      `function bmsTick() {
+        engine.dispatch("npc", JSON.stringify({ id: "ghost", x: 1, z: 2 }));
+      }`,
+      99,
+    );
+    expect(script.npcs().map((npc) => npc.id)).toEqual(["ghost"]);
+    script.dispose();
+  });
+
+  it("reports when a loaded script places no NPCs", async () => {
+    const { script } = console();
+    const line = await script.loadScript("function bmsTick() {}", 1);
+    expect(line).toContain("no NPCs placed yet");
     script.dispose();
   });
 });
