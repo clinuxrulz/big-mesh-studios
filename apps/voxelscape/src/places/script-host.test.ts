@@ -2,9 +2,13 @@
 import { describe, expect, it } from "vitest";
 import { ScriptHost, type DialogState } from "./script-host";
 import { SAMPLE_PLACE_SCRIPT } from "./sample";
+import { MAIN_SCRIPT_FILE } from "./project";
 
 let clockMs = 0;
 const clock = () => clockMs;
+
+const loadProject = (host: ScriptHost, source: string) =>
+  host.loadProject({ [MAIN_SCRIPT_FILE]: source }, MAIN_SCRIPT_FILE);
 
 const fresh = async (): Promise<{
   host: ScriptHost;
@@ -30,7 +34,7 @@ const fresh = async (): Promise<{
 describe("a script host", () => {
   it("runs the sample script and grounds its NPCs", async () => {
     const { host } = await fresh();
-    await host.load(SAMPLE_PLACE_SCRIPT);
+    await loadProject(host, SAMPLE_PLACE_SCRIPT);
     const npcs = host.npcList;
     expect(npcs.map((n) => n.id).sort()).toEqual(["rook", "sable"]);
     expect(host.npc("sable")).toMatchObject({
@@ -44,7 +48,7 @@ describe("a script host", () => {
 
   it("walks a shop dialog from greeting to a sale", async () => {
     const { host, toasts, dialogs } = await fresh();
-    await host.load(SAMPLE_PLACE_SCRIPT);
+    await loadProject(host, SAMPLE_PLACE_SCRIPT);
 
     await host.talk("sable", "");
     expect(host.dialogFor("")).toMatchObject({
@@ -70,7 +74,7 @@ describe("a script host", () => {
 
   it("ignores a choice that does not match the open dialog", async () => {
     const { host } = await fresh();
-    await host.load(SAMPLE_PLACE_SCRIPT);
+    await loadProject(host, SAMPLE_PLACE_SCRIPT);
     await host.talk("sable", "");
     await host.choose("rook", 0, ""); // talking to sable, choosing on rook
     expect(host.dialogFor("")).toMatchObject({ npcId: "sable" });
@@ -79,7 +83,7 @@ describe("a script host", () => {
 
   it("leaves a dialog when the player walks away", async () => {
     const { host, dialogs } = await fresh();
-    await host.load(SAMPLE_PLACE_SCRIPT);
+    await loadProject(host, SAMPLE_PLACE_SCRIPT);
     await host.talk("rook", "");
     expect(host.dialogFor("")).not.toBeNull();
     await host.leave("rook", "");
@@ -90,7 +94,7 @@ describe("a script host", () => {
 
   it("keeps two players' dialogs apart", async () => {
     const { host } = await fresh();
-    await host.load(SAMPLE_PLACE_SCRIPT);
+    await loadProject(host, SAMPLE_PLACE_SCRIPT);
     await host.talk("sable", "did:plc:alice");
     await host.talk("rook", "did:plc:bob");
     expect(host.dialogFor("did:plc:alice")).toMatchObject({ npcId: "sable" });
@@ -100,13 +104,16 @@ describe("a script host", () => {
 
   it("ignores an effect that is not well-formed, and reports script errors", async () => {
     const { host, notices } = await fresh();
-    await host.load(`
-      function bmsTick() {
+    await loadProject(
+      host,
+      `
+      export function bmsTick() {
         engine.dispatch("npc", JSON.stringify({ id: "ghost" }));
         engine.dispatch("npc", "not json");
         engine.log("hi from the script");
       }
-    `);
+    `,
+    );
     expect(host.npc("ghost")).toBeNull();
     expect(notices).toContain("hi from the script");
     host.dispose();
@@ -114,7 +121,7 @@ describe("a script host", () => {
 
   it("reports a step that throws", async () => {
     const { host, notices } = await fresh();
-    await host.load("function bmsTick() { missing(); }");
+    await loadProject(host, "export function bmsTick() { missing(); }");
     await host.talk("sable", "");
     expect(host.lastError).toMatch(/ReferenceError/);
     expect(notices.join("\n")).toMatch(/ReferenceError/);

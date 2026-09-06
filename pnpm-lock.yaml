@@ -235,6 +235,9 @@ importers:
       three:
         specifier: 'catalog:'
         version: 0.183.2
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
     devDependencies:
       '@big-mesh-studios/atproto':
         specifier: workspace:*
@@ -266,9 +269,6 @@ importers:
       playwright:
         specifier: ^1.62.1
         version: 1.62.1
-      typescript:
-        specifier: 'catalog:'
-        version: 5.9.3
       vite:
         specifier: 'catalog:'
         version: 7.3.6(@types/node@26.4.0)

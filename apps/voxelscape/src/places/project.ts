@@ -12,25 +12,40 @@ import {
 } from "./place";
 
 /** The script file a freshly created place starts with. */
-export const MAIN_SCRIPT_FILE = "main.js";
+export const MAIN_SCRIPT_FILE = "main.ts";
 
-/** The source a new place begins editing from, shaped like the bundled sample. */
-export const STARTER_SCRIPT = `// Your place's script. Define bmsTick to react to the events the world
-// hands you each step; anything you want done to the world is spoken through
-// engine.dispatch. Run /script:demo for a working sample with dialogs.
-var started = false;
+/** The source a new place begins editing from, typed the way a place script expects to be. */
+export const STARTER_SCRIPT = `// Your place's script. Export a bmsTick function and the world will call it
+// each step with the shared clock and the events since the last step. The
+// TypeScript types are stripped when the script loads, so the panel's
+// squiggles are the whole of the type-check; imports may only reach this
+// place's own script files. Run /script:demo for a working sample.
+declare const engine: {
+  dispatch(tag: string, payload: string): void;
+  log(line: string): void;
+  now(): number;
+};
 
-function bmsTick(clockMs, eventsJson) {
+let started = false;
+
+export function bmsTick(clockMs: number, eventsJson: string): void {
   if (!started) {
     started = true;
-    engine.dispatch("npc", JSON.stringify({ id: "guide", x: 8, z: 8, name: "Guide" }));
+    engine.dispatch(
+      "npc",
+      JSON.stringify({ id: "guide", x: 8, z: 8, name: "Guide" }),
+    );
     engine.log("your place started");
   }
-  var events = JSON.parse(eventsJson);
-  for (var i = 0; i < events.length; i++) {
-    var e = events[i];
-    if (e.kind === "npc-talk") {
-      engine.dispatch("toast", JSON.stringify({ player: e.producer, text: "Hello, traveller." }));
+  const events = JSON.parse(
+    eventsJson,
+  ) as Array<{ kind: string; producer: string }>;
+  for (const event of events) {
+    if (event.kind === "npc-talk") {
+      engine.dispatch(
+        "toast",
+        JSON.stringify({ player: event.producer, text: "Hello, traveller." }),
+      );
     }
   }
 }

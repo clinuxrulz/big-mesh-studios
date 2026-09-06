@@ -268,14 +268,16 @@ export const PlaceEditor: Component = () => {
     if (p === null) {
       return;
     }
-    const source = p.scripts[active()];
-    if (source === undefined) {
+    const entry = p.manifest.scripts?.[0];
+    if (entry === undefined || p.scripts[entry] === undefined) {
+      setStatus("name a first script in the manifest to run it");
       return;
     }
     setBusy(true);
     try {
       const line = await voxelscape.placeEditor.runScript(
-        source,
+        p.scripts,
+        entry,
         p.manifest.seed,
       );
       setStatus(line);

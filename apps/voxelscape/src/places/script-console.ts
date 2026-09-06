@@ -5,6 +5,7 @@
 // methods return is one line-shaped answer for a console to print.
 import { ScriptHost, type DialogState } from "./script-host";
 import { SAMPLE_PLACE_SCRIPT } from "./sample";
+import { MAIN_SCRIPT_FILE } from "./project";
 
 export interface ScriptConsoleParams {
   /** The terrain surface at (`x`, `z`), where a script's NPCs are grounded. */
@@ -75,19 +76,28 @@ export class ScriptConsole {
 
   /** Loads the bundled sample place script. */
   async loadSample(): Promise<string> {
-    await this.loadScript(SAMPLE_PLACE_SCRIPT, 12_345);
+    await this.loadProject(
+      { [MAIN_SCRIPT_FILE]: SAMPLE_PLACE_SCRIPT },
+      MAIN_SCRIPT_FILE,
+      12_345,
+    );
     return `sample script loaded — ${this.loadedLine()}`;
   }
 
   /**
-   * Loads `source` as the running script. The interpreter is built fresh each
-   * load, so a creator iterating on a script starts from clean state — no NPC
-   * or dialog from a previous run survives — and `seed` seeds its randomness,
-   * the seed a place author means to publish.
+   * Loads the place's scripts as the running project. The interpreter is built
+   * fresh each load, so a creator iterating on a script starts from clean state
+   * — no NPC or dialog from a previous run survives — and `seed` seeds its
+   * randomness, the seed a place author means to publish. `entry` is the file
+   * execution starts from; it must export `bmsTick`.
    */
-  async loadScript(source: string, seed: number): Promise<string> {
+  async loadProject(
+    files: Record<string, string>,
+    entry: string,
+    seed: number,
+  ): Promise<string> {
     const host = await this.freshHost(seed);
-    await host.load(source);
+    await host.loadProject(files, entry);
     return `script loaded — ${this.loadedLine()}`;
   }
 

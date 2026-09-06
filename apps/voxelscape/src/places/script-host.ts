@@ -9,6 +9,7 @@
 import { createQuickJSSandbox } from "./quickjs-sandbox";
 import { EventLog } from "./event-log";
 import { parseEffect, type ParsedEffect } from "./effects";
+import { bundlePlaceProject } from "./bundle";
 import type { ScriptSandbox } from "./sandbox";
 import type { ScriptEventPayload } from "./events";
 
@@ -103,11 +104,19 @@ export class ScriptHost {
     return this.problem;
   }
 
-  /** Loads the script, applies anything it did while loading, and steps it once. */
-  async load(source: string): Promise<void> {
+  /**
+   * Compiles the project's scripts, loads the bundle into the sandbox, applies
+   * anything it did while loading, and steps it once. The entry file is where
+   * execution starts; its module must export `bmsTick`.
+   */
+  async loadProject(
+    files: Record<string, string>,
+    entry: string,
+  ): Promise<void> {
     const sandbox = await this.ready;
     this.assertAlive();
-    sandbox.load(source);
+    const code = await bundlePlaceProject(files, entry);
+    sandbox.load(code);
     this.loaded = true;
     await this.drain(sandbox);
     await this.step();

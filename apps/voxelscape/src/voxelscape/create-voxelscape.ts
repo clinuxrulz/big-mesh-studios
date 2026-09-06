@@ -105,8 +105,12 @@ export interface Voxelscape {
     defaultSeed: number;
     places: PlaceLibrary;
     publisher: PlacePublisher;
-    /** Loads `source` into the running place script host, seeded from the draft. */
-    runScript(source: string, seed: number): Promise<string>;
+    /** Loads the draft's scripts into the running place host, seeded from the draft. */
+    runScript(
+      files: Record<string, string>,
+      entry: string,
+      seed: number,
+    ): Promise<string>;
   };
   /** Whether `onDebugStats` is being called, which `/render:perf` toggles. */
   debugPerf: Accessor<boolean>;
@@ -623,8 +627,10 @@ export const createVoxelscape = ({
     defaultSeed: terrain.seed,
     places: placeLibrary,
     publisher: placePublisher,
-    runScript: (source: string, seed: number) =>
-      scriptConsoleFor().then((console) => console.loadScript(source, seed)),
+    runScript: (files: Record<string, string>, entry: string, seed: number) =>
+      scriptConsoleFor().then((console) =>
+        console.loadProject(files, entry, seed),
+      ),
   };
 
   const commands = createCommands({

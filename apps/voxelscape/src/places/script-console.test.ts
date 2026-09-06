@@ -2,8 +2,9 @@
 import { describe, expect, it } from "vitest";
 import { ScriptConsole } from "./script-console";
 import { SAMPLE_PLACE_SCRIPT } from "./sample";
+import { MAIN_SCRIPT_FILE } from "./project";
 
-const console = (): {
+const scriptConsole = (): {
   script: ScriptConsole;
   lines: string[];
 } => {
@@ -17,9 +18,12 @@ const console = (): {
   };
 };
 
+const loadProject = (script: ScriptConsole, source: string, seed: number) =>
+  script.loadProject({ [MAIN_SCRIPT_FILE]: source }, MAIN_SCRIPT_FILE, seed);
+
 describe("a script console", () => {
   it("reports before a script is loaded", async () => {
-    const { script } = console();
+    const { script } = scriptConsole();
     await expect(script.describe()).resolves.toBe(
       "no script loaded — use /script:demo",
     );
@@ -27,7 +31,7 @@ describe("a script console", () => {
   });
 
   it("loads the sample and runs a whole conversation", async () => {
-    const { script, lines } = console();
+    const { script, lines } = scriptConsole();
     const loaded = await script.loadSample();
     expect(loaded).toMatch(/sample script loaded — .*Sable.*Rook/);
     expect(loaded).toMatch(/talk with \/script:talk <id> \(sable or rook\)/i);
@@ -48,7 +52,7 @@ describe("a script console", () => {
   });
 
   it("keeps the shop sale reachable through option numbers", async () => {
-    const { script, lines } = console();
+    const { script, lines } = scriptConsole();
     await script.loadSample();
     await script.talk("sable");
     await script.choose(1); // buy a potion
@@ -60,19 +64,20 @@ describe("a script console", () => {
   });
 
   it("loads an arbitrary script and reports where its NPCs stand", async () => {
-    const { script } = console();
-    const line = await script.loadScript(SAMPLE_PLACE_SCRIPT, 99);
+    const { script } = scriptConsole();
+    const line = await loadProject(script, SAMPLE_PLACE_SCRIPT, 99);
     expect(line).toMatch(/script loaded — .*Sable.*Rook/);
     expect(line).toMatch(/sable or rook/);
     script.dispose();
   });
 
   it("replaces the previous script's NPCs when a new source loads", async () => {
-    const { script } = console();
-    await script.loadScript(SAMPLE_PLACE_SCRIPT, 99);
+    const { script } = scriptConsole();
+    await loadProject(script, SAMPLE_PLACE_SCRIPT, 99);
     expect(script.npcs()).toHaveLength(2);
-    await script.loadScript(
-      `function bmsTick() {
+    await loadProject(
+      script,
+      `export function bmsTick() {
         engine.dispatch("npc", JSON.stringify({ id: "ghost", x: 1, z: 2 }));
       }`,
       99,
@@ -82,8 +87,8 @@ describe("a script console", () => {
   });
 
   it("reports when a loaded script places no NPCs", async () => {
-    const { script } = console();
-    const line = await script.loadScript("function bmsTick() {}", 1);
+    const { script } = scriptConsole();
+    const line = await loadProject(script, "export function bmsTick() {}", 1);
     expect(line).toContain("no NPCs placed yet");
     script.dispose();
   });

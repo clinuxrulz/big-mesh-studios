@@ -46,7 +46,6 @@
     "esbuild": "catalog:",
     "jsdom": "catalog:",
     "playwright": "^1.62.1",
-    "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plugin-solid": "catalog:",
     "vitest": "catalog:"
@@ -68,6 +67,7 @@
     "peerjs": "^1.5.5",
     "quickjs-emscripten-core": "0.32.0",
     "solid-js": "catalog:",
-    "three": "catalog:"
+    "three": "catalog:",
+    "typescript": "catalog:"
   }
 }

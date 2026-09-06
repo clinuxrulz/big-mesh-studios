@@ -1,8 +1,10 @@
-// A small scripted place, written as a place creator would write it: two NPCs
-// stand in the world, each running a short dialog tree, and picking an option
-// makes the script answer — closing the dialog, or ending with a toast. It is
-// the working example the script host is tested against, and the first script
-// a player can load with the console while the world wires its dialog surface.
+// A small scripted place, written the way a place creator would write it: two
+// NPCs stand in the world, each running a short dialog tree, and picking an
+// option makes the script answer — closing the dialog, or ending with a toast.
+// It is the working example the script host is tested against, and the first
+// script a player can load with the console while the world wires its dialog
+// surface. Like every place script it is a module: it exports bmsTick, and the
+// world calls it each step with the shared clock and the events since the last.
 export const SAMPLE_PLACE_SCRIPT = String.raw`
 var started = false;
 var state = {};
@@ -69,7 +71,7 @@ function gateNode(player, node, option) {
   }
 }
 
-function bmsTick(clockMs, eventsJson) {
+export function bmsTick(clockMs, eventsJson) {
   if (!started) {
     started = true;
     spawn();
