@@ -1280,6 +1280,23 @@ export class TriangleRenderer {
     // once the new data actually arrives
     this.chunkMeshes.delete(index);
     this.meshes.invalidate(index);
+    // The slot's world and probe meshes still point at the old superchunk's
+    // geometry pair, which the next full re-join hands back to the pool for
+    // another superchunk to re-upload. Unseat them now so no mesh with a live
+    // range draws whatever content that pair is next filled with at the old
+    // location; the replacement mesh is seated when the new cell's build lands.
+    for (const map of [
+      this.scChunkTerrain,
+      this.scChunkWater,
+      this.scProbeTerrain,
+      this.scProbeWater,
+    ]) {
+      const mesh = map.get(index);
+      if (mesh !== undefined) {
+        mesh.drawRange = EMPTY_RANGE;
+      }
+    }
+    this.slotCenter.delete(index);
     if (oldKey !== undefined) {
       const oldMembers = this.scMembers.get(oldKey);
       const slot = oldMembers?.findIndex((m) => m.index === index) ?? -1;

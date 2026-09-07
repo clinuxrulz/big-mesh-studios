@@ -60,6 +60,51 @@ describe("TriangleRenderer", () => {
     expect(renderer.terrain.children[0].visible).toBe(true);
   });
 
+  it("unseats a slot's mesh when it is repositioned, so recycled geometry cannot flash", () => {
+    // Slot 0 and slot 1 sit in different superchunks. Once slot 0's mesh is
+    // seated in its own superchunk, recycling the slot to a cell in slot 1's
+    // superchunk drops its old superchunk's geometry pair into the pool — a
+    // pair the slot's world mesh still referenced. The mesh must stop drawing
+    // (empty range) at the moment of the move, not when the new cell's data
+    // arrives, or it shows whatever geometry that pair is next filled with.
+    const renderer = rendererFor(blockWithFloor(), blockWithFloor());
+    const camera = new PerspectiveCamera(60, 1, 0.1, 1000);
+    camera.position.set(0, 0, 0);
+    camera.lookAt(512, 0, 0); // face +x so both superchunks stay in the frustum
+    const tick = (): void => renderer.tick(0.016, camera);
+
+    renderer.repositionBlock(0, [0, 0, 0]);
+    renderer.repositionBlock(1, [256, 0, 0]);
+    renderer.onBlockChanged(0);
+    renderer.meshNow(0);
+    for (let frame = 0; frame < 10; frame++) {
+      tick();
+    }
+    const rendererState = renderer as unknown as {
+      scChunkTerrain: Map<number, { drawRange: { count: number } }>;
+      slotCenter: Map<number, unknown>;
+    };
+    expect(rendererState.scChunkTerrain.get(0)!.drawRange.count).toBeGreaterThan(
+      0,
+    );
+
+    renderer.repositionBlock(0, [384, 0, 0]);
+    expect(rendererState.scChunkTerrain.get(0)!.drawRange.count).toBe(0);
+    expect(rendererState.slotCenter.has(0)).toBe(false);
+
+    // The new cell's data lands and is meshed: the slot draws again, seated in
+    // its new superchunk.
+    renderer.onBlockChanged(0);
+    renderer.meshNow(0);
+    for (let frame = 0; frame < 10; frame++) {
+      tick();
+    }
+    expect(rendererState.scChunkTerrain.get(0)!.drawRange.count).toBeGreaterThan(
+      0,
+    );
+    expect(renderer.triangleCount).toBeGreaterThan(0);
+  });
+
   it("draws nothing for a block with no voxels in it", () => {
     const renderer = rendererFor(buildBlockShell({ center: [0, 0, 0] }));
 
