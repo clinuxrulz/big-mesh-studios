@@ -84,9 +84,9 @@ describe("TriangleRenderer", () => {
       scChunkTerrain: Map<number, { drawRange: { count: number } }>;
       slotCenter: Map<number, unknown>;
     };
-    expect(rendererState.scChunkTerrain.get(0)!.drawRange.count).toBeGreaterThan(
-      0,
-    );
+    expect(
+      rendererState.scChunkTerrain.get(0)!.drawRange.count,
+    ).toBeGreaterThan(0);
 
     renderer.repositionBlock(0, [384, 0, 0]);
     expect(rendererState.scChunkTerrain.get(0)!.drawRange.count).toBe(0);
@@ -99,9 +99,9 @@ describe("TriangleRenderer", () => {
     for (let frame = 0; frame < 10; frame++) {
       tick();
     }
-    expect(rendererState.scChunkTerrain.get(0)!.drawRange.count).toBeGreaterThan(
-      0,
-    );
+    expect(
+      rendererState.scChunkTerrain.get(0)!.drawRange.count,
+    ).toBeGreaterThan(0);
     expect(renderer.triangleCount).toBeGreaterThan(0);
   });
 
