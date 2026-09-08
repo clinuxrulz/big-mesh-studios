@@ -562,6 +562,17 @@ interface SuperchunkState {
   /** Each member's contiguous run of indices in the merged geometry, for its `drawRange`. */
   terrainRanges: Map<number, { start: number; count: number }>;
   waterRanges: Map<number, { start: number; count: number }>;
+  /**
+   * How many vertices and indices of each pass the GPU already holds from the
+   * last upload, so an append-only rebuild re-sends just the tail instead of
+   * the whole merged geometry.
+   */
+  committed: {
+    terrainVerts: number;
+    terrainIndices: number;
+    waterVerts: number;
+    waterIndices: number;
+  };
 }
 
 /**
@@ -882,6 +893,12 @@ export class TriangleRenderer {
         waterGeometry: geometry.water,
         terrainRanges: new Map(),
         waterRanges: new Map(),
+        committed: {
+          terrainVerts: 0,
+          terrainIndices: 0,
+          waterVerts: 0,
+          waterIndices: 0,
+        },
       };
       // The superchunk's old merged geometry is largely stale (its data was
       // replaced or its membership moved), so its geometry is returned to the
@@ -929,23 +946,46 @@ export class TriangleRenderer {
       }
       return false;
     }
-    setGeometryData(state.terrainGeometry, {
-      positions: state.terrain.positions.array(),
-      normals: state.terrain.normals.array(),
-      uvs: state.terrain.uvs.array(),
-      brightness: state.terrain.brightness.array(),
-      indices: state.terrain.indices.array(),
-    });
-    setOcclusionColors(state.terrainGeometry, state.terrain.colors.array());
-    setGeometryData(state.waterGeometry, {
-      positions: state.water.positions.array(),
-      normals: state.water.normals.array(),
-      uvs: state.water.uvs.array(),
-      brightness: state.water.brightness.array(),
-      indices: state.water.indices.array(),
-    });
-    setOcclusionColors(state.waterGeometry, state.water.colors.array());
+    const { committed } = state;
+    setGeometryData(
+      state.terrainGeometry,
+      {
+        positions: state.terrain.positions.array(),
+        normals: state.terrain.normals.array(),
+        uvs: state.terrain.uvs.array(),
+        brightness: state.terrain.brightness.array(),
+        indices: state.terrain.indices.array(),
+      },
+      committed.terrainVerts,
+      committed.terrainIndices,
+    );
+    setOcclusionColors(
+      state.terrainGeometry,
+      state.terrain.colors.array(),
+      committed.terrainVerts,
+    );
+    setGeometryData(
+      state.waterGeometry,
+      {
+        positions: state.water.positions.array(),
+        normals: state.water.normals.array(),
+        uvs: state.water.uvs.array(),
+        brightness: state.water.brightness.array(),
+        indices: state.water.indices.array(),
+      },
+      committed.waterVerts,
+      committed.waterIndices,
+    );
+    setOcclusionColors(
+      state.waterGeometry,
+      state.water.colors.array(),
+      committed.waterVerts,
+    );
     this.scLastUpload.set(key, this.frame);
+    committed.terrainVerts = state.terrain.positions.count / 3;
+    committed.terrainIndices = state.terrain.indices.count;
+    committed.waterVerts = state.water.positions.count / 3;
+    committed.waterIndices = state.water.indices.count;
     this.syncSlotMeshes(key, center, state);
     this.updateTriCount();
     return true;

@@ -567,6 +567,38 @@ export const buildWaterMesh = (
 };
 
 /**
+ * Wraps a typed array as a `BufferAttribute` whose `updateRange` says which
+ * slice the GPU still needs, then marks it for upload. A caller that keeps a
+ * merged geometry's arrays and only appends to them passes how many vertices
+ * (or indices, for the index attribute) the GPU already holds, so the next
+ * draw re-sends just the tail; `committed` of 0 (or a count that no longer
+ * grew) uploads nothing extra.
+ */
+const attrWithRange = (
+  array: number[] | Float32Array | Uint32Array,
+  itemSize: number,
+  committed: number,
+): BufferAttribute => {
+  const arr =
+    array instanceof Float32Array || array instanceof Uint32Array
+      ? array
+      : new Float32Array(array);
+  const total = arr.length / itemSize;
+  const a = new BufferAttribute(arr, itemSize);
+  if (committed > 0 && total > committed) {
+    a.updateRange = {
+      offset: committed * itemSize,
+      count: (total - committed) * itemSize,
+    };
+  } else if (total <= committed) {
+    // Nothing to send: the GPU already holds this exact data.
+    a.updateRange = { offset: 0, count: 0 };
+  }
+  a.needsUpdate = true;
+  return a;
+};
+
+/**
  * Applies `mesh`'s arrays to an existing geometry *in place*, replacing
  * its attributes while keeping the geometry object identity stable. The
  * renderer keys its GPU-buffer cache by geometry object, so re-uploading
@@ -575,21 +607,27 @@ export const buildWaterMesh = (
  * data). Replacing `mesh.geometry` with a fresh geometry instead would
  * orphan the old entry in that cache and leak its GPU buffers on every
  * rebuild.
+ *
+ * `committedVertices` and `committedIndices` name what the GPU already holds
+ * from the last upload of this same geometry: 0 uploads everything, and a
+ * partial count uploads only the appended slice (the arrays in `mesh` must be
+ * that geometry's own, grown at the tail).
  */
 export const setGeometryData = (
   geometry: BufferGeometry,
   mesh: MeshArrays,
+  committedVertices = 0,
+  committedIndices = 0,
 ): void => {
-  const toF32 = (a: number[] | Float32Array): Float32Array =>
-    a instanceof Float32Array ? a : new Float32Array(a);
   const attr = (
     name: string,
     array: number[] | Float32Array,
     itemSize: number,
   ): void => {
-    const a = new BufferAttribute(toF32(array), itemSize);
-    a.needsUpdate = true;
-    geometry.setAttribute(name, a);
+    geometry.setAttribute(
+      name,
+      attrWithRange(array, itemSize, committedVertices),
+    );
   };
   attr("position", mesh.positions, 3);
   attr("normal", mesh.normals, 3);
@@ -607,7 +645,7 @@ export const setGeometryData = (
     mesh.indices instanceof Uint32Array
       ? mesh.indices
       : new Uint32Array(mesh.indices);
-  geometry.setIndex(new BufferAttribute(idx, 1));
+  geometry.setIndex(attrWithRange(idx, 1, committedIndices));
 };
 
 /**
@@ -615,18 +653,17 @@ export const setGeometryData = (
  * channel each) to a geometry already uploaded with `setGeometryData`. The
  * occlusion-culled probe material reads the `occlusionColor` attribute; a
  * material that does not reference it — every other material in the world —
- * never has it bound.
+ * never has it bound. `committedVertices` behaves as in `setGeometryData`.
  */
 export const setOcclusionColors = (
   geometry: BufferGeometry,
   colors: number[] | Float32Array,
+  committedVertices = 0,
 ): void => {
-  const attr = new BufferAttribute(
-    colors instanceof Float32Array ? colors : new Float32Array(colors),
-    3,
+  geometry.setAttribute(
+    "occlusionColor",
+    attrWithRange(colors, 3, committedVertices),
   );
-  attr.needsUpdate = true;
-  geometry.setAttribute("occlusionColor", attr);
 };
 
 /**

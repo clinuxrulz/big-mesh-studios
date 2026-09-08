@@ -148,10 +148,14 @@ export class FillClient {
         skyLight: msg.skyLight[j],
         blockLight: msg.blockLight[j],
       });
-      this.applyEdits(i);
-      // Edits can change what the block emits (lava placed or removed), so the
-      // worker's steady-state light is no longer current once the overlay land.
-      fillLight(this.blocks[i], this.terrain);
+      // The worker generated and lit the un-edited terrain, so re-lighting is
+      // owed only where the overlay changed a voxel of this block (an edit can
+      // make a new emitter or open the sky). A pristine block keeps the
+      // worker's light, which is exactly the recomputation this pass would
+      // otherwise throw away and do again on the main thread.
+      if (this.applyEdits(i) > 0) {
+        fillLight(this.blocks[i], this.terrain);
+      }
       this.onBlockChanged(i);
     }
   }
@@ -297,13 +301,16 @@ export class FillClient {
   /**
    * Re-applies the edit overlay to a block's slot, so a refilled slot
    * reflects edits recorded since its last fill.
+   *
+   * @returns The number of store voxels the overlay wrote, which is how the
+   * caller knows whether anything that could change the block's light landed.
    */
-  private applyEdits(i: number): void {
+  private applyEdits(i: number): number {
     const layer = this.editLayer;
     if (layer === undefined) {
-      return;
+      return 0;
     }
-    layer.applyToBlock(this.blocks[i]);
+    return layer.applyToBlock(this.blocks[i]);
   }
 
   private sendFillBatch(
