@@ -301,6 +301,13 @@ export interface TriangleRendererParams {
    * data it holds.
    */
   onBlockMeshed?: (index: number) => void;
+  /**
+   * The most bytes of merged geometry one frame may mark for GPU upload; a
+   * burst that exceeds it stays dirty and merges over the following frames.
+   * Defaults to `MAX_UPLOAD_BYTES_PER_FRAME`; a test passes a smaller value to
+   * make a single frame's spending observable.
+   */
+  uploadBytesPerFrame?: number;
 }
 
 /** Chunk cells per superchunk per axis: 2 chunks of 64³ voxels, 256³ world units. */
@@ -319,6 +326,26 @@ const BLOCK_HALF = BLOCK_WORLD[0] / 2;
  * something when a build is stuck.
  */
 const MAX_UPLOAD_STALL_FRAMES = 6;
+
+/**
+ * The bytes of merged geometry one frame may mark for GPU upload. A scroll's
+ * shell or the initial load can settle several superchunks on the same frame,
+ * and each full join's first upload is a whole-buffer GPU transfer; without a
+ * cap the frame that lands them pays for all of them at once. The rest of a
+ * burst stays dirty and merges over the following frames, nearest first.
+ */
+const MAX_UPLOAD_BYTES_PER_FRAME = 2 * 1024 * 1024;
+
+/**
+ * The bytes one vertex of merged geometry adds to the GPU upload: position 12
+ * + normal 12 + uv 8 + brightness 4 + the probe colour 12 the merge stamps on
+ * every vertex. A pass without UVs is over-counted by its 8 bytes, which only
+ * tightens the frame's budget. Indices are counted at `INDEX_UPLOAD_BYTES`.
+ */
+const VERTEX_UPLOAD_BYTES = 48;
+
+/** The bytes one index of merged geometry adds to the GPU upload. */
+const INDEX_UPLOAD_BYTES = 4;
 
 /** Frames between the hardware occlusion queries, each a readback that stalls the pipeline. */
 const DEFAULT_OCCLUSION_INTERVAL = 200;
@@ -484,6 +511,31 @@ const emptyArrays = (): MergedArrays => ({
   brightness: new Growable(Float32Array),
 });
 
+/**
+ * The bytes of `arrays` the GPU does not yet hold: everything past the
+ * `committedVerts` and `committedIndices` the last upload already sent. A full
+ * re-join (both committed counts 0) counts the whole geometry; an append-only
+ * rebuild counts only its tail.
+ */
+const mergedTailBytes = (
+  arrays: MergedArrays,
+  committedVerts: number,
+  committedIndices: number,
+): number =>
+  Math.max(0, arrays.positions.count / 3 - committedVerts) *
+    VERTEX_UPLOAD_BYTES +
+  Math.max(0, arrays.indices.count - committedIndices) * INDEX_UPLOAD_BYTES;
+
+/**
+ * The bytes appending one block's built arrays into a merged superchunk
+ * eventually costs the GPU upload: the block's per-vertex attributes plus the
+ * probe colour the merge stamps on each of its vertices, and its indices at
+ * `INDEX_UPLOAD_BYTES` each.
+ */
+const meshArraysBytes = (arrays: MeshArrays): number =>
+  (arrays.positions.length / 3) * VERTEX_UPLOAD_BYTES +
+  arrays.indices.length * INDEX_UPLOAD_BYTES;
+
 /** One view-frustum plane as the `[a, b, c, d]` of `a*x + b*y + c*z + d`. */
 type FrustumPlane = [number, number, number, number];
 
@@ -613,6 +665,10 @@ export class TriangleRenderer {
 
   private readonly waterExtinction: number;
   private readonly seaLevel: number | undefined;
+  /** The merged bytes one frame may mark for upload; the tick spends against it. */
+  private readonly uploadBudgetBytes: number;
+  /** Bytes of merged geometry marked for upload on this tick's merges, for the debug line. */
+  private uploadBytesThisFrame = 0;
 
   private totalTriangles: number = 0;
   /**
@@ -727,6 +783,8 @@ export class TriangleRenderer {
     this.waterExtinction = waterExtinction;
     this.seaLevel = seaLevel;
     this.onBlockMeshed = onBlockMeshed;
+    this.uploadBudgetBytes =
+      params.uploadBytesPerFrame ?? MAX_UPLOAD_BYTES_PER_FRAME;
     // Water probes shade over terrain but never hide it the way the real water
     // pass blends over the scene: the probe's depth stays the terrain's, so the
     // culler cannot mistake translucent water for an opaque occluder.
@@ -982,6 +1040,20 @@ export class TriangleRenderer {
       committed.waterVerts,
     );
     this.scLastUpload.set(key, this.frame);
+    // Count what this upload marked before the committed counters catch up, so
+    // the frame's debug figure reflects the merged bytes actually reaching the
+    // GPU rather than the pre-merge estimate the pacing spent against.
+    this.uploadBytesThisFrame +=
+      mergedTailBytes(
+        state.terrain,
+        committed.terrainVerts,
+        committed.terrainIndices,
+      ) +
+      mergedTailBytes(
+        state.water,
+        committed.waterVerts,
+        committed.waterIndices,
+      );
     committed.terrainVerts = state.terrain.positions.count / 3;
     committed.terrainIndices = state.terrain.indices.count;
     committed.waterVerts = state.water.positions.count / 3;
@@ -989,6 +1061,59 @@ export class TriangleRenderer {
     this.syncSlotMeshes(key, center, state);
     this.updateTriCount();
     return true;
+  }
+
+  /**
+   * The bytes `rebuildSuperchunk` would mark for upload for `key` right now,
+   * before the merge runs: a full re-join owes every landed member's mesh at
+   * whole size, and an append-only rebuild owes its un-joined members plus the
+   * un-committed tail of geometry already joined. The tick's frame budget
+   * spends against this estimate, so a burst is paced in units of upload volume
+   * rather than superchunk count.
+   */
+  private pendingUploadBytes(key: string): number {
+    const members = this.scMembers.get(key);
+    if (members === undefined) {
+      return 0;
+    }
+    // A full re-join replaces the merged geometry wholesale, so every member
+    // whose build has landed is owed at whole-mesh size no matter what the old
+    // geometry already held. An append-only rebuild instead owes only the
+    // un-joined members and the merged arrays' un-committed tail.
+    if (this.scMerged.get(key) === undefined || this.scNeedsFull.has(key)) {
+      let bytes = 0;
+      for (const member of members) {
+        const built = this.chunkMeshes.get(member.index);
+        if (built !== undefined) {
+          bytes +=
+            meshArraysBytes(built.terrain) + meshArraysBytes(built.water);
+        }
+      }
+      return bytes;
+    }
+    const state = this.scMerged.get(key) as SuperchunkState;
+    const joined = state.slots;
+    let bytes = 0;
+    for (const member of members) {
+      if (joined.has(member.index)) {
+        continue;
+      }
+      const built = this.chunkMeshes.get(member.index);
+      if (built !== undefined) {
+        bytes += meshArraysBytes(built.terrain) + meshArraysBytes(built.water);
+      }
+    }
+    bytes += mergedTailBytes(
+      state.terrain,
+      state.committed.terrainVerts,
+      state.committed.terrainIndices,
+    );
+    bytes += mergedTailBytes(
+      state.water,
+      state.committed.waterVerts,
+      state.committed.waterIndices,
+    );
+    return bytes;
   }
 
   /** Appends one member's geometry to a superchunk's merged arrays and records its index run. */
@@ -1312,6 +1437,11 @@ export class TriangleRenderer {
     return this.totalTriangles;
   }
 
+  /** Bytes of merged geometry the last tick marked for GPU upload, for the debug line. */
+  get lastTickUploadBytes(): number {
+    return this.uploadBytesThisFrame;
+  }
+
   repositionBlock(index: number, center: Dim3): void {
     const newKey = scKey(superchunkCellOf(center));
     const oldKey = this.blockSc.get(index);
@@ -1425,11 +1555,14 @@ export class TriangleRenderer {
     // keep draining the mesh-build queue a few blocks per frame (the worker
     // does the heavy lifting off the main thread)
     this.meshes.drain();
-    // upload one merged superchunk geometry per dirty superchunk, so a burst
-    // of block results reads as a few draw calls rather than a few thousand;
-    // a superchunk that is still meshing stays dirty and uploads once it
-    // settles (or the stall backstop trips)
+    // Merging landed block results into superchunk geometry keeps a burst of
+    // builds reading as a few draw calls rather than a few thousand, and the
+    // tick below spends a byte budget on those merges each frame so no single
+    // frame pays for the whole of a scroll's burst at once. A superchunk that
+    // is still meshing stays dirty and uploads once it settles (or the stall
+    // backstop trips).
     this.frame++;
+    this.uploadBytesThisFrame = 0;
     // A block whose rebuild never arrives must not hold its neighbours off the
     // screen forever; past the stall backstop the group gives up whatever has
     // landed so far, and anything later uploads on its own.
@@ -1462,6 +1595,15 @@ export class TriangleRenderer {
         camera.position.z,
       ]),
     );
+    // Of the superchunks the gates above leave, merge and upload a frame's
+    // byte budget at a time: the burst of a scroll or the initial load can
+    // settle several superchunks on one frame, and each full join's first
+    // upload is a whole-buffer GPU transfer. The nearest superchunks merge
+    // first, so the terrain entering view ahead of the player appears before
+    // the rest, and whatever exceeds the budget stays dirty like an occluded
+    // superchunk does. A superchunk whose whole join alone exceeds the budget
+    // still merges that frame — it is the only thing the frame could spend.
+    const due: Array<{ key: string; d2: number; bytes: number }> = [];
     for (const key of dirty) {
       const { center, half } = scBounds(key);
       if (!inFrustum(planes, center, half)) {
@@ -1480,7 +1622,25 @@ export class TriangleRenderer {
         this.dirty.add(key);
         continue;
       }
-      this.rebuildSuperchunk(key);
+      const dx = center[0] - camera.position.x;
+      const dy = center[1] - camera.position.y;
+      const dz = center[2] - camera.position.z;
+      due.push({
+        key,
+        d2: dx * dx + dy * dy + dz * dz,
+        bytes: this.pendingUploadBytes(key),
+      });
+    }
+    due.sort((a, b) => a.d2 - b.d2);
+    let spent = 0;
+    for (const candidate of due) {
+      if (spent > 0 && spent + candidate.bytes > this.uploadBudgetBytes) {
+        this.dirty.add(candidate.key);
+        continue;
+      }
+      if (this.rebuildSuperchunk(candidate.key)) {
+        spent += candidate.bytes;
+      }
     }
     // Hide what the camera is not looking at, now that this frame's rebuilds
     // have decided which superchunks have geometry.

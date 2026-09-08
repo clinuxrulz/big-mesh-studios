@@ -876,7 +876,7 @@ export const createVoxelscape = ({
       beforeRender: (renderer, camera) =>
         world.renderer.occlusionFrame(renderer, camera),
       describeStats: () =>
-        `tris: ${world.renderer.triangleCount.toLocaleString()} | occluded: ${world.renderer.occlusions}`,
+        `tris: ${world.renderer.triangleCount.toLocaleString()} | uploaded: ${world.renderer.lastTickUploadBytes.toLocaleString()} B | occluded: ${world.renderer.occlusions}`,
     });
 
     unmount = () => {

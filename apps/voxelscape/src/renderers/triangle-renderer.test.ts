@@ -18,12 +18,20 @@ const blockWithFloor = (): WorldBlock => {
 };
 
 /** A renderer holding these blocks, with a tile for the voxel they are drawn in. */
-const rendererFor = (...blocks: WorldBlock[]) => {
+const rendererFor = (...blocks: WorldBlock[]): TriangleRenderer =>
+  rendererForBudget(undefined, ...blocks);
+
+/** As `rendererFor`, but capping each frame's merged upload at `budget` bytes. */
+const rendererForBudget = (
+  budget: number | undefined,
+  ...blocks: WorldBlock[]
+): TriangleRenderer => {
   const renderer = new TriangleRenderer({
     blocks,
     waterExtinction: 0.1,
     seaLevel: undefined,
     onBlockMeshed: () => {},
+    uploadBytesPerFrame: budget,
   });
   /** The whole atlas as one tile: these tests are about what is drawn, not where from. */
   const whole: TileRect = [0, 0, 1, 1];
@@ -213,5 +221,40 @@ describe("TriangleRenderer", () => {
     }
 
     expect(renderer.terrain.children.filter((m) => m.visible)).toHaveLength(1);
+  });
+
+  it("paces in-frustum superchunk uploads across frames within the byte budget", () => {
+    // Three blocks in three superchunks, all in the camera's frustum and
+    // unmeasured by the occlusion pass: merging and uploading them all on one
+    // frame is the stall the budget exists to prevent. A one-byte frame budget
+    // leaves each tick enough for the nearest outstanding superchunk alone, so
+    // the visible world gains one chunk at a time.
+    const renderer = rendererForBudget(
+      1,
+      blockWithFloor(),
+      blockWithFloor(),
+      blockWithFloor(),
+    );
+    const camera = new PerspectiveCamera(60, 1, 0.1, 1000);
+    camera.lookAt(1024, 0, 0); // face +x so every superchunk stays in the frustum
+
+    renderer.repositionBlock(0, [0, 0, 0]);
+    renderer.repositionBlock(1, [256, 0, 0]);
+    renderer.repositionBlock(2, [512, 0, 0]);
+    for (const index of [0, 1, 2]) {
+      renderer.onBlockChanged(index);
+      renderer.meshNow(index);
+    }
+
+    const visible = (): number =>
+      renderer.terrain.children.filter((mesh) => mesh.visible).length;
+
+    renderer.tick(0.016, camera);
+    expect(visible()).toBe(1);
+    renderer.tick(0.016, camera);
+    expect(visible()).toBe(2);
+    renderer.tick(0.016, camera);
+    expect(visible()).toBe(3);
+    expect(renderer.triangleCount).toBeGreaterThan(0);
   });
 });
