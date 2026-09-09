@@ -1857,18 +1857,13 @@ export class TriangleRenderer {
       ...this.scProbeWater.keys(),
     ]);
     this.occlusionPending = true;
-    renderer
-      .readPixelsAsync(this.occlusionTarget, this.occlusionReadback)
-      .then((readback) => {
-        this.occlusionPending = false;
-        this.lastQueryTested = tested;
-        this.lastVisible = scanVisible(readback, tested, readbackBytes);
-      })
-      .catch(() => {
-        // The readback landed nothing usable (e.g. context loss mid-flight);
-        // keep the last query's result and let the next `queryIsDue` retry.
-        this.occlusionPending = false;
-      });
+    void this.runOcclusionQuery(
+      renderer,
+      this.occlusionTarget,
+      this.occlusionReadback,
+      tested,
+      readbackBytes,
+    );
     this.lastQueryFrame = this.frame;
     this.lastQueryPosition = [
       camera.position.x,
@@ -1876,6 +1871,34 @@ export class TriangleRenderer {
       camera.position.z,
     ];
     this.lastQueryForward = [forward.x, forward.y, forward.z];
+  }
+
+  /**
+   * Waits on one occlusion query's readback and turns it into the
+   * visible-slot set a later `applyVisibility` reads. Runs detached from
+   * `occlusionFrame`, which keeps `occlusionPending` set for exactly as long
+   * as this takes so a later frame does not start another query over it; a
+   * readback that lands nothing usable (context loss mid-flight, say) is
+   * left for the next `queryIsDue` check to retry, with `lastVisible`
+   * unchanged from whatever the last query that did land found.
+   */
+  private async runOcclusionQuery(
+    renderer: WebGLRenderer,
+    target: WebGLRenderTarget,
+    out: Uint8Array,
+    tested: Set<number>,
+    readbackBytes: number,
+  ): Promise<void> {
+    try {
+      const readback = await renderer.readPixelsAsync(target, out);
+      this.lastQueryTested = tested;
+      this.lastVisible = scanVisible(readback, tested, readbackBytes);
+    } catch {
+      // Nothing usable landed; lastVisible and lastQueryTested keep their
+      // prior values, and the next queryIsDue check retries on its own.
+    } finally {
+      this.occlusionPending = false;
+    }
   }
 
   /** On by default; when off, every chunk draws and no readback runs. */
