@@ -17,5 +17,8 @@
   },
   "devDependencies": {
     "prettier": "^3.9.6"
+  },
+  "dependencies": {
+    "@random-mesh/rmsl": "link:../rmsl"
   }
 }

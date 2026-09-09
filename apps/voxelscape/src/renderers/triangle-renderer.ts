@@ -813,6 +813,8 @@ export class TriangleRenderer {
   private lastQueryFrame = Number.NEGATIVE_INFINITY;
   private lastQueryPosition: [number, number, number] | null = null;
   private lastQueryForward: [number, number, number] | null = null;
+  /** Set while a query's readback is in flight, so a later frame does not issue another before it lands. */
+  private occlusionPending = false;
   private occlusionOn = true;
   private occlusionInterval = DEFAULT_OCCLUSION_INTERVAL;
   /** When on, the world draws as its probe pass: every chunk in its slot's debug colour. */
@@ -1782,14 +1784,20 @@ export class TriangleRenderer {
   /**
    * Runs the hardware occlusion query this frame, when one is owed: draws the
    * probe scene (every content slot in its flat colour) into the offscreen
-   * target and reads the pixels back, so the next `applyVisibility` can hide
-   * the chunks the last query found covered. Called just before the main
-   * render, so the probe is drawn from the same frame's geometry and the
-   * same camera view the player sees that frame; the readback it returns
-   * answers the frames after it.
+   * target and reads the pixels back, so a later `applyVisibility` can hide
+   * the chunks the query found covered. Called just before the main render,
+   * so the probe is drawn from the same frame's geometry and the same
+   * camera view the player sees that frame. The readback itself runs off the
+   * GPU without blocking this frame, and lands a frame or a few later —
+   * `applyVisibility` keeps answering from the last query that landed until
+   * this one does, which is fine for a hint that only ever needs to be
+   * roughly current.
    */
   occlusionFrame(renderer: WebGLRenderer, camera: PerspectiveCamera): void {
     if (!this.occlusionOn) {
+      return;
+    }
+    if (this.occlusionPending) {
       return;
     }
     if (this.scProbeTerrain.size === 0 && this.scProbeWater.size === 0) {
@@ -1844,16 +1852,23 @@ export class TriangleRenderer {
       new Color(previousClear[0], previousClear[1], previousClear[2]),
       previousClear[3],
     );
-    renderer.readPixels(this.occlusionTarget, this.occlusionReadback);
-    this.lastQueryTested = new Set<number>([
+    const tested = new Set<number>([
       ...this.scProbeTerrain.keys(),
       ...this.scProbeWater.keys(),
     ]);
-    this.lastVisible = scanVisible(
-      this.occlusionReadback,
-      this.lastQueryTested,
-      readbackBytes,
-    );
+    this.occlusionPending = true;
+    renderer
+      .readPixelsAsync(this.occlusionTarget, this.occlusionReadback)
+      .then((readback) => {
+        this.occlusionPending = false;
+        this.lastQueryTested = tested;
+        this.lastVisible = scanVisible(readback, tested, readbackBytes);
+      })
+      .catch(() => {
+        // The readback landed nothing usable (e.g. context loss mid-flight);
+        // keep the last query's result and let the next `queryIsDue` retry.
+        this.occlusionPending = false;
+      });
     this.lastQueryFrame = this.frame;
     this.lastQueryPosition = [
       camera.position.x,
