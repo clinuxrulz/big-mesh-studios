@@ -19,6 +19,7 @@ export const toTyped = (m: MeshArrays): MeshArrays => ({
   normals:
     m.normals instanceof Float32Array ? m.normals : new Float32Array(m.normals),
   uvs: m.uvs instanceof Float32Array ? m.uvs : new Float32Array(m.uvs),
+  rects: m.rects instanceof Float32Array ? m.rects : new Float32Array(m.rects),
   brightness:
     m.brightness instanceof Float32Array
       ? m.brightness
@@ -28,7 +29,7 @@ export const toTyped = (m: MeshArrays): MeshArrays => ({
 });
 
 /**
- * The buffers to move along with a pair of typed meshes: each pair's ten
+ * The buffers to move along with a pair of typed meshes: each pair's twelve
  * typed-array buffers, terrain first then water — each buffer once, because a
  * transfer list that names a buffer twice is refused by the structured clone
  * algorithm. Two meshes that share an (e.g. empty) array reuse one entry, and
@@ -41,10 +42,11 @@ export const meshArraysTransfers = (
   const seen = new Set<Transferable>();
   const transfer: Transferable[] = [];
   for (const mesh of [terrain, water]) {
-    const { positions, normals, uvs, brightness, indices } = mesh as {
+    const { positions, normals, uvs, rects, brightness, indices } = mesh as {
       positions: Float32Array;
       normals: Float32Array;
       uvs: Float32Array;
+      rects: Float32Array;
       brightness: Float32Array;
       indices: Uint32Array;
     };
@@ -52,6 +54,7 @@ export const meshArraysTransfers = (
       positions.buffer,
       normals.buffer,
       uvs.buffer,
+      rects.buffer,
       brightness.buffer,
       indices.buffer,
     ]) {

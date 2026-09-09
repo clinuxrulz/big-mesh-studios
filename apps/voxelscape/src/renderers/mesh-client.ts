@@ -30,6 +30,7 @@ const EMPTY_MESH: MeshArrays = {
   positions: [],
   normals: [],
   uvs: [],
+  rects: [],
   brightness: [],
   indices: [],
 };

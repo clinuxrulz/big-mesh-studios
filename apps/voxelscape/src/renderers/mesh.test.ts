@@ -90,6 +90,23 @@ const windsOutward = (mesh: MeshArrays): boolean => {
 };
 
 /** Collects each vertex's normal, keyed to its uv. */
+/** Each face direction's tile rects, one per vertex drawn facing that way. */
+const rectsByNormal = (mesh: MeshArrays): Map<string, number[][]> => {
+  const out = new Map<string, number[][]>();
+  for (let i = 0; i < vertexCount(mesh); i++) {
+    const key = `${mesh.normals[i * 3]},${mesh.normals[i * 3 + 1]},${mesh.normals[i * 3 + 2]}`;
+    const list = out.get(key) ?? [];
+    list.push([
+      mesh.rects[i * 4],
+      mesh.rects[i * 4 + 1],
+      mesh.rects[i * 4 + 2],
+      mesh.rects[i * 4 + 3],
+    ]);
+    out.set(key, list);
+  }
+  return out;
+};
+
 const facesByNormal = (
   mesh: MeshArrays,
 ): Map<string, Array<[number, number]>> => {
@@ -163,17 +180,21 @@ describe("buildBlockMesh", () => {
       }
     }
     const mesh = buildBlockMesh(store, []);
-    // 3x3x3 cube: 6 faces x 9 unit faces
-    expect(faceCount(mesh)).toBe(54);
-    expect(vertexCount(mesh)).toBe(54 * 4);
-    // the shell only: each cube face contributes 9 unit quads (4 verts each)
+    // The interior is never meshed, and each of the cube's six sides is nine
+    // equally lit faces in one plane, so each becomes a single merged quad.
+    expect(faceCount(mesh)).toBe(6);
+    expect(vertexCount(mesh)).toBe(6 * 4);
     const yShell = facesByNormal(mesh);
-    expect(yShell.get("1,0,0")?.length).toBe(36);
-    expect(yShell.get("-1,0,0")?.length).toBe(36);
-    expect(yShell.get("0,0,1")?.length).toBe(36);
-    expect(yShell.get("0,0,-1")?.length).toBe(36);
-    expect(yShell.get("0,1,0")?.length).toBe(36);
-    expect(yShell.get("0,-1,0")?.length).toBe(36);
+    for (const normal of [
+      "1,0,0",
+      "-1,0,0",
+      "0,0,1",
+      "0,0,-1",
+      "0,1,0",
+      "0,-1,0",
+    ]) {
+      expect(yShell.get(normal)?.length).toBe(4);
+    }
   });
 
   it("never surfaces the block floor of a fully solid store", () => {
@@ -192,9 +213,10 @@ describe("buildBlockMesh", () => {
     }
     const mesh = buildBlockMesh(store, []);
     expect(hasNormal(mesh, 0, -1, 0)).toBe(false);
-    // every column's top voxel exposes its top face (16 quads x 4 verts)
+    // Every column's top voxel exposes its top face, and the sixteen of them
+    // are one flat-lit plane, so they merge into a single quad.
     const faces = facesByNormal(mesh);
-    expect(faces.get("0,1,0")?.length ?? 0).toBe(64);
+    expect(faces.get("0,1,0")?.length ?? 0).toBe(4);
   });
 
   it("keeps terrain that touches water", () => {
@@ -214,9 +236,10 @@ describe("buildBlockMesh", () => {
     fillStore(b, [8, 0, 0], solidTerrain);
     const meshA = buildBlockMesh(a, []);
     const meshB = buildBlockMesh(b, []);
-    // 4x4 top surfaces; no +X/-X seam face between the two blocks
-    expect(faceCount(meshA)).toBe(16);
-    expect(faceCount(meshB)).toBe(16);
+    // Each block's 4x4 top surface merges into one quad, and there is no
+    // +X/-X seam face between the two of them.
+    expect(faceCount(meshA)).toBe(1);
+    expect(faceCount(meshB)).toBe(1);
     expect(hasNormal(meshA, 1, 0, 0)).toBe(false); // no +X seam face
     expect(hasNormal(meshB, -1, 0, 0)).toBe(false); // no -X seam face
     expect(hasNormal(meshA, 0, 1, 0)).toBe(true);
@@ -295,7 +318,7 @@ describe("buildBlockMesh", () => {
     expect(hasNormal(mesh, -1, 0, 0)).toBe(false);
   });
 
-  it("bakes the atlas rects into per-face UVs", () => {
+  it("gives each face the atlas rect its direction calls for", () => {
     const store = smallStore();
     store.set(1, 1, 1, VOXEL_GRASS);
     const tiles: VoxelTileConfig[] = [
@@ -307,24 +330,31 @@ describe("buildBlockMesh", () => {
       },
     ];
     const mesh = buildBlockMesh(store, tiles);
-    const byNormal = facesByNormal(mesh);
-    const within = (uvs: Array<[number, number]>, rect: number[]): boolean =>
-      uvs.every(
-        ([u, v]) =>
-          u >= rect[0] && u <= rect[2] && v >= rect[1] && v <= rect[3],
-      );
-    expect(within(byNormal.get("0,1,0")!, tiles[0].top)).toBe(true);
-    expect(within(byNormal.get("0,-1,0")!, tiles[0].bottom)).toBe(true);
-    // every side face (any non-axis-aligned normal) uses the side rect
-    const sideRects = [
-      byNormal.get("1,0,0")!,
-      byNormal.get("-1,0,0")!,
-      byNormal.get("0,0,1")!,
-      byNormal.get("0,0,-1")!,
-    ];
-    for (const rect of sideRects) {
-      expect(within(rect, tiles[0].side)).toBe(true);
+    const byNormal = rectsByNormal(mesh);
+    const all = (rects: number[][], rect: number[]): boolean =>
+      rects.every((one) => one.every((value, at) => value === rect[at]));
+    expect(all(byNormal.get("0,1,0")!, tiles[0].top)).toBe(true);
+    expect(all(byNormal.get("0,-1,0")!, tiles[0].bottom)).toBe(true);
+    for (const normal of ["1,0,0", "-1,0,0", "0,0,1", "0,0,-1"]) {
+      expect(all(byNormal.get(normal)!, tiles[0].side)).toBe(true);
     }
+  });
+
+  it("counts texture coordinates in cells, so a merged quad repeats its tile", () => {
+    const store = smallStore();
+    // Three voxels in a row, all lit the same: one quad three cells wide.
+    for (let x = 1; x <= 3; x++) {
+      store.set(x, 1, 1, VOXEL_GRASS);
+    }
+    const mesh = buildBlockMesh(store, []);
+    const tops = facesByNormal(mesh).get("0,1,0")!;
+    expect(tops).toHaveLength(4);
+    // The quad spans three cells along x and one along z, and its texture
+    // coordinates say so, rather than sweeping nought to one across the whole.
+    const us = tops.map(([u]) => u).sort((a, b) => a - b);
+    const vs = tops.map(([, v]) => v).sort((a, b) => a - b);
+    expect(us).toEqual([0, 0, 3, 3]);
+    expect(vs).toEqual([0, 0, 1, 1]);
   });
 });
 
@@ -413,6 +443,7 @@ describe("setGeometryData", () => {
       positions: [],
       normals: [],
       uvs: [],
+      rects: [],
       brightness: [],
       indices: [],
     });

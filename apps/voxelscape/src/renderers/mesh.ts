@@ -30,6 +30,7 @@ import {
 } from "../world/voxel-store";
 import { surfaceFractionOfLevel } from "../world/fluid";
 import { LIGHT_TO_UNIT, type LightStore } from "../world/light-store";
+import { SlicePlane } from "./plane-merge";
 
 /**
  * Vertex arrays for one mesh. The CPU builders produce plain arrays; the
@@ -39,7 +40,14 @@ import { LIGHT_TO_UNIT, type LightStore } from "../world/light-store";
 export interface MeshArrays {
   positions: number[] | Float32Array;
   normals: number[] | Float32Array;
+  /**
+   * Texture coordinates counted in cells rather than swept nought to one, so a
+   * quad covering several cells repeats its tile once per cell. Which tile
+   * each vertex repeats is `rects`.
+   */
   uvs: number[] | Float32Array;
+  /** Each vertex's tile rect in the atlas, four numbers a vertex. */
+  rects: number[] | Float32Array;
   indices: number[] | Uint32Array;
   /** One 0..1 brightness per vertex, baked from the block's light + corner occlusion. */
   brightness: number[] | Float32Array;
@@ -90,6 +98,14 @@ const windsOutward = (axis: number, sign: number): boolean =>
  * The two in-plane axis indices of a face, by the axis the face is on. The
  * mesher uses these to read a corner's neighbours in the face plane.
  */
+/**
+ * Whether a face's u axis runs along the second of its tangent axes rather
+ * than the first. Only the X faces are laid out that way — their u runs along
+ * Z while their v runs up Y — and a merged quad has to know, because its
+ * texture repeats once per cell along each.
+ */
+const U_ALONG_SECOND_TANGENT = [true, false, false];
+
 const TANGENT_AXES: Array<[number, number]> = [
   [1, 2], // +X/-X faces lie in the YZ plane
   [0, 2], // +Y/-Y faces lie in the XZ plane
@@ -212,6 +228,8 @@ interface QuadContext {
   positions: number[];
   normals: number[];
   uvs: number[];
+  /** Each vertex's tile rect, so the material can wrap a repeating quad into it. */
+  rects: number[];
   brightness: number[];
   indices: number[];
 }
@@ -225,6 +243,7 @@ const emptyQuadContext = (
   positions: [],
   normals: [],
   uvs: [],
+  rects: [],
   brightness: [],
   indices: [],
 });
@@ -276,11 +295,59 @@ const emitCubeFace = (
       axis === 1 ? sign : 0,
       axis === 2 ? sign : 0,
     );
-    ctx.uvs.push(
-      rect[0] + u * (rect[2] - rect[0]),
-      rect[1] + v * (rect[3] - rect[1]),
-    );
+    ctx.uvs.push(u, v);
+    ctx.rects.push(rect[0], rect[1], rect[2], rect[3]);
     ctx.brightness.push(cornerLight === null ? 1 : cornerLight[k]);
+  }
+  finishQuad(ctx, base, axis, sign);
+};
+
+/**
+ * Emits one quad covering a rectangle of cells that all show the same tile
+ * and are all shaded flat, in the plane `slice` of `axis` facing `sign`. The
+ * rectangle starts at `first` cells along the face's first tangent axis and
+ * `second` along its other, and runs `wide` and `tall` cells from there.
+ *
+ * The texture coordinates count cells rather than sweeping nought to one, so
+ * the material repeats the tile once per cell across however many the quad
+ * covers.
+ */
+const emitMergedFace = (
+  ctx: QuadContext,
+  axis: number,
+  sign: number,
+  slice: number,
+  first: number,
+  second: number,
+  wide: number,
+  tall: number,
+  rect: TileRect,
+  shade: number,
+): void => {
+  const { store } = ctx;
+  const scale = store.scale;
+  const voxels = store.voxels;
+  const [a1, a2] = TANGENT_AXES[axis];
+  const base = ctx.positions.length / 3;
+  const facing = (slice + (sign > 0 ? 1 : 0) - voxels[axis] / 2) * scale;
+  const alongU = U_ALONG_SECOND_TANGENT[axis] ? tall : wide;
+  const alongV = U_ALONG_SECOND_TANGENT[axis] ? wide : tall;
+  for (const corner of FACE_CORNERS[axis]) {
+    const [xo, yo, zo, u, v] = corner;
+    const offsets = [xo, yo, zo];
+    const point = [0, 0, 0];
+    point[axis] = facing;
+    point[a1] = (first + offsets[a1] * wide - voxels[a1] / 2) * scale;
+    point[a2] = (second + offsets[a2] * tall - voxels[a2] / 2) * scale;
+    ctx.positions.push(point[0], point[1], point[2]);
+    ctx.normals.push(
+      axis === 0 ? sign : 0,
+      axis === 1 ? sign : 0,
+      axis === 2 ? sign : 0,
+    );
+    ctx.uvs.push(u * alongU, v * alongV);
+    ctx.rects.push(rect[0], rect[1], rect[2], rect[3]);
+    ctx.brightness.push(shade);
   }
   finishQuad(ctx, base, axis, sign);
 };
@@ -330,10 +397,8 @@ const emitFluidFace = (
       axis === 1 ? sign : 0,
       axis === 2 ? sign : 0,
     );
-    ctx.uvs.push(
-      rect[0] + u * (rect[2] - rect[0]),
-      rect[1] + v * (rect[3] - rect[1]),
-    );
+    ctx.uvs.push(u, v);
+    ctx.rects.push(rect[0], rect[1], rect[2], rect[3]);
     ctx.brightness.push(cornerLight === null ? 1 : cornerLight[k]);
   }
   finishQuad(ctx, base, axis, sign);
@@ -460,53 +525,99 @@ export const buildBlockMesh = (
   const at = (x: number, y: number, z: number): number =>
     store.atPadded(x, y, z);
 
+  // Lava is drawn cell by cell, at whatever height each cell's level asks
+  // for, so it is swept on its own before the solid faces are gathered.
   for (let z = 0; z < nz; ++z) {
     for (let y = 0; y < ny; ++y) {
       for (let x = 0; x < nx; ++x) {
-        const id = at(x, y, z);
-        if (id === VOXEL_AIR || isWaterId(id)) {
-          continue;
-        }
-        if (isLavaId(id)) {
+        if (isLavaId(at(x, y, z))) {
           emitLiquidVoxel(ctx, x, y, z, rectOf);
-          continue;
         }
-        const below = at(x, y - 1, z);
-        const above = at(x, y + 1, z);
-        const left = at(x - 1, y, z);
-        const right = at(x + 1, y, z);
-        const front = at(x, y, z - 1);
-        const back = at(x, y, z + 1);
-        const exposedTop = openToFace(above);
-        const exposedBottom = openToFace(below);
-        const exposedLeft = openToFace(left);
-        const exposedRight = openToFace(right);
-        const exposedFront = openToFace(front);
-        const exposedBack = openToFace(back);
-        if (
-          !exposedTop &&
-          !exposedBottom &&
-          !exposedLeft &&
-          !exposedRight &&
-          !exposedFront &&
-          !exposedBack
-        ) {
-          continue;
+      }
+    }
+  }
+
+  const rectFor = (id: number, axis: number, sign: number): TileRect => {
+    const tile = tiles.get(id);
+    if (axis !== 1) {
+      return tile?.side ?? DEFAULT_RECT;
+    }
+    return (sign > 0 ? tile?.top : tile?.bottom) ?? DEFAULT_RECT;
+  };
+
+  const cell = [0, 0, 0];
+  const neighbour = [0, 0, 0];
+  for (let axis = 0; axis < 3; axis++) {
+    const [a1, a2] = TANGENT_AXES[axis];
+    const plane = new SlicePlane(store.voxels[a1], store.voxels[a2]);
+    for (const sign of [-1, 1]) {
+      for (let slice = 0; slice < store.voxels[axis]; slice++) {
+        plane.clear();
+        for (let second = 0; second < store.voxels[a2]; second++) {
+          for (let first = 0; first < store.voxels[a1]; first++) {
+            cell[axis] = slice;
+            cell[a1] = first;
+            cell[a2] = second;
+            const id = at(cell[0], cell[1], cell[2]);
+            if (id === VOXEL_AIR || isWaterId(id) || isLavaId(id)) {
+              continue;
+            }
+            neighbour[axis] = slice + sign;
+            neighbour[a1] = first;
+            neighbour[a2] = second;
+            if (!openToFace(at(neighbour[0], neighbour[1], neighbour[2]))) {
+              continue;
+            }
+            plane.set(
+              first,
+              second,
+              id,
+              faceBrightness(
+                store,
+                light,
+                cell[0],
+                cell[1],
+                cell[2],
+                axis,
+                sign,
+              ),
+            );
+          }
         }
-        const wx = (x + 0.5 - nx / 2) * scale;
-        const wy = (y + 0.5 - ny / 2) * scale;
-        const wz = (z + 0.5 - nz / 2) * scale;
-        const tile = tiles.get(id);
-        const top = tile?.top ?? DEFAULT_RECT;
-        const side = tile?.side ?? DEFAULT_RECT;
-        const bottom = tile?.bottom ?? DEFAULT_RECT;
-        if (exposedTop) emitCubeFace(ctx, wx, wy, wz, 1, 1, top, x, y, z);
-        if (exposedBottom)
-          emitCubeFace(ctx, wx, wy, wz, 1, -1, bottom, x, y, z);
-        if (exposedLeft) emitCubeFace(ctx, wx, wy, wz, 0, -1, side, x, y, z);
-        if (exposedRight) emitCubeFace(ctx, wx, wy, wz, 0, 1, side, x, y, z);
-        if (exposedFront) emitCubeFace(ctx, wx, wy, wz, 2, -1, side, x, y, z);
-        if (exposedBack) emitCubeFace(ctx, wx, wy, wz, 2, 1, side, x, y, z);
+        plane.eachRectangle((rectangle) => {
+          const { first, second, wide, tall, id, shade } = rectangle;
+          const rect = rectFor(id, axis, sign);
+          if (shade === null) {
+            cell[axis] = slice;
+            cell[a1] = first;
+            cell[a2] = second;
+            emitCubeFace(
+              ctx,
+              (cell[0] + 0.5 - nx / 2) * scale,
+              (cell[1] + 0.5 - ny / 2) * scale,
+              (cell[2] + 0.5 - nz / 2) * scale,
+              axis,
+              sign,
+              rect,
+              cell[0],
+              cell[1],
+              cell[2],
+            );
+            return;
+          }
+          emitMergedFace(
+            ctx,
+            axis,
+            sign,
+            slice,
+            first,
+            second,
+            wide,
+            tall,
+            rect,
+            shade,
+          );
+        });
       }
     }
   }
@@ -515,6 +626,7 @@ export const buildBlockMesh = (
     positions: ctx.positions,
     normals: ctx.normals,
     uvs: ctx.uvs,
+    rects: ctx.rects,
     brightness: ctx.brightness,
     indices: ctx.indices,
   };
@@ -542,6 +654,7 @@ export const buildWaterMesh = (
       positions: ctx.positions,
       normals: ctx.normals,
       uvs: ctx.uvs,
+      rects: ctx.rects,
       brightness: ctx.brightness,
       indices: ctx.indices,
     };
@@ -561,6 +674,7 @@ export const buildWaterMesh = (
     positions: ctx.positions,
     normals: ctx.normals,
     uvs: ctx.uvs,
+    rects: ctx.rects,
     brightness: ctx.brightness,
     indices: ctx.indices,
   };
@@ -633,8 +747,10 @@ export const setGeometryData = (
   attr("normal", mesh.normals, 3);
   if (mesh.uvs.length > 0) {
     attr("uv", mesh.uvs, 2);
+    attr("tileRect", mesh.rects, 4);
   } else {
     geometry.deleteAttribute("uv");
+    geometry.deleteAttribute("tileRect");
   }
   // The per-vertex brightness mults the surface colour; a material that does
   // not reference it (the probe, the picker) simply never binds it.

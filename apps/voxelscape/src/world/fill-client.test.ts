@@ -11,8 +11,22 @@ import type { BlockMeshes } from "../renderers/mesh";
 import type { FillBatchRequest, FillBatchResult } from "./fill-worker";
 
 const EMPTY_MESHES: BlockMeshes = {
-  terrain: { positions: [], normals: [], uvs: [], brightness: [], indices: [] },
-  water: { positions: [], normals: [], uvs: [], brightness: [], indices: [] },
+  terrain: {
+    positions: [],
+    normals: [],
+    uvs: [],
+    rects: [],
+    brightness: [],
+    indices: [],
+  },
+  water: {
+    positions: [],
+    normals: [],
+    uvs: [],
+    rects: [],
+    brightness: [],
+    indices: [],
+  },
 };
 
 /**

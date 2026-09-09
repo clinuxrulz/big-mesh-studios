@@ -74,6 +74,7 @@ const emptyMesh = (): MeshArrays => ({
   positions: new Float32Array(0),
   normals: new Float32Array(0),
   uvs: new Float32Array(0),
+  rects: new Float32Array(0),
   brightness: new Float32Array(0),
   indices: new Uint32Array(0),
 });

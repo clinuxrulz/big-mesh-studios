@@ -8,8 +8,22 @@ import type { VoxelTileConfig } from "./atlas";
 import type { BlockMeshes, MeshBuildRequest, MeshBuildResult } from "./mesh";
 
 const EMPTY_MESHES: BlockMeshes = {
-  terrain: { positions: [], normals: [], uvs: [], brightness: [], indices: [] },
-  water: { positions: [], normals: [], uvs: [], brightness: [], indices: [] },
+  terrain: {
+    positions: [],
+    normals: [],
+    uvs: [],
+    rects: [],
+    brightness: [],
+    indices: [],
+  },
+  water: {
+    positions: [],
+    normals: [],
+    uvs: [],
+    rects: [],
+    brightness: [],
+    indices: [],
+  },
 };
 
 /**
@@ -73,6 +87,7 @@ class FakeMeshWorker {
         positions: [],
         normals: [],
         uvs: [],
+        rects: [],
         brightness: [],
         indices: [],
       },
@@ -80,6 +95,7 @@ class FakeMeshWorker {
         positions: [],
         normals: [],
         uvs: [],
+        rects: [],
         brightness: [],
         indices: [],
       },

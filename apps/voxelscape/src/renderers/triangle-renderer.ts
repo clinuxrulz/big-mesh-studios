@@ -18,7 +18,7 @@
 // frustum, and by the hardware occlusion pass, which readbacks the window of
 // terrain a sampling of the view actually shows and skips the rest.
 import type { Node, UniformNode } from "@random-mesh/rmsl";
-import { float, mat3, pow, vec3, vec4 } from "@random-mesh/rmsl";
+import { float, mat3, pow, vec2, vec3, vec4 } from "@random-mesh/rmsl";
 import {
   BoxGeometry,
   Builder,
@@ -104,6 +104,11 @@ export class TriangleMaterial extends NodeMaterial {
   protected setup(b: Builder, _scene: Scene): void {
     void b.attribute("brightness", "float");
     void b.varying("brightness", "float");
+    // A quad covers as many cells as its faces merged into it, and its texture
+    // coordinates count those cells, so the fragment wraps them back into the
+    // one tile this vertex names.
+    void b.attribute("tileRect", "vec4");
+    void b.varying("tileRect", "vec4");
     this.maxDistanceUniform = b.materialUniform(
       "maxDistance",
       "float",
@@ -168,6 +173,7 @@ export class TriangleMaterial extends NodeMaterial {
     }
     b.normalWorld.assign(b.normalMatrix.mul(normal).normalize());
     b.uvVarying.assign(b.uv);
+    b.varying("tileRect", "vec4").assign(b.attribute("tileRect", "vec4"));
     return b.projectionMatrix.mul(b.viewMatrix.mul(worldPosition));
   }
 
@@ -197,7 +203,16 @@ export class TriangleMaterial extends NodeMaterial {
     // flat blue until the spritesheet is applied
     let albedo = vec3(0.0, 0.0, 1.0);
     if (this.tilesSampler !== undefined) {
-      albedo = this.tilesSampler.texture(uv).rgb;
+      // `fract` tiles the quad; the rect places that tile in the atlas. The
+      // renderer builds no mip chain, so wrapping in the fragment costs no
+      // seam: nothing here picks a level from the coordinate's derivative.
+      const rect = b.varying("tileRect", "vec4").toVar();
+      const within = vec2(uv.x.fract(), uv.y.fract());
+      const inAtlas = vec2(
+        rect.x.add(within.x.mul(rect.z.sub(rect.x))),
+        rect.y.add(within.y.mul(rect.w.sub(rect.y))),
+      );
+      albedo = this.tilesSampler.texture(inAtlas).rgb;
     }
     // baked per-vertex light + ambient occlusion, floored so unlit niches are
     // still a whisper of shape rather than pure black
@@ -241,6 +256,11 @@ export class TriangleWaterMaterial extends NodeMaterial {
   protected setup(b: Builder, _scene: Scene): void {
     void b.attribute("brightness", "float");
     void b.varying("brightness", "float");
+    // A quad covers as many cells as its faces merged into it, and its texture
+    // coordinates count those cells, so the fragment wraps them back into the
+    // one tile this vertex names.
+    void b.attribute("tileRect", "vec4");
+    void b.varying("tileRect", "vec4");
     this.fogColorUniform = b.materialUniform(
       "fogColor",
       "vec3",
@@ -354,11 +374,11 @@ const MAX_UPLOAD_BYTES_PER_FRAME = 2 * 1024 * 1024;
 
 /**
  * The bytes one vertex of merged geometry adds to the GPU upload: position 12
- * + normal 12 + uv 8 + brightness 4. A pass without UVs is over-counted by its
- * 8 bytes, which only tightens the frame's budget. Indices are counted at
- * `INDEX_UPLOAD_BYTES`.
+ * + normal 12 + uv 8 + the tile rect 16 + brightness 4. A pass without UVs is
+ * over-counted by their 24 bytes, which only tightens the frame's budget.
+ * Indices are counted at `INDEX_UPLOAD_BYTES`.
  */
-const VERTEX_UPLOAD_BYTES = 36;
+const VERTEX_UPLOAD_BYTES = 52;
 
 /** The bytes one index of merged geometry adds to the GPU upload. */
 const INDEX_UPLOAD_BYTES = 4;
@@ -514,6 +534,8 @@ type MergedArrays = {
   positions: Growable<Float32Array>;
   normals: Growable<Float32Array>;
   uvs: Growable<Float32Array>;
+  /** Four numbers a vertex: the atlas rect its repeating texture wraps into. */
+  rects: Growable<Float32Array>;
   indices: Growable<Uint32Array>;
   /** One 0..1 brightness per vertex, carried from the per-chunk bake. */
   brightness: Growable<Float32Array>;
@@ -523,6 +545,7 @@ const emptyArrays = (): MergedArrays => ({
   positions: new Growable(Float32Array),
   normals: new Growable(Float32Array),
   uvs: new Growable(Float32Array),
+  rects: new Growable(Float32Array),
   indices: new Growable(Uint32Array),
   brightness: new Growable(Float32Array),
 });
@@ -552,11 +575,12 @@ const meshArraysBytes = (arrays: MeshArrays): number =>
   (arrays.positions.length / 3) * VERTEX_UPLOAD_BYTES +
   arrays.indices.length * INDEX_UPLOAD_BYTES;
 
-/** Bytes a superchunk's five merged attribute buffers occupy. */
+/** Bytes a superchunk's six merged attribute buffers occupy. */
 const mergedArraysBytes = (arrays: MergedArrays): number =>
   arrays.positions.capacityBytes +
   arrays.normals.capacityBytes +
   arrays.uvs.capacityBytes +
+  arrays.rects.capacityBytes +
   arrays.indices.capacityBytes +
   arrays.brightness.capacityBytes;
 
@@ -636,6 +660,7 @@ const appendArrays = (
   into.positions.pushOffset(a.positions, dx, dy, dz);
   into.normals.pushMany(a.normals);
   into.uvs.pushMany(a.uvs);
+  into.rects.pushMany(a.rects);
   into.brightness.pushMany(a.brightness);
   into.indices.pushShifted(a.indices, base);
 };
@@ -1055,6 +1080,7 @@ export class TriangleRenderer {
         positions: state.terrain.positions.array(),
         normals: state.terrain.normals.array(),
         uvs: state.terrain.uvs.array(),
+        rects: state.terrain.rects.array(),
         brightness: state.terrain.brightness.array(),
         indices: state.terrain.indices.array(),
       },
@@ -1068,6 +1094,7 @@ export class TriangleRenderer {
         positions: state.water.positions.array(),
         normals: state.water.normals.array(),
         uvs: state.water.uvs.array(),
+        rects: state.water.rects.array(),
         brightness: state.water.brightness.array(),
         indices: state.water.indices.array(),
       },
