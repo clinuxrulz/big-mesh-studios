@@ -9,6 +9,12 @@ export default defineConfig({
     // four one, finds nothing listening there, and refuses the connection.
     host: "127.0.0.1",
   },
+  build: {
+    // Written but not pointed at: the built files carry no `sourceMappingURL`,
+    // so a browser never fetches a map, while `pnpm bench --functions` reads
+    // them off the disk to give a sampled profile the names its source has.
+    sourcemap: "hidden",
+  },
   plugins: [solid({ ssr: false })],
   worker: {
     // Every worker in the app is a module worker (`new Worker(..., { type:

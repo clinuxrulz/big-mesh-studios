@@ -17,6 +17,8 @@
 //                                    # measure what they cost
 //   pnpm bench --android             # measure on the phone plugged in here,
 //                                    # in the Chrome it already has
+//   pnpm bench walk --functions      # sample the main thread and say which
+//                                    # functions spent it
 //
 // A commit is measured through the harness in this checkout, so the scenarios,
 // the report and its page are whatever they are here; only the application
@@ -65,6 +67,13 @@ import {
   summarizeTrace,
 } from "./trace.ts";
 import type { TraceSummary } from "./trace.ts";
+import {
+  formatFunctions,
+  startSampling,
+  stopSampling,
+  summarizeProfile,
+} from "./functions.ts";
+import type { FunctionSummary } from "./functions.ts";
 import { writeHtmlReport } from "./html.ts";
 
 /** The application directory, whatever directory the script was started from. */
@@ -139,6 +148,12 @@ interface Options {
    */
   monsters: boolean;
   /**
+   * Whether to sample the main thread while each scenario runs and report which
+   * functions spent its time. Sampling costs the thread a few percent, so a run
+   * that asks for it is for reading rather than for comparing.
+   */
+  functions: boolean;
+  /**
    * Whether to measure on the phone plugged into this machine rather than in a
    * window here. A phone brings its own screen and its own power, so a run on
    * one takes those instead of this command's, and refuses the flags that stand
@@ -161,6 +176,7 @@ const parseOptions = (argv: string[]): Options => {
   let at: string | undefined;
   let monsters = false;
   let android = false;
+  let functions = false;
   let profile = profileNamed("native");
   for (let i = 0; i < argv.length; i++) {
     const argument = argv[i];
@@ -190,6 +206,8 @@ const parseOptions = (argv: string[]): Options => {
       monsters = true;
     } else if (argument === "--android") {
       android = true;
+    } else if (argument === "--functions") {
+      functions = true;
     } else if (argument.startsWith("--")) {
       throw new Error(`unknown option ${argument}`);
     } else {
@@ -224,6 +242,7 @@ const parseOptions = (argv: string[]): Options => {
     at,
     monsters,
     android,
+    functions,
   };
 };
 
@@ -294,13 +313,19 @@ const newestChange = (directory: string): number => {
   return newest;
 };
 
-/** Builds the site in `dir` when its sources have moved on since its last build. */
+/**
+ * Builds the site in `dir` when anything the build reads has moved on since the
+ * last one: the sources, and the files that decide what the build makes of them.
+ * A configuration change with untouched sources still makes a different site.
+ */
 const buildIfStale = (dir: string): void => {
   const built = join(dir, "dist", "index.html");
-  if (
-    existsSync(built) &&
-    statSync(built).mtimeMs > newestChange(join(dir, "src"))
-  ) {
+  const configured = ["vite.config.ts", "package.json", "index.html"]
+    .map((name) => join(dir, name))
+    .filter((path) => existsSync(path))
+    .map((path) => statSync(path).mtimeMs);
+  const newest = Math.max(newestChange(join(dir, "src")), ...configured);
+  if (existsSync(built) && statSync(built).mtimeMs > newest) {
     return;
   }
   console.log("building the site (sources are newer than the last build)");
@@ -439,12 +464,20 @@ const measure = async (
   page: Page,
   scenario: Scenario,
   tracing: { cdp: CDPSession; file: string } | undefined,
-): Promise<{ drain: PerfDrain; trace?: TraceSummary }> => {
+  sampling: { cdp: CDPSession; file: string; distDir: string } | undefined,
+): Promise<{
+  drain: PerfDrain;
+  trace?: TraceSummary;
+  functions?: FunctionSummary;
+}> => {
   await waitForQuiet(page);
   await page.waitForTimeout((scenario.settleSeconds ?? 0.5) * 1000);
   const events = tracing === undefined ? [] : await startTrace(tracing.cdp);
   if (tracing !== undefined) {
     await dumpMemory(tracing.cdp);
+  }
+  if (sampling !== undefined) {
+    await startSampling(sampling.cdp);
   }
   await page.evaluate((route) => {
     const bench = (window as unknown as { __voxelscape: BenchWindow })
@@ -458,13 +491,24 @@ const measure = async (
       .__voxelscape;
     return bench.probe.drain();
   });
+  let functions: FunctionSummary | undefined;
+  if (sampling !== undefined) {
+    const profile = await stopSampling(sampling.cdp);
+    writeFileSync(sampling.file, JSON.stringify(profile));
+    functions = summarizeProfile(
+      profile,
+      sampling.file,
+      scenario.name,
+      sampling.distDir,
+    );
+  }
   if (tracing === undefined) {
-    return { drain };
+    return { drain, functions };
   }
   await dumpMemory(tracing.cdp);
   await stopTrace(tracing.cdp);
   writeFileSync(tracing.file, JSON.stringify(events));
-  return { drain, trace: summarizeTrace(events, tracing.file) };
+  return { drain, functions, trace: summarizeTrace(events, tracing.file) };
 };
 
 /**
@@ -633,8 +677,15 @@ const main = async (): Promise<void> => {
     const traceCdp = options.trace
       ? await page.context().newCDPSession(page)
       : undefined;
+    // The sampler runs through its own session, so arming and disarming it
+    // around each scenario cannot disturb a trace being recorded through the
+    // one above.
+    const samplingCdp = options.functions
+      ? await page.context().newCDPSession(page)
+      : undefined;
     const scenarios: ScenarioReport[] = [];
     const traces: TraceSummary[] = [];
+    const sampled: FunctionSummary[] = [];
     for (const scenario of options.scenarios) {
       const repeats = [];
       const drains: PerfDrain[] = [];
@@ -651,11 +702,27 @@ const main = async (): Promise<void> => {
                 file: outPath(`trace-${scenario.name}-${Date.now()}.json`),
               }
             : undefined;
-        const measured = await measure(page, scenario, tracing);
+        // Only the first repeat is sampled, for the same reason as the trace:
+        // one profile answers what a profile is asked, and the sampling costs
+        // the thread it watches.
+        const samplingHere =
+          samplingCdp !== undefined && repeat === 0
+            ? {
+                cdp: samplingCdp,
+                file: outPath(
+                  `profile-${scenario.name}-${Date.now()}.cpuprofile`,
+                ),
+                distDir: join(subject.dir, "dist"),
+              }
+            : undefined;
+        const measured = await measure(page, scenario, tracing, samplingHere);
         repeats.push(summarize(measured.drain));
         drains.push(measured.drain);
         if (measured.trace !== undefined) {
           traces.push(measured.trace);
+        }
+        if (measured.functions !== undefined) {
+          sampled.push(measured.functions);
         }
       }
       const reported = drains[representativeIndex(repeats)];
@@ -719,8 +786,12 @@ const main = async (): Promise<void> => {
     );
     const traceLines =
       traces.length === 0 ? "" : `\n\n${traces.map(formatTrace).join("\n\n")}`;
+    const functionLines =
+      sampled.length === 0
+        ? ""
+        : `\n\n${sampled.map(formatFunctions).join("\n\n")}`;
     console.log(
-      `\n${formatReport(report)}${traceLines}\n\nwritten to ${file}\ndrawn in ${drawn}`,
+      `\n${formatReport(report)}${traceLines}${functionLines}\n\nwritten to ${file}\ndrawn in ${drawn}`,
     );
   } finally {
     await browser?.close();
