@@ -24,6 +24,9 @@ catalogs:
     '@fortawesome/fontawesome-free':
       specifier: ^7.3.1
       version: 7.3.1
+    '@random-mesh/rmsl':
+      specifier: ^1.12.0
+      version: 1.12.0
     '@solidjs/signals':
       specifier: 2.0.0-beta.29
       version: 2.0.0-beta.29
@@ -70,16 +73,9 @@ catalogs:
       specifier: ^4.1.3
       version: 4.1.11
 
-overrides:
-  '@random-mesh/rmsl': link:../rmsl
-
 importers:
 
   .:
-    dependencies:
-      '@random-mesh/rmsl':
-        specifier: link:../rmsl
-        version: link:../rmsl
     devDependencies:
       prettier:
         specifier: ^3.9.6
@@ -109,9 +105,6 @@ importers:
       '@atcute/lexicons':
         specifier: 'catalog:'
         version: 2.1.0
-      '@random-mesh/rmsl':
-        specifier: link:../../../rmsl
-        version: link:../../../rmsl
       '@solidjs/router':
         specifier: 2.0.0-next.13
         version: 2.0.0-next.13(@solidjs/web@2.0.0-beta.29(solid-js@2.0.0-beta.29))(solid-js@2.0.0-beta.29)
@@ -149,6 +142,9 @@ importers:
       '@fortawesome/fontawesome-free':
         specifier: 'catalog:'
         version: 7.3.1
+      '@random-mesh/rmsl':
+        specifier: 'catalog:'
+        version: 1.12.0(vite@7.3.6(@types/node@26.4.0))
       '@solidjs/signals':
         specifier: 'catalog:'
         version: 2.0.0-beta.29
@@ -213,8 +209,8 @@ importers:
         specifier: 0.32.0
         version: 0.32.0
       '@random-mesh/rmsl':
-        specifier: link:../../../rmsl
-        version: link:../../../rmsl
+        specifier: 'catalog:'
+        version: 1.12.0(vite@7.3.6(@types/node@26.4.0))
       '@solidjs/signals':
         specifier: 'catalog:'
         version: 2.0.0-beta.29
@@ -377,9 +373,6 @@ importers:
       '@big-mesh-studios/maths':
         specifier: workspace:*
         version: link:../maths
-      '@random-mesh/rmsl':
-        specifier: link:../../../rmsl
-        version: link:../../../rmsl
       fast-png:
         specifier: 'catalog:'
         version: 8.0.0
@@ -390,6 +383,9 @@ importers:
       '@atcute/lexicons':
         specifier: 'catalog:'
         version: 2.1.0
+      '@random-mesh/rmsl':
+        specifier: 'catalog:'
+        version: 1.12.0(vite@7.3.6(@types/node@26.4.0))
       jsdom:
         specifier: 'catalog:'
         version: 30.0.1
@@ -849,6 +845,14 @@ packages:
     cpu: [x64]
     os: [linux]
     libc: [glibc]
+
+  '@random-mesh/rmsl@1.12.0':
+    resolution: {integrity: sha512-Je5jUA/lcz2Fci3XVXdhKgzu3L4GAnf0HjLUa5G6AL6PmIsd2CkiXhZMkjziT2608X/CeqeKQiU+/vpevCvfRw==}
+    peerDependencies:
+      vite: '>=5.0.0'
+    peerDependenciesMeta:
+      vite:
+        optional: true
 
   '@rollup/rollup-android-arm-eabi@4.63.0':
     resolution: {integrity: sha512-70TeIFezKKy65LgAVyQh+w94/gjWhvPWaLaGGeMEgVrPkQhuj/M5bAYYZzIFUj9Y69oHyTm5Um/R6gcLh4A8JA==}
@@ -2100,6 +2104,13 @@ snapshots:
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
+
+  '@random-mesh/rmsl@1.12.0(vite@7.3.6(@types/node@26.4.0))':
+    dependencies:
+      '@webgpu/types': 0.1.72
+      esbuild: 0.28.2
+    optionalDependencies:
+      vite: 7.3.6(@types/node@26.4.0)
 
   '@rollup/rollup-android-arm-eabi@4.63.0':
     optional: true
