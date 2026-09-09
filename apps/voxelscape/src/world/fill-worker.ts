@@ -59,6 +59,26 @@ export type FillWorkerMessage =
 let cachedCustomFillStore: FillStoreFn | undefined = undefined;
 
 /**
+ * The custom fill store a `customFillStoreUrl` names, imported once and cached
+ * for the life of the worker's configuration. Shared with the combined
+ * fill-and-mesh generator so one module's fills and the other's populate the
+ * same cache.
+ */
+export const customFillStoreOf = async (
+  cfg: FillConfig,
+): Promise<FillStoreFn | undefined> => {
+  if (cfg.customFillStoreUrl && !cachedCustomFillStore) {
+    try {
+      const module = await import(/* @vite-ignore */ cfg.customFillStoreUrl);
+      cachedCustomFillStore = module.fillStore || module.default;
+    } catch (err) {
+      console.error("[fill-worker] failed to import customFillStoreUrl:", err);
+    }
+  }
+  return cachedCustomFillStore;
+};
+
+/**
  * Builds one result per block in a fill request, in the order the request
  * lists them. Pure, so it can be unit-tested without a worker context.
  *
@@ -72,21 +92,14 @@ export async function* buildFillResults(
   req: FillBatchRequest,
   cfg: FillConfig,
 ): AsyncGenerator<FillBatchResult> {
-  if (cfg.customFillStoreUrl && !cachedCustomFillStore) {
-    try {
-      const module = await import(/* @vite-ignore */ cfg.customFillStoreUrl);
-      cachedCustomFillStore = module.fillStore || module.default;
-    } catch (err) {
-      console.error("[fill-worker] failed to import customFillStoreUrl:", err);
-    }
-  }
+  const customFillStore = await customFillStoreOf(cfg);
 
   for (let i = 0; i < req.centers.length; i++) {
     const data = buildBlockData({
       center: req.centers[i],
       lod: req.lods[i],
       terrain: cfg.terrain,
-      customFillStore: cachedCustomFillStore,
+      customFillStore,
       borderSizes: req.borderSizes?.[i],
     });
     yield {

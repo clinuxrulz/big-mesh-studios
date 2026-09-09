@@ -18,6 +18,8 @@ import { FillClient } from "./fill-client";
 import type { EditLayer } from "./edit-layer";
 import type { TerrainConfig } from "./noise";
 import type { BorderSizes, FillStoreFn } from "./voxel-store";
+import type { VoxelTileConfig } from "../renderers/atlas";
+import type { BlockMeshes } from "../renderers/mesh";
 import type { WorldWorkerPool } from "./worker-pool";
 
 export interface CellCoord {
@@ -119,9 +121,11 @@ export interface ChunkSphereParams {
   terrain: TerrainConfig;
   /**
    * Called whenever a slot's voxel data is ready to be reflected on screen —
-   * during the initial fill, or when a scroll-revealed cell's fill lands.
+   * during the initial fill, or when a scroll-revealed cell's fill lands. When
+   * the block was meshed by the same worker job its fill ran in, the geometry
+   * arrives with the voxels and the caller can adopt it directly.
    */
-  onBlockChanged: (index: number) => void;
+  onBlockChanged: (index: number, meshes?: BlockMeshes) => void;
   /**
    * Called when a slot takes a different world position (scroll), before its
    * new data has arrived.
@@ -138,6 +142,12 @@ export interface ChunkSphereParams {
   customFillStoreUrl?: string;
   /** Applied to each block after its terrain is generated (see `FillClient`). */
   editLayer?: EditLayer;
+  /**
+   * The current atlas tile rectangles, read anew for each fill batch. When it
+   * is supplied, the fill client's workers mesh each block right after
+   * filling it, and the block's geometry arrives with its voxels.
+   */
+  tileRects?: () => VoxelTileConfig[];
   /**
    * The world's shared worker pool, used by the mesh client too. A caller
    * that hands over a pool pools one set of workers for both jobs; a caller
@@ -218,6 +228,7 @@ export class ChunkSphere {
       editLayer: params.editLayer,
       customFillStore: params.customFillStore,
       customFillStoreUrl: params.customFillStoreUrl,
+      tileRects: params.tileRects,
       pool: params.pool,
       createWorker: params.createWorker,
     });
@@ -281,6 +292,7 @@ export class ChunkSphere {
       rest.map((index) => this.blocks[index].center),
       rest.map((index) => lodAt(this.cells[index], this.centerCell)),
       rest.map((index) => borderSizesOf(this.cells[index], this.centerCell)),
+      [x, y, z],
     );
     return nearest;
   }
@@ -378,9 +390,10 @@ export class ChunkSphere {
     if (toFill.length === 0) {
       return;
     }
-    // Fill nearest-first so the terrain the player is walking toward appears
-    // before the cap behind them; the player's own cell, being nearest, is
-    // the first of the first worker's batch and lands first.
+    // Both the entering shell and the refill get a nearest-first order here
+    // (which also decides what the no-worker path fills first), and the
+    // player's position as the worker scheduler's focus, so the terrain being
+    // walked toward streams before the shoreline that is not being walked.
     const order = toFill.sort(
       (a, b) =>
         this.distanceSquared(a, x, y, z) - this.distanceSquared(b, x, y, z),
@@ -390,6 +403,7 @@ export class ChunkSphere {
       order.map((index) => this.blocks[index].center),
       order.map((index) => lodAt(this.cells[index], this.centerCell)),
       order.map((index) => borderSizesOf(this.cells[index], this.centerCell)),
+      [x, y, z],
     );
   }
 

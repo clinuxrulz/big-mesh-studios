@@ -10,7 +10,8 @@ import { buildBlockMesh, buildWaterMesh } from "./mesh";
 import { VoxelStore } from "../world/voxel-store";
 import { LightStore } from "../world/light-store";
 
-const toTyped = (m: MeshArrays): MeshArrays => ({
+/** Converts a CPU builder's plain arrays into typed arrays, so a mesh can be transferred. */
+export const toTyped = (m: MeshArrays): MeshArrays => ({
   positions:
     m.positions instanceof Float32Array
       ? m.positions
@@ -25,6 +26,43 @@ const toTyped = (m: MeshArrays): MeshArrays => ({
   indices:
     m.indices instanceof Uint32Array ? m.indices : new Uint32Array(m.indices),
 });
+
+/**
+ * The buffers to move along with a pair of typed meshes: each pair's ten
+ * typed-array buffers, terrain first then water — each buffer once, because a
+ * transfer list that names a buffer twice is refused by the structured clone
+ * algorithm. Two meshes that share an (e.g. empty) array reuse one entry, and
+ * the receiver's typed arrays still point at the same transferred buffer.
+ */
+export const meshArraysTransfers = (
+  terrain: MeshArrays,
+  water: MeshArrays,
+): Transferable[] => {
+  const seen = new Set<Transferable>();
+  const transfer: Transferable[] = [];
+  for (const mesh of [terrain, water]) {
+    const { positions, normals, uvs, brightness, indices } = mesh as {
+      positions: Float32Array;
+      normals: Float32Array;
+      uvs: Float32Array;
+      brightness: Float32Array;
+      indices: Uint32Array;
+    };
+    for (const buffer of [
+      positions.buffer,
+      normals.buffer,
+      uvs.buffer,
+      brightness.buffer,
+      indices.buffer,
+    ]) {
+      if (!seen.has(buffer)) {
+        seen.add(buffer);
+        transfer.push(buffer);
+      }
+    }
+  }
+  return transfer;
+};
 
 /**
  * Builds a block's terrain and water meshes from a request. The request's
@@ -58,34 +96,15 @@ export const handleMeshMessage = (
 };
 
 /**
- * The buffers to move along with a result: both meshes' ten typed arrays plus
- * the three input buffers echoed back so the caller can recycle them instead
- * of letting them be garbage-collected.
+ * The buffers to move along with a result: the two meshes' ten typed arrays
+ * plus the three input buffers echoed back so the caller can recycle them
+ * instead of letting them be garbage-collected.
  */
 export const meshResultTransfers = (
   result: MeshBuildResult,
-): Transferable[] => {
-  const transfer: Transferable[] = [];
-  for (const mesh of [result.terrain, result.water]) {
-    const { positions, normals, uvs, brightness, indices } = mesh as {
-      positions: Float32Array;
-      normals: Float32Array;
-      uvs: Float32Array;
-      brightness: Float32Array;
-      indices: Uint32Array;
-    };
-    transfer.push(
-      positions.buffer,
-      normals.buffer,
-      uvs.buffer,
-      brightness.buffer,
-      indices.buffer,
-    );
-  }
-  transfer.push(
-    result.data.buffer,
-    result.skyLight.buffer,
-    result.blockLight.buffer,
-  );
-  return transfer;
-};
+): Transferable[] => [
+  ...meshArraysTransfers(result.terrain, result.water),
+  result.data.buffer,
+  result.skyLight.buffer,
+  result.blockLight.buffer,
+];

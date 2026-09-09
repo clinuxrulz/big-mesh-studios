@@ -4,7 +4,13 @@ import { MeshClient } from "./mesh-client";
 import { WorldWorkerPool } from "../world/worker-pool";
 import { buildBlockShell, type WorldBlock } from "../world/level-data";
 import { VOXEL_GRASS } from "../world/voxel-store";
-import type { MeshBuildRequest, MeshBuildResult } from "./mesh";
+import type { VoxelTileConfig } from "./atlas";
+import type { BlockMeshes, MeshBuildRequest, MeshBuildResult } from "./mesh";
+
+const EMPTY_MESHES: BlockMeshes = {
+  terrain: { positions: [], normals: [], uvs: [], brightness: [], indices: [] },
+  water: { positions: [], normals: [], uvs: [], brightness: [], indices: [] },
+};
 
 /**
  * A worker that records what it is sent and hands results back only when told
@@ -243,6 +249,42 @@ describe("MeshClient", () => {
     client.setTiles([]);
     client.drain();
     expect(worker?.sent.map((r) => r.id)).toEqual([0, 1, 2, 3]);
+  });
+
+  it("adopts a mesh built alongside a fill without queueing a rebuild", () => {
+    const { client, built, worker } = setup(3);
+    client.requestBuild(1); // e.g. queued by a reposition
+    client.acceptMesh(1, EMPTY_MESHES);
+
+    expect(built).toEqual([1]);
+    // The queued rebuild was already met by the adopted geometry.
+    client.drain();
+    expect(worker?.sent).toEqual([]);
+  });
+
+  it("drops a build still in flight when a fill's mesh is adopted for the slot", () => {
+    const { client, built, worker } = setup(3);
+    client.requestBuild(1);
+    client.drain();
+
+    // The block's fill landed with its geometry before the older build
+    // returned; the in-flight result was built from superseded data.
+    client.acceptMesh(1, EMPTY_MESHES);
+    worker?.deliver(0);
+
+    expect(built).toEqual([1]);
+  });
+
+  it("reports the tile rects it was last given", () => {
+    const { client } = setup(2);
+    const rect: VoxelTileConfig = {
+      id: 1,
+      top: [0, 0, 4, 4],
+      side: [0, 4, 4, 4],
+      bottom: [0, 8, 4, 4],
+    };
+    client.setTiles([rect]);
+    expect(client.tileRects).toEqual([rect]);
   });
 
   it("reports an empty mesh for a chunk whose level holds no surface, without touching a worker", () => {

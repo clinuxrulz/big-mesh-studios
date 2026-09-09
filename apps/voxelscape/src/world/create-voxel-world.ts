@@ -1,6 +1,7 @@
 import type { Group } from "@random-mesh/rmsl/scene";
 import { TriangleRenderer } from "../renderers/triangle-renderer";
 import { loadVoxelTiles } from "../renderers/tile-loader";
+import type { VoxelTileConfig } from "../renderers/atlas";
 import { ChunkSphere } from "./chunk-sphere";
 import { WorldWorkerPool } from "./worker-pool";
 import {
@@ -180,17 +181,17 @@ export const createVoxelWorld = ({
   );
 
   let releaseHandler: ((index: number) => void) | undefined;
-  const sphere = new ChunkSphere({
+  const sphere: ChunkSphere = new ChunkSphere({
     radius: chunkRadius,
     yRadius: chunkRadiusY,
     terrain,
-    onBlockChanged: (i) => {
+    onBlockChanged: (i, meshes) => {
       // Recorded before the renderer is told, because a block only counts as
       // drawn once its geometry is built and `onBlockMeshed` fires from
       // inside this call.
       filled.add(i);
       ready.add(i);
-      renderer.onBlockChanged(i);
+      renderer.onBlockChanged(i, meshes);
       for (const cb of filledListeners) {
         cb(i);
       }
@@ -210,9 +211,12 @@ export const createVoxelWorld = ({
     },
     onBlockRelease: (i) => releaseHandler?.(i),
     editLayer,
+    // Read lazily so the getter returns the rects the atlas settled on by the
+    // time a batch is sent, even though the renderer is built just below.
+    tileRects: (): VoxelTileConfig[] => renderer.tileRects,
     pool: workerPool,
   });
-  const blockGrid = { blocks: sphere.blocks };
+  const blockGrid: { blocks: WorldBlock[] } = { blocks: sphere.blocks };
 
   /**
    * Snapshots a released slot's moving fluid into the edit overlay so it
@@ -288,7 +292,7 @@ export const createVoxelWorld = ({
   const ready = new Set<number>();
   /** The slot the player spawns in, or -1 until the initial fill has been asked for. */
   let spawnIndex = -1;
-  const renderer = new TriangleRenderer({
+  const renderer: TriangleRenderer = new TriangleRenderer({
     blocks: blockGrid.blocks,
     waterExtinction: WATER_EXTINCTION,
     seaLevel: terrain.seaLevel,

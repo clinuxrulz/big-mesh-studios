@@ -3,8 +3,17 @@ import { describe, expect, it, vi } from "vitest";
 import { FillClient } from "./fill-client";
 import { WorldWorkerPool } from "./worker-pool";
 import { buildBlockShell } from "./level-data";
+import { EditLayer } from "./edit-layer";
 import { DEFAULT_TERRAIN } from "./noise";
+import { VOXEL_GRASS } from "./voxel-store";
+import type { VoxelTileConfig } from "../renderers/atlas";
+import type { BlockMeshes } from "../renderers/mesh";
 import type { FillBatchRequest, FillBatchResult } from "./fill-worker";
+
+const EMPTY_MESHES: BlockMeshes = {
+  terrain: { positions: [], normals: [], uvs: [], brightness: [], indices: [] },
+  water: { positions: [], normals: [], uvs: [], brightness: [], indices: [] },
+};
 
 /**
  * A worker that records what it is sent (with the per-request generations)
@@ -86,7 +95,7 @@ class FakeFillWorker {
 }
 
 describe("FillClient", () => {
-  it("drops a fill result for a slot requested again before the fill landed", () => {
+  it("drops a stale fill for a re-requested slot and re-sends the current one", () => {
     const blocks = [buildBlockShell({ center: [0, 0, 0] })];
     const worker = new FakeFillWorker();
     const changed = vi.fn();
@@ -97,19 +106,23 @@ describe("FillClient", () => {
       createWorker: () => worker as unknown as Worker | undefined,
     });
 
-    // First a fill for the slot at cell A, then — before it returns — the
-    // same slot is re-requested at cell B (the sphere moved it on).
+    // First a fill for the slot at cell A, then — before it lands — the same
+    // slot is re-requested at cell B (the sphere moved it on). The re-request
+    // bumps the slot's generation but is not sent: the worker is running a
+    // batch for the slot, and a batch is only queued when the worker is free.
     client.requestFill([0], [[0, 0, 0]], [0]);
     blocks[0].center = [128, 0, 0];
     client.requestFill([0], [[128, 0, 0]], [0]);
 
-    expect(worker.sent).toHaveLength(2);
+    expect(worker.sent).toHaveLength(1);
     expect(worker.sent[0].gens).toEqual([1]);
-    expect(worker.sent[1].gens).toEqual([2]);
 
-    // The stale fill for cell A must not be applied to the slot now at B.
+    // The stale fill for cell A lands and is refused (the generation has moved
+    // on), which frees the worker to take the pending re-request.
     worker.deliver(0);
     expect(changed).not.toHaveBeenCalled();
+    expect(worker.sent).toHaveLength(2);
+    expect(worker.sent[1].gens).toEqual([2]);
 
     // The current fill lands and is applied.
     worker.deliver(1);
@@ -144,6 +157,38 @@ describe("FillClient", () => {
 
     client.requestFill([0], [[0, 0, 0]], [2]);
     expect(worker.sent[0].lods).toEqual([2]);
+  });
+
+  it("sends a newer nearest request before an older far one", () => {
+    const blocks = [
+      buildBlockShell({ center: [0, 0, 0] }),
+      buildBlockShell({ center: [1000, 0, 0] }),
+    ];
+    const worker = new FakeFillWorker();
+    const changed = vi.fn();
+    const client = new FillClient({
+      terrain: DEFAULT_TERRAIN,
+      blocks,
+      onBlockChanged: changed,
+      createWorker: () => worker as unknown as Worker | undefined,
+    });
+
+    // The far slot is requested first and sent while the worker is free.
+    client.requestFill([1], [[1000, 0, 0]], [0], undefined, [0, 0, 0]);
+    expect(worker.sent).toHaveLength(1);
+    expect(worker.sent[0].indices).toEqual([1]);
+
+    // The nearer slot is requested while the worker runs the far fill; it
+    // queues rather than sending, then takes the worker's next batch.
+    client.requestFill([0], [[0, 0, 0]], [0], undefined, [0, 0, 0]);
+    expect(worker.sent).toHaveLength(1);
+
+    worker.deliver(0);
+    expect(worker.sent).toHaveLength(2);
+    expect(worker.sent[1].indices).toEqual([0]);
+    worker.deliver(1);
+    expect(changed).toHaveBeenCalledWith(1);
+    expect(changed).toHaveBeenCalledWith(0);
   });
 
   it("sizes the slot's store to the level of detail it fills at", () => {
@@ -238,5 +283,170 @@ describe("FillClient", () => {
 
     worker.deliver(0);
     expect(changed).toHaveBeenCalledWith(0);
+  });
+
+  it("sends a combined fillMesh request carrying the tile rects when a tileRects source is supplied", () => {
+    const blocks = [buildBlockShell({ center: [0, 0, 0] })];
+    const worker = new FakeFillWorker();
+    const rects: VoxelTileConfig[] = [
+      { id: 1, top: [0, 0, 4, 4], side: [0, 4, 4, 4], bottom: [0, 8, 4, 4] },
+    ];
+    const client = new FillClient({
+      terrain: DEFAULT_TERRAIN,
+      blocks,
+      onBlockChanged: () => {},
+      tileRects: () => rects,
+      createWorker: () => worker as unknown as Worker | undefined,
+    });
+
+    client.requestFill([0], [[0, 0, 0]], [0]);
+
+    expect(worker.sent[0]).toMatchObject({
+      type: "fillMesh",
+      indices: [0],
+      gens: [1],
+      tileRects: rects,
+    });
+    // The mesh client still queues normal rebuilds, so nothing here sends
+    // anything at the end of a fill.
+    expect(worker.sent).toHaveLength(1);
+  });
+
+  it("sends plain fill requests when no tileRects source is supplied", () => {
+    const blocks = [buildBlockShell({ center: [0, 0, 0] })];
+    const worker = new FakeFillWorker();
+    const client = new FillClient({
+      terrain: DEFAULT_TERRAIN,
+      blocks,
+      onBlockChanged: () => {},
+      createWorker: () => worker as unknown as Worker | undefined,
+    });
+
+    client.requestFill([0], [[0, 0, 0]], [0]);
+
+    expect(worker.sent[0].type).toBe("fill");
+  });
+
+  it("adopts the meshes a combined result carries", () => {
+    const blocks = [buildBlockShell({ center: [0, 0, 0] })];
+    const worker = new FakeFillWorker();
+    const changed = vi.fn();
+    const rects: VoxelTileConfig[] = [];
+    const client = new FillClient({
+      terrain: DEFAULT_TERRAIN,
+      blocks,
+      onBlockChanged: changed,
+      tileRects: () => rects,
+      createWorker: () => worker as unknown as Worker | undefined,
+    });
+
+    client.requestFill([0], [[0, 0, 0]], [0]);
+    for (const listener of worker.messageListeners) {
+      listener({
+        data: {
+          type: "fillMesh",
+          index: 0,
+          gen: worker.sent[0].gens[0],
+          lod: 0,
+          storeData: new Uint8Array(0),
+          mightHaveVoxels: false,
+          hasWater: false,
+          skyLight: new Uint8Array(0),
+          blockLight: new Uint8Array(0),
+          terrain: EMPTY_MESHES.terrain,
+          water: EMPTY_MESHES.water,
+        },
+      } as MessageEvent);
+    }
+    // The block's geometry arrived with its voxels, so the caller gets the
+    // meshes and never queues a separate rebuild.
+    expect(changed).toHaveBeenCalledWith(0, EMPTY_MESHES);
+  });
+
+  it("drops the combined meshes when the atlas changed after the request was sent", () => {
+    const blocks = [buildBlockShell({ center: [0, 0, 0] })];
+    const worker = new FakeFillWorker();
+    const changed = vi.fn();
+    // Two atlases: the early one the initial fill is sent against, and the one
+    // the spritesheet finishes loading into a moment later.
+    const earlyRects: VoxelTileConfig[] = [];
+    const loadedRects: VoxelTileConfig[] = [
+      { id: 1, top: [0, 0, 4, 4], side: [0, 4, 4, 4], bottom: [0, 8, 4, 4] },
+    ];
+    let currentRects: VoxelTileConfig[] = earlyRects;
+    const client = new FillClient({
+      terrain: DEFAULT_TERRAIN,
+      blocks,
+      onBlockChanged: changed,
+      tileRects: () => currentRects,
+      createWorker: () => worker as unknown as Worker | undefined,
+    });
+
+    client.requestFill([0], [[0, 0, 0]], [0]);
+    // The atlas landed while the job was in the worker: the meshes it returns
+    // were baked with the earlier, empty tile list, so their texture
+    // coordinates are wrong for what the renderer draws now.
+    currentRects = loadedRects;
+    for (const listener of worker.messageListeners) {
+      listener({
+        data: {
+          type: "fillMesh",
+          index: 0,
+          gen: worker.sent[0].gens[0],
+          lod: 0,
+          storeData: new Uint8Array(0),
+          mightHaveVoxels: false,
+          hasWater: false,
+          skyLight: new Uint8Array(0),
+          blockLight: new Uint8Array(0),
+          terrain: EMPTY_MESHES.terrain,
+          water: EMPTY_MESHES.water,
+        },
+      } as MessageEvent);
+    }
+    // The stale meshes are not adopted; the block is only reported as changed,
+    // which queues a rebuild against the tiles the renderer holds now.
+    expect(changed).toHaveBeenCalledWith(0);
+    expect(changed).not.toHaveBeenCalledWith(0, EMPTY_MESHES);
+  });
+
+  it("drops the worker's meshes when the edit overlay changed the block", () => {
+    const blocks = [buildBlockShell({ center: [0, 0, 0] })];
+    const worker = new FakeFillWorker();
+    const changed = vi.fn();
+    const rects: VoxelTileConfig[] = [];
+    const editLayer = new EditLayer();
+    editLayer.set([0, 0, 0], VOXEL_GRASS, 1);
+    const client = new FillClient({
+      terrain: DEFAULT_TERRAIN,
+      blocks,
+      onBlockChanged: changed,
+      editLayer,
+      tileRects: () => rects,
+      createWorker: () => worker as unknown as Worker | undefined,
+    });
+
+    client.requestFill([0], [[0, 0, 0]], [0]);
+    for (const listener of worker.messageListeners) {
+      listener({
+        data: {
+          type: "fillMesh",
+          index: 0,
+          gen: worker.sent[0].gens[0],
+          lod: 0,
+          storeData: new Uint8Array(0),
+          mightHaveVoxels: false,
+          hasWater: false,
+          skyLight: new Uint8Array(0),
+          blockLight: new Uint8Array(0),
+          terrain: EMPTY_MESHES.terrain,
+          water: EMPTY_MESHES.water,
+        },
+      } as MessageEvent);
+    }
+    // The worker never saw the edit, so its mesh is stale: the caller is told
+    // only that the block changed, and a normal rebuild is what re-draws it.
+    expect(changed).toHaveBeenCalledWith(0);
+    expect(changed).not.toHaveBeenCalledWith(0, EMPTY_MESHES);
   });
 });

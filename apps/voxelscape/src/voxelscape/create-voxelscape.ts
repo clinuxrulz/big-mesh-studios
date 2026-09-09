@@ -209,6 +209,21 @@ export const createVoxelscape = ({
     player,
   });
 
+  // Benchmarks drive the real world through a URL flag, the way `#perf` does:
+  // hand the moving body and the window's readiness queries to the page so a
+  // playwright script can watch the player's cell stream in (or fail to) as it
+  // walks.
+  if (window.location.hash.includes("bench")) {
+    (window as unknown as { __voxelscape?: object }).__voxelscape = {
+      player: avatar.player.position,
+      cellReady: (x: number, y: number, z: number) => world.cellReady(x, y, z),
+      blockCount: world.blocks.length,
+      cellsInSphere,
+      chunkRadius,
+      chunkRadiusY,
+    };
+  }
+
   /**
    * The player's hearts and the death sequence. When a zombie's swing empties
    * them, the camera plays the fall a corpse does, then this stands the

@@ -4,6 +4,7 @@ import { WorldWorkerPool } from "../world/worker-pool";
 import {
   buildBlockMesh,
   buildWaterMesh,
+  type BlockMeshes,
   type MeshArrays,
   type MeshBuildRequest,
   type MeshBuildResult,
@@ -100,6 +101,11 @@ export class MeshClient {
    * from nothing, which is why `setTiles` invalidates every block.
    */
   private readonly tilesById = new Map<number, VoxelTileConfig>();
+  /**
+   * The tile list that `tileRects` hands out. Replaced wholesale on `setTiles`
+   * so its identity marks the atlas generation a combined mesh was baked for.
+   */
+  private rects: VoxelTileConfig[] = [];
   private readonly pool: WorldWorkerPool;
   private warnedWorkerError = false;
   private nextWorker = 0;
@@ -181,6 +187,19 @@ export class MeshClient {
   }
 
   /**
+   * Adopts a mesh a worker built alongside a block's fill, and drops any
+   * rebuild the block is queued for: its geometry is already current, so
+   * nothing is left for a drain to send. The generation is bumped so a build
+   * still in flight for the slot (from before its data was replaced) is
+   * dropped as stale when it lands.
+   */
+  acceptMesh(index: number, meshes: BlockMeshes): void {
+    this.generation[index]++;
+    this.pending.delete(index);
+    this.onMeshBuilt(index, meshes.terrain, meshes.water);
+  }
+
+  /**
    * Builds one block's mesh on the calling thread, before returning, and
    * takes it off the queue. For the block that has to be on screen before the
    * player is let in: starting the worker and loading its modules costs
@@ -226,16 +245,29 @@ export class MeshClient {
 
   /**
    * Replaces the tile rectangles and queues every block, because each one's
-   * texture coordinates are baked into the geometry it was built with.
+   * texture coordinates are baked into the geometry it was built with. The
+   * rect list is swapped for a fresh array, never mutated in place, so a
+   * caller holding the previous array can tell the atlas changed.
    */
   setTiles(voxelTiles: VoxelTileConfig[]): void {
     this.tilesById.clear();
     for (const tile of voxelTiles) {
       this.tilesById.set(tile.id, tile);
     }
+    this.rects = [...this.tilesById.values()];
     for (let index = 0; index < this.blocks.length; index++) {
       this.requestBuild(index);
     }
+  }
+
+  /**
+   * The atlas's current tile rectangles, for a combined fill's mesh to bake.
+   * The same array is returned until the tiles change, so a combined fill can
+   * tell whether a result's mesh was built against the current atlas by
+   * comparing references.
+   */
+  get tileRects(): VoxelTileConfig[] {
+    return this.rects;
   }
 
   private buildOnThisThread(indices: number[]): void {

@@ -712,3 +712,13 @@ export interface MeshBuildResult {
   /** The block light channel the worker read, echoed back for reuse. */
   blockLight: Uint8Array;
 }
+
+/**
+ * A block's two surface meshes, terrain and water, built together. A fill
+ * result carries one when the worker that generated the block's voxels also
+ * meshed them, so the block never waits behind a separately-queued mesh job.
+ */
+export interface BlockMeshes {
+  terrain: MeshArrays;
+  water: MeshArrays;
+}

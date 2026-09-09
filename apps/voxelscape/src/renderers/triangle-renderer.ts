@@ -38,7 +38,12 @@ import {
 import type { PerspectiveCamera } from "@random-mesh/rmsl/scene";
 import type { VoxelTileConfig } from "./atlas";
 import { BLOCK_WORLD, type Dim3, type WorldBlock } from "../world/level-data";
-import { setGeometryData, setOcclusionColors, type MeshArrays } from "./mesh";
+import {
+  setGeometryData,
+  setOcclusionColors,
+  type BlockMeshes,
+  type MeshArrays,
+} from "./mesh";
 import { MeshClient } from "./mesh-client";
 import type { WorldWorkerPool } from "../world/worker-pool";
 import { OcclusionDebugMaterial } from "./occlusion-debug-material";
@@ -1547,7 +1552,14 @@ export class TriangleRenderer {
     }
   }
 
-  onBlockChanged(index: number): void {
+  onBlockChanged(index: number, meshes?: BlockMeshes): void {
+    if (meshes !== undefined) {
+      // The worker that filled this block meshed it in the same job, so its
+      // geometry is already current: adopt it instead of queueing another
+      // build that a busy worker would serve after other queued fills.
+      this.meshes.acceptMesh(index, meshes);
+      return;
+    }
     this.meshes.requestBuild(index);
   }
 
@@ -1555,6 +1567,11 @@ export class TriangleRenderer {
     this.triMaterial.tilesTexture = texture;
     this.triMaterial.needsUpdate = true;
     this.meshes.setTiles(voxelTiles);
+  }
+
+  /** The atlas's current tile rectangles, for the fill worker's combined meshes to bake. */
+  get tileRects(): VoxelTileConfig[] {
+    return this.meshes.tileRects;
   }
 
   applyLighting(dayNight: DayNight): void {

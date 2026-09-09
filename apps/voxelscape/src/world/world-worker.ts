@@ -1,12 +1,13 @@
-// Web worker that both generates a block's procedural voxel data (fill) and
-// builds its surface triangle mesh, so one thread answers the world's two
-// heavy per-block jobs instead of them splitting across two pools. The main
-// thread sends a fill configuration once, then `fill` requests carrying the
-// centres of the blocks it wants and `mesh` requests carrying a block's voxel
-// data. Each block of a fill is posted back on its own as it is generated;
-// each mesh is posted back as one result. Every result carries its kind on a
-// `type` field, so the fill and mesh clients sharing this worker can tell
-// their own answers apart.
+// Web worker that generates a block's procedural voxel data (fill), builds its
+// surface triangle mesh (mesh), and does both in one pass (fillMesh), so one
+// thread answers the world's heavy per-block jobs. The main thread sends a
+// fill configuration once, then `fill` requests carrying the centres of the
+// blocks it wants, `fillMesh` requests that also carry the atlas tile
+// rectangles so each block's mesh can be built with its fill, and `mesh`
+// requests carrying a block's voxel data. Each block of a fill or combined
+// fill is posted back on its own as it is generated; each mesh is posted back
+// as one result. Every result carries its kind on a `type` field, so the fill
+// and mesh clients sharing this worker can tell their own answers apart.
 import {
   fillResultTransfers,
   handleFillMessage,
@@ -14,6 +15,12 @@ import {
   type FillConfig,
   type FillWorkerMessage,
 } from "./fill-worker";
+import {
+  fillMeshResultTransfers,
+  handleFillMeshMessage,
+  type FillMeshBlockResult,
+  type FillMeshBatchRequest,
+} from "./fill-mesh-worker";
 import type { MeshBuildResult, MeshBuildRequest } from "../renderers/mesh";
 import {
   handleMeshMessage,
@@ -21,20 +28,21 @@ import {
 } from "../renderers/mesh-worker";
 
 /** Every message a world worker accepts, each identified by its `type`. */
-export type WorldWorkerMessage = FillWorkerMessage | MeshBuildRequest;
+export type WorldWorkerMessage =
+  FillWorkerMessage | FillMeshBatchRequest | MeshBuildRequest;
 
-/** What handling one message produces: a stored config, fill results, a mesh, or nothing. */
+/** What handling one message produces: a stored config, results, a mesh, or nothing. */
 export type WorldWorkerOutput = {
   config?: FillConfig;
-  results?: AsyncGenerator<FillBatchResult>;
+  results?: AsyncGenerator<FillBatchResult | FillMeshBlockResult>;
   mesh?: { result: MeshBuildResult; transfers: Transferable[] };
 };
 
 /**
  * Pure message handler: returns the config to store for a `config` message, a
- * result per block for a `fill` message, a single result for a `mesh` message,
- * or neither for anything else (an unknown message, or a `fill` message
- * received before a configuration).
+ * result per block for a `fill` or `fillMesh` message, a single result for a
+ * `mesh` message, or neither for anything else (an unknown message, or a fill
+ * message received before a configuration).
  */
 export const handleWorldMessage = (
   msg: WorldWorkerMessage,
@@ -42,6 +50,9 @@ export const handleWorldMessage = (
 ): WorldWorkerOutput => {
   if (msg.type === "config" || msg.type === "fill") {
     return handleFillMessage(msg, config);
+  }
+  if (msg.type === "fillMesh") {
+    return handleFillMeshMessage(msg, config);
   }
   if (msg.type === "mesh") {
     const result = handleMeshMessage(msg);
@@ -61,7 +72,7 @@ const workerSelf =
     ? (self as unknown as {
         onmessage: ((ev: MessageEvent) => void) | null;
         postMessage: (
-          message: FillBatchResult | MeshBuildResult,
+          message: FillBatchResult | FillMeshBlockResult | MeshBuildResult,
           transfer: Transferable[],
         ) => void;
       })
@@ -78,7 +89,11 @@ if (workerSelf !== undefined) {
       return;
     }
     for await (const result of out.results ?? []) {
-      workerSelf.postMessage(result, fillResultTransfers(result));
+      const transfers =
+        result.type === "fill"
+          ? fillResultTransfers(result)
+          : fillMeshResultTransfers(result);
+      workerSelf.postMessage(result, transfers);
     }
     if (out.mesh !== undefined) {
       workerSelf.postMessage(out.mesh.result, out.mesh.transfers);
