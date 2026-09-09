@@ -13,6 +13,8 @@
 //                                    # measure the scaler itself
 //   pnpm bench --at bcf5696          # measure some other commit, checked out
 //                                    # beside this one, with this harness
+//   pnpm bench --monsters            # leave the monsters in the world, to
+//                                    # measure what they cost
 //
 // A commit is measured through the harness in this checkout, so the scenarios,
 // the report and its page are whatever they are here; only the application
@@ -112,6 +114,13 @@ interface Options {
   trace: boolean;
   /** The commit to measure, if not the one this checkout stands on. */
   at?: string;
+  /**
+   * Whether to leave the world growing monsters. A monster walks where the
+   * terrain and the frame rate take it and swings when it reaches the player,
+   * so it puts a different fight into every run; the benchmark empties the
+   * world of them unless this asks for them.
+   */
+  monsters: boolean;
 }
 
 const parseOptions = (argv: string[]): Options => {
@@ -126,6 +135,7 @@ const parseOptions = (argv: string[]): Options => {
   let trace = false;
   let scale: number | undefined;
   let at: string | undefined;
+  let monsters = false;
   let profile = profileNamed("native");
   for (let i = 0; i < argv.length; i++) {
     const argument = argv[i];
@@ -151,6 +161,8 @@ const parseOptions = (argv: string[]): Options => {
       port = Number(argv[++i]);
     } else if (argument === "--at") {
       at = argv[++i];
+    } else if (argument === "--monsters") {
+      monsters = true;
     } else if (argument.startsWith("--")) {
       throw new Error(`unknown option ${argument}`);
     } else {
@@ -183,6 +195,7 @@ const parseOptions = (argv: string[]): Options => {
     trace,
     scale,
     at,
+    monsters,
   };
 };
 
@@ -343,8 +356,9 @@ const pinConditions = async (
     adaptive: boolean;
     timeSeconds: number;
     workers?: number;
+    monsters: boolean;
   },
-): Promise<string> =>
+): Promise<{ workers: string; monsters: string }> =>
   page.evaluate(async (pins) => {
     const bench = (window as unknown as { __voxelscape: BenchWindow })
       .__voxelscape;
@@ -359,7 +373,10 @@ const pinConditions = async (
     if (pins.workers !== undefined) {
       await bench.run(`/world:workers ${pins.workers}`);
     }
-    return String(await bench.run("/world:workers"));
+    const monsters = pins.monsters
+      ? "monsters: left in the world"
+      : String(await bench.run("/monsters:spawning off"));
+    return { workers: String(await bench.run("/world:workers")), monsters };
   }, pins);
 
 /**
@@ -470,12 +487,22 @@ const main = async (): Promise<void> => {
     console.log("window loaded; settling");
     await page.waitForTimeout(SETTLE_MS);
     const scale = options.scale ?? options.profile.scale;
-    const workers = await pinConditions(page, {
+    const pinned = await pinConditions(page, {
       scale,
       adaptive: options.adaptive,
       timeSeconds: PINNED_TIME_SECONDS,
       workers: options.profile.workers,
+      monsters: options.monsters,
     });
+    // A build older than the command does not know how to put its monsters
+    // away, and would be measured with a fight in it against one that was
+    // not. Better to stop than to report two runs as comparable.
+    if (!options.monsters && pinned.monsters.startsWith("unknown command")) {
+      throw new Error(
+        "this build cannot empty the world of monsters, so its numbers would carry a fight the other run does not; measure it with --monsters, and the other run too",
+      );
+    }
+    console.log(pinned.monsters);
     const machine = await describeMachine(page);
     // The processor is slowed only once the window has loaded. Boot would
     // otherwise take the slowdown too, and what is being measured is a world
@@ -553,10 +580,11 @@ const main = async (): Promise<void> => {
         blockCount: machine.blockCount,
         pinnedScale: scale,
         adaptiveResolution: options.adaptive,
-        workers,
+        workers: pinned.workers,
         profile: options.profile.name,
         cpuThrottle: options.profile.cpuThrottle,
         pacing: options.unlocked ? "unlocked" : "paced",
+        monsters: options.monsters,
       },
       scenarios,
     };

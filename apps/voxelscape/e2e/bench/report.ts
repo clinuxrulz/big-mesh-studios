@@ -32,6 +32,13 @@ export interface RunContext {
    * because nothing is waiting for the display.
    */
   pacing: "paced" | "unlocked";
+  /**
+   * Whether the world was left to grow monsters while the run was measured.
+   * A monster wanders where the terrain and the frame rate take it and swings
+   * when it reaches the player, so a run measured with them in it measures a
+   * different fight every time.
+   */
+  monsters: boolean;
 }
 
 /**
@@ -221,7 +228,8 @@ export const formatReport = (report: BenchReport): string => {
       (context.cpuThrottle > 1
         ? `, processor slowed ${context.cpuThrottle} times`
         : "") +
-      ` · frames ${context.pacing}`,
+      ` · frames ${context.pacing}` +
+      (context.monsters ? "" : " · no monsters"),
     `${context.graphicsCard} · ${context.cores} threads · ` +
       `${context.viewport.width}x${context.viewport.height} · ` +
       `radius ${context.chunkRadius} (${context.blockCount} blocks) · ` +

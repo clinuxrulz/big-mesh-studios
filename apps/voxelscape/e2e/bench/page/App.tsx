@@ -326,6 +326,7 @@ export function App(props: {
             ? `, processor slowed ${context().cpuThrottle} times`
             : ""}
           {` · frames ${context().pacing}`}
+          {context().monsters === false ? " · no monsters" : ""}
           {context().adaptiveResolution
             ? " · resolution adapting"
             : ` · scale pinned at ${context().pinnedScale}`}

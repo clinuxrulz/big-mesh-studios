@@ -106,7 +106,8 @@ const main = (): void => {
     before.context.graphicsCard !== after.context.graphicsCard ||
     before.context.chunkRadius !== after.context.chunkRadius ||
     before.context.pinnedScale !== after.context.pinnedScale ||
-    before.context.pacing !== after.context.pacing
+    before.context.pacing !== after.context.pacing ||
+    before.context.monsters !== after.context.monsters
   ) {
     console.log(
       "\nthese two runs were measured under different conditions; the numbers below are not comparable",
