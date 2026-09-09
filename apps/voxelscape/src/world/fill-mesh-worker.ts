@@ -18,10 +18,12 @@ import { LightStore } from "./light-store";
 import {
   buildBlockMesh,
   buildWaterMesh,
+  emptyMesh,
+  MeshBuilder,
   type MeshArrays,
 } from "../renderers/mesh";
 import type { VoxelTileConfig } from "../renderers/atlas";
-import { meshArraysTransfers, toTyped } from "../renderers/mesh-worker";
+import { meshArraysTransfers } from "../renderers/mesh-worker";
 import { customFillStoreOf, type FillConfig } from "./fill-worker";
 
 export interface FillMeshBatchRequest {
@@ -65,19 +67,10 @@ export interface FillMeshBlockResult {
 }
 
 /**
- * A fresh empty typed mesh. Each call allocates its own arrays rather than
- * returning a shared constant, because a block's result leaves the worker
- * with its buffers transferred (detached), so a cached mesh could not be
- * sent twice.
+ * The arrays every block this worker builds is accumulated into, one pair for as
+ * long as the worker lives, the same way the mesh-only path keeps its own.
  */
-const emptyMesh = (): MeshArrays => ({
-  positions: new Float32Array(0),
-  normals: new Float32Array(0),
-  uvs: new Float32Array(0),
-  tiles: new Float32Array(0),
-  brightness: new Float32Array(0),
-  indices: new Uint32Array(0),
-});
+const scratch = { terrain: new MeshBuilder(), water: new MeshBuilder() };
 
 /**
  * Builds one combined result per block in a `fillMesh` request, in request
@@ -115,8 +108,8 @@ export async function* buildFillMeshResults(
         skylight: data.skyLight,
         blocklight: data.blockLight,
       });
-      terrain = toTyped(buildBlockMesh(store, req.tileRects, light));
-      water = toTyped(buildWaterMesh(store, light));
+      terrain = buildBlockMesh(store, req.tileRects, light, scratch.terrain);
+      water = buildWaterMesh(store, light, scratch.water);
     }
     yield {
       type: "fillMesh",

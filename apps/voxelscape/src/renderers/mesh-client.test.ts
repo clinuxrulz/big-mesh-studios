@@ -5,25 +5,12 @@ import { WorldWorkerPool } from "../world/worker-pool";
 import { buildBlockShell, type WorldBlock } from "../world/level-data";
 import { VOXEL_GRASS } from "../world/voxel-store";
 import type { VoxelTileConfig } from "./atlas";
+import { emptyMesh } from "./mesh";
 import type { BlockMeshes, MeshBuildRequest, MeshBuildResult } from "./mesh";
 
 const EMPTY_MESHES: BlockMeshes = {
-  terrain: {
-    positions: [],
-    normals: [],
-    uvs: [],
-    tiles: [],
-    brightness: [],
-    indices: [],
-  },
-  water: {
-    positions: [],
-    normals: [],
-    uvs: [],
-    tiles: [],
-    brightness: [],
-    indices: [],
-  },
+  terrain: emptyMesh(),
+  water: emptyMesh(),
 };
 
 /**
@@ -83,22 +70,8 @@ class FakeMeshWorker {
     const result: MeshBuildResult = {
       type: "mesh",
       id: request.id,
-      terrain: {
-        positions: [],
-        normals: [],
-        uvs: [],
-        tiles: [],
-        brightness: [],
-        indices: [],
-      },
-      water: {
-        positions: [],
-        normals: [],
-        uvs: [],
-        tiles: [],
-        brightness: [],
-        indices: [],
-      },
+      terrain: emptyMesh(),
+      water: emptyMesh(),
       // A real worker transfers the input buffers it read back for reuse, so
       // the fake does the same.
       data: request.data,

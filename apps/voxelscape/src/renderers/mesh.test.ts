@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { VoxelTileConfig } from "./atlas";
 import {
   buildBlockMesh,
+  emptyMesh,
   buildWaterMesh,
   meshArraysToGeometry,
   setGeometryData,
@@ -429,14 +430,7 @@ describe("setGeometryData", () => {
     store.set(1, 1, 1, VOXEL_GRASS);
     const geometry = meshArraysToGeometry(buildBlockMesh(store, []));
     expect(geometry.drawCount).toBeGreaterThan(0);
-    setGeometryData(geometry, {
-      positions: [],
-      normals: [],
-      uvs: [],
-      tiles: [],
-      brightness: [],
-      indices: [],
-    });
+    setGeometryData(geometry, emptyMesh());
     expect(geometry.drawCount).toBe(0);
   });
 });

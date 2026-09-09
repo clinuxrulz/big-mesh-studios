@@ -5,6 +5,7 @@ import { Counter, probe } from "../render/perf-probe";
 import {
   buildBlockMesh,
   buildWaterMesh,
+  emptyMesh,
   type BlockMeshes,
   type MeshArrays,
   type MeshBuildRequest,
@@ -26,14 +27,7 @@ const MAX_BUILDS_PER_DRAIN = 12;
 const MAX_BUFFER_POOL_SOURCES = 2 * MAX_BUILDS_PER_DRAIN;
 
 /** The geometry of a chunk that holds no surface: nothing to draw. */
-const EMPTY_MESH: MeshArrays = {
-  positions: [],
-  normals: [],
-  uvs: [],
-  tiles: [],
-  brightness: [],
-  indices: [],
-};
+const EMPTY_MESH: MeshArrays = emptyMesh();
 
 export interface MeshClientParams {
   /**

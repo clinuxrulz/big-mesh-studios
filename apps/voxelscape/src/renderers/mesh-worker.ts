@@ -6,27 +6,17 @@
 // echoed for the caller to recycle. Pure: the worker entry that runs this
 // lives in `world-worker.ts`.
 import type { MeshArrays, MeshBuildRequest, MeshBuildResult } from "./mesh";
-import { buildBlockMesh, buildWaterMesh } from "./mesh";
+import { buildBlockMesh, buildWaterMesh, MeshBuilder } from "./mesh";
 import { VoxelStore } from "../world/voxel-store";
 import { LightStore } from "../world/light-store";
 
-/** Converts a CPU builder's plain arrays into typed arrays, so a mesh can be transferred. */
-export const toTyped = (m: MeshArrays): MeshArrays => ({
-  positions:
-    m.positions instanceof Float32Array
-      ? m.positions
-      : new Float32Array(m.positions),
-  normals:
-    m.normals instanceof Float32Array ? m.normals : new Float32Array(m.normals),
-  uvs: m.uvs instanceof Float32Array ? m.uvs : new Float32Array(m.uvs),
-  tiles: m.tiles instanceof Float32Array ? m.tiles : new Float32Array(m.tiles),
-  brightness:
-    m.brightness instanceof Float32Array
-      ? m.brightness
-      : new Float32Array(m.brightness),
-  indices:
-    m.indices instanceof Uint32Array ? m.indices : new Uint32Array(m.indices),
-});
+/**
+ * The arrays every block this worker builds is accumulated into, one pair for
+ * as long as the worker lives. They grow to the largest block the worker meets
+ * and then stop growing, and what leaves is copied out of them at its exact
+ * length, so nothing here is held by a result.
+ */
+const scratch = { terrain: new MeshBuilder(), water: new MeshBuilder() };
 
 /**
  * The buffers to move along with a pair of typed meshes: each pair's twelve
@@ -91,8 +81,8 @@ export const handleMeshMessage = (
   return {
     type: "mesh",
     id,
-    terrain: toTyped(buildBlockMesh(store, tileRects, light)),
-    water: toTyped(buildWaterMesh(store, light)),
+    terrain: buildBlockMesh(store, tileRects, light, scratch.terrain),
+    water: buildWaterMesh(store, light, scratch.water),
     data,
     skyLight,
     blockLight,

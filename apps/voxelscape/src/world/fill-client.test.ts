@@ -7,26 +7,13 @@ import { EditLayer } from "./edit-layer";
 import { DEFAULT_TERRAIN } from "./noise";
 import { VOXEL_GRASS } from "./voxel-store";
 import type { VoxelTileConfig } from "../renderers/atlas";
+import { emptyMesh } from "../renderers/mesh";
 import type { BlockMeshes } from "../renderers/mesh";
 import type { FillBatchRequest, FillBatchResult } from "./fill-worker";
 
 const EMPTY_MESHES: BlockMeshes = {
-  terrain: {
-    positions: [],
-    normals: [],
-    uvs: [],
-    tiles: [],
-    brightness: [],
-    indices: [],
-  },
-  water: {
-    positions: [],
-    normals: [],
-    uvs: [],
-    tiles: [],
-    brightness: [],
-    indices: [],
-  },
+  terrain: emptyMesh(),
+  water: emptyMesh(),
 };
 
 /**

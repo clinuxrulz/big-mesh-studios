@@ -20,6 +20,7 @@
 // opaque draw order.
 import { BufferAttribute, BufferGeometry } from "@random-mesh/rmsl/scene";
 import type { VoxelTileConfig } from "./atlas";
+import { Growable } from "./growable";
 import {
   VOXEL_AIR,
   isFluidId,
@@ -33,25 +34,74 @@ import { LIGHT_TO_UNIT, type LightStore } from "../world/light-store";
 import { SlicePlane } from "./plane-merge";
 
 /**
- * Vertex arrays for one mesh. The CPU builders produce plain arrays; the
- * web worker converts them to typed arrays so they can be transferred back
- * without a copy. `meshArraysToGeometry` consumes either.
+ * Vertex arrays for one mesh, at exactly the length the build wrote. Typed all
+ * the way from the builder that accumulated them, so what a worker sends is
+ * transferred rather than converted and copied.
  */
 export interface MeshArrays {
-  positions: number[] | Float32Array;
-  normals: number[] | Float32Array;
+  positions: Float32Array;
+  normals: Float32Array;
   /**
    * Texture coordinates counted in cells rather than swept nought to one, so a
    * quad covering several cells repeats its tile once per cell. Which tile
-   * each vertex repeats is `rects`.
+   * each vertex repeats is `tiles`.
    */
-  uvs: number[] | Float32Array;
+  uvs: Float32Array;
   /** Each vertex's tile of the sheet, one number a vertex. */
-  tiles: number[] | Float32Array;
-  indices: number[] | Uint32Array;
+  tiles: Float32Array;
+  indices: Uint32Array;
   /** One 0..1 brightness per vertex, baked from the block's light + corner occlusion. */
-  brightness: number[] | Float32Array;
+  brightness: Float32Array;
 }
+
+/**
+ * The six arrays a mesh is built into, and the mesher's unit of reuse: a worker
+ * keeps one of these for terrain and one for water and hands the same pair to
+ * every block it builds, so the arrays grow to the largest block it meets and
+ * then stop growing. `finish` copies what was written out at its exact length,
+ * because that copy is transferred away and must not be a view onto the buffer
+ * the next block overwrites.
+ */
+export class MeshBuilder {
+  readonly positions = new Growable(Float32Array);
+  readonly normals = new Growable(Float32Array);
+  readonly uvs = new Growable(Float32Array);
+  readonly tiles = new Growable(Float32Array);
+  readonly brightness = new Growable(Float32Array);
+  readonly indices = new Growable(Uint32Array);
+
+  /** Empties every array for the next block, keeping the buffers. */
+  clear(): void {
+    this.positions.clear();
+    this.normals.clear();
+    this.uvs.clear();
+    this.tiles.clear();
+    this.brightness.clear();
+    this.indices.clear();
+  }
+
+  /** What was written, as arrays of their own. */
+  finish(): MeshArrays {
+    return {
+      positions: this.positions.exact(),
+      normals: this.normals.exact(),
+      uvs: this.uvs.exact(),
+      tiles: this.tiles.exact(),
+      brightness: this.brightness.exact(),
+      indices: this.indices.exact(),
+    };
+  }
+}
+
+/** A mesh with nothing in it, for a block with no face to show. */
+export const emptyMesh = (): MeshArrays => ({
+  positions: new Float32Array(0),
+  normals: new Float32Array(0),
+  uvs: new Float32Array(0),
+  tiles: new Float32Array(0),
+  brightness: new Float32Array(0),
+  indices: new Uint32Array(0),
+});
 
 /**
  * One quad's four corners as [xOffset, yOffset, zOffset, u, v] cell
@@ -226,28 +276,8 @@ const DEFAULT_TILE = 0;
 interface QuadContext {
   store: VoxelStore;
   light: LightStore | null;
-  positions: number[];
-  normals: number[];
-  uvs: number[];
-  /** Each vertex's tile of the sheet, which the material wraps its quad into. */
-  tiles: number[];
-  brightness: number[];
-  indices: number[];
+  into: MeshBuilder;
 }
-
-const emptyQuadContext = (
-  store: VoxelStore,
-  light: LightStore | null,
-): QuadContext => ({
-  store,
-  light,
-  positions: [],
-  normals: [],
-  uvs: [],
-  tiles: [],
-  brightness: [],
-  indices: [],
-});
 
 const finishQuad = (
   ctx: QuadContext,
@@ -256,9 +286,11 @@ const finishQuad = (
   sign: number,
 ): void => {
   if (windsOutward(axis, sign)) {
-    ctx.indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    ctx.into.indices.pushTriple(base, base + 1, base + 2);
+    ctx.into.indices.pushTriple(base, base + 2, base + 3);
   } else {
-    ctx.indices.push(base, base + 2, base + 1, base, base + 3, base + 2);
+    ctx.into.indices.pushTriple(base, base + 2, base + 1);
+    ctx.into.indices.pushTriple(base, base + 3, base + 2);
   }
 };
 
@@ -281,24 +313,24 @@ const emitCubeFace = (
   const { store, light } = ctx;
   const scale = store.scale;
   const h = scale / 2;
-  const base = ctx.positions.length / 3;
+  const base = ctx.into.positions.count / 3;
   const corners = FACE_CORNERS[axis];
   const cornerLight = faceBrightness(store, light, x, y, z, axis, sign);
   for (let k = 0; k < corners.length; k++) {
     const [xo, yo, zo, u, v] = corners[k];
-    ctx.positions.push(
+    ctx.into.positions.pushTriple(
       axis === 0 ? wx + sign * h : wx + (xo - 0.5) * 2 * h,
       axis === 1 ? wy + sign * h : wy + (yo - 0.5) * 2 * h,
       axis === 2 ? wz + sign * h : wz + (zo - 0.5) * 2 * h,
     );
-    ctx.normals.push(
+    ctx.into.normals.pushTriple(
       axis === 0 ? sign : 0,
       axis === 1 ? sign : 0,
       axis === 2 ? sign : 0,
     );
-    ctx.uvs.push(u, v);
-    ctx.tiles.push(tile);
-    ctx.brightness.push(cornerLight === null ? 1 : cornerLight[k]);
+    ctx.into.uvs.pushPair(u, v);
+    ctx.into.tiles.push(tile);
+    ctx.into.brightness.push(cornerLight === null ? 1 : cornerLight[k]);
   }
   finishQuad(ctx, base, axis, sign);
 };
@@ -329,7 +361,7 @@ const emitMergedFace = (
   const scale = store.scale;
   const voxels = store.voxels;
   const [a1, a2] = TANGENT_AXES[axis];
-  const base = ctx.positions.length / 3;
+  const base = ctx.into.positions.count / 3;
   const facing = (slice + (sign > 0 ? 1 : 0) - voxels[axis] / 2) * scale;
   const alongU = U_ALONG_SECOND_TANGENT[axis] ? tall : wide;
   const alongV = U_ALONG_SECOND_TANGENT[axis] ? wide : tall;
@@ -340,15 +372,15 @@ const emitMergedFace = (
     point[axis] = facing;
     point[a1] = (first + offsets[a1] * wide - voxels[a1] / 2) * scale;
     point[a2] = (second + offsets[a2] * tall - voxels[a2] / 2) * scale;
-    ctx.positions.push(point[0], point[1], point[2]);
-    ctx.normals.push(
+    ctx.into.positions.pushTriple(point[0], point[1], point[2]);
+    ctx.into.normals.pushTriple(
       axis === 0 ? sign : 0,
       axis === 1 ? sign : 0,
       axis === 2 ? sign : 0,
     );
-    ctx.uvs.push(u * alongU, v * alongV);
-    ctx.tiles.push(tile);
-    ctx.brightness.push(shade);
+    ctx.into.uvs.pushPair(u * alongU, v * alongV);
+    ctx.into.tiles.push(tile);
+    ctx.into.brightness.push(shade);
   }
   finishQuad(ctx, base, axis, sign);
 };
@@ -377,7 +409,7 @@ const emitFluidFace = (
   const { store, light } = ctx;
   const scale = store.scale;
   const h = scale / 2;
-  const base = ctx.positions.length / 3;
+  const base = ctx.into.positions.count / 3;
   const corners = FACE_CORNERS[axis];
   const cornerLight = faceBrightness(store, light, x, y, z, axis, sign);
   const yAt = (fraction: number): number => wy - h + fraction * scale;
@@ -388,19 +420,19 @@ const emitFluidFace = (
     // edge `bottomFraction`.
     const fy =
       axis === 1 ? topFraction : yo === 1 ? topFraction : bottomFraction;
-    ctx.positions.push(
+    ctx.into.positions.pushTriple(
       axis === 0 ? wx + sign * h : wx + (xo - 0.5) * 2 * h,
       yAt(fy),
       axis === 2 ? wz + sign * h : wz + (zo - 0.5) * 2 * h,
     );
-    ctx.normals.push(
+    ctx.into.normals.pushTriple(
       axis === 0 ? sign : 0,
       axis === 1 ? sign : 0,
       axis === 2 ? sign : 0,
     );
-    ctx.uvs.push(u, v);
-    ctx.tiles.push(tile);
-    ctx.brightness.push(cornerLight === null ? 1 : cornerLight[k]);
+    ctx.into.uvs.pushPair(u, v);
+    ctx.into.tiles.push(tile);
+    ctx.into.brightness.push(cornerLight === null ? 1 : cornerLight[k]);
   }
   finishQuad(ctx, base, axis, sign);
 };
@@ -511,8 +543,10 @@ export const buildBlockMesh = (
   store: VoxelStore,
   voxelTiles: VoxelTileConfig[],
   light: LightStore | null = null,
+  into: MeshBuilder = new MeshBuilder(),
 ): MeshArrays => {
-  const ctx = emptyQuadContext(store, light);
+  into.clear();
+  const ctx: QuadContext = { store, light, into };
   const [nx, ny, nz] = store.voxels;
   const scale = store.scale;
   const tiles = new Map<number, VoxelTileConfig>();
@@ -620,14 +654,7 @@ export const buildBlockMesh = (
     }
   }
 
-  return {
-    positions: ctx.positions,
-    normals: ctx.normals,
-    uvs: ctx.uvs,
-    tiles: ctx.tiles,
-    brightness: ctx.brightness,
-    indices: ctx.indices,
-  };
+  return into.finish();
 };
 
 /**
@@ -641,21 +668,16 @@ export const buildBlockMesh = (
 export const buildWaterMesh = (
   store: VoxelStore,
   light: LightStore | null = null,
+  into: MeshBuilder = new MeshBuilder(),
 ): MeshArrays => {
-  const ctx = emptyQuadContext(store, light);
+  into.clear();
+  const ctx: QuadContext = { store, light, into };
   const [nx, ny, nz] = store.voxels;
 
   // A store whose fill reported no water voxel cannot expose a water face, and
   // sweeping a full volume to prove it is the point of this flag.
   if (!store.hasWater) {
-    return {
-      positions: ctx.positions,
-      normals: ctx.normals,
-      uvs: ctx.uvs,
-      tiles: ctx.tiles,
-      brightness: ctx.brightness,
-      indices: ctx.indices,
-    };
+    return into.finish();
   }
 
   for (let z = 0; z < nz; ++z) {
@@ -668,14 +690,7 @@ export const buildWaterMesh = (
     }
   }
 
-  return {
-    positions: ctx.positions,
-    normals: ctx.normals,
-    uvs: ctx.uvs,
-    tiles: ctx.tiles,
-    brightness: ctx.brightness,
-    indices: ctx.indices,
-  };
+  return into.finish();
 };
 
 /**
@@ -687,16 +702,12 @@ export const buildWaterMesh = (
  * grew) uploads nothing extra.
  */
 const attrWithRange = (
-  array: number[] | Float32Array | Uint32Array,
+  array: Float32Array | Uint32Array,
   itemSize: number,
   committed: number,
 ): BufferAttribute => {
-  const arr =
-    array instanceof Float32Array || array instanceof Uint32Array
-      ? array
-      : new Float32Array(array);
-  const total = arr.length / itemSize;
-  const a = new BufferAttribute(arr, itemSize);
+  const total = array.length / itemSize;
+  const a = new BufferAttribute(array, itemSize);
   if (committed > 0 && total > committed) {
     a.updateRange = {
       offset: committed * itemSize,
@@ -731,11 +742,7 @@ export const setGeometryData = (
   committedVertices = 0,
   committedIndices = 0,
 ): void => {
-  const attr = (
-    name: string,
-    array: number[] | Float32Array,
-    itemSize: number,
-  ): void => {
+  const attr = (name: string, array: Float32Array, itemSize: number): void => {
     geometry.setAttribute(
       name,
       attrWithRange(array, itemSize, committedVertices),
