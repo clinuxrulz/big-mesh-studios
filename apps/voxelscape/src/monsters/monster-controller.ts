@@ -119,6 +119,14 @@ export class MonsterController {
   private readonly dead = new Set<string>();
   private lastBroadcastAt = 0;
 
+  /**
+   * Whether the spawn cells around the players are materialized at all. A
+   * world with this turned off grows no monsters of its own; it still adopts
+   * the ones a peer broadcasts or a record carries, because those belong to
+   * whoever is simulating them.
+   */
+  spawning = true;
+
   constructor(params: MonsterControllerParams) {
     this.seed = params.seed;
     this.heightAt = params.heightAt;
@@ -379,9 +387,21 @@ export class MonsterController {
     return window;
   }
 
+  /**
+   * Forgets every monster at once, emptying the world. Those whose spawn cells
+   * are still within a player's window come back on the next tick, unless
+   * spawning has been turned off.
+   */
+  forgetAll(): void {
+    this.monsters_.clear();
+    this.rngs.clear();
+    this.lastPersistAt.clear();
+    this.lastPersisted.clear();
+  }
+
   /** Creates a sleeping snapshot for every windowed cell that holds a monster and is not yet tracked. */
   private materialize(window: Set<string>): void {
-    if (this.monsters_.size >= MONSTER_CAP) {
+    if (!this.spawning || this.monsters_.size >= MONSTER_CAP) {
       return;
     }
     for (const key of window) {

@@ -531,6 +531,27 @@ export const createCommands = ({
       run: () =>
         `${monsters.describe()}\n${monsterSync.describe()}\n${monsterRender.describe()}`,
     },
+    "/monsters:spawning": {
+      description:
+        "let the world grow monsters of its own, or empty it and stop",
+      args: "[on|off]",
+      run: (rest) => {
+        const argument = rest[0];
+        if (argument === "off") {
+          monsters.spawning = false;
+          monsters.forgetAll();
+          return "monsters: spawning off, and the world emptied of them";
+        }
+        if (argument === "on") {
+          monsters.spawning = true;
+          return "monsters: spawning on";
+        }
+        if (argument !== undefined) {
+          return "usage: /monsters:spawning [on|off]";
+        }
+        return `monsters: spawning ${monsters.spawning ? "on" : "off"} — ${monsters.describe()}`;
+      },
+    },
     "/monsters:model": {
       description: "dress the monsters in a model an account published",
       args: "[handle] [name]",

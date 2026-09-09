@@ -659,3 +659,45 @@ describe("monster controller attacks", () => {
     expect(hits.length).toBeGreaterThan(0);
   });
 });
+
+describe("spawning", () => {
+  it("materializes monsters from the seed while it is on", () => {
+    const controller = makeController();
+    controller.tick(0.016);
+    expect(controller.monsters.size).toBeGreaterThan(0);
+  });
+
+  it("grows none of its own once it is turned off", () => {
+    const controller = makeController();
+    controller.spawning = false;
+    controller.tick(0.016);
+    expect(controller.monsters.size).toBe(0);
+  });
+
+  it("empties the world when told to forget them all", () => {
+    const controller = makeController();
+    controller.tick(0.016);
+    expect(controller.monsters.size).toBeGreaterThan(0);
+    controller.forgetAll();
+    expect(controller.monsters.size).toBe(0);
+  });
+
+  it("leaves the world empty across later ticks once both have happened", () => {
+    const controller = makeController();
+    controller.tick(0.016);
+    controller.spawning = false;
+    controller.forgetAll();
+    for (let tick = 0; tick < 10; tick++) {
+      controller.tick(0.016);
+    }
+    expect(controller.monsters.size).toBe(0);
+  });
+
+  it("still adopts a monster a peer is simulating", () => {
+    const controller = makeController();
+    controller.spawning = false;
+    controller.forgetAll();
+    controller.applyMonsterUpdates([update()]);
+    expect(controller.monsters.size).toBe(1);
+  });
+});
