@@ -44,9 +44,28 @@ import type { SubTexture } from "../renderers/atlas";
 import { cellsInSphere } from "../world/chunk-sphere";
 import { type Dim3 } from "../world/level-data";
 import { DEFAULT_TERRAIN, type TerrainConfig } from "../world/noise";
+import { Field, Phase, probe } from "../render/perf-probe";
 
 /** Sky blue, matching the material's default fog color so the horizon blends. */
 const SKY_BLUE = 0x87ceeb;
+
+/**
+ * A movement a benchmark drives the player along in place of the keyboard.
+ * The player is carried over the terrain rather than walked into it, so a
+ * route covers the ground it says it covers instead of stopping at the first
+ * hillside, and the distance it travels is decided by the frame's own `dt`
+ * rather than by how many frames a slow machine managed to draw.
+ */
+export interface BenchRoute {
+  /** The compass direction travelled, in radians, measured from due north. */
+  heading: number;
+  /** World units travelled a second along that heading. */
+  speed: number;
+  /** Radians a second the view turns by, positive to the left. */
+  turn: number;
+  /** How long the route runs, in seconds. */
+  seconds: number;
+}
 
 export interface VoxelscapeConfig {
   /** Radius of the block window in X and Z, in chunks. Also sets the fog and camera far distances. */
@@ -208,21 +227,6 @@ export const createVoxelscape = ({
     spawn,
     player,
   });
-
-  // Benchmarks drive the real world through a URL flag, the way `#perf` does:
-  // hand the moving body and the window's readiness queries to the page so a
-  // playwright script can watch the player's cell stream in (or fail to) as it
-  // walks.
-  if (window.location.hash.includes("bench")) {
-    (window as unknown as { __voxelscape?: object }).__voxelscape = {
-      player: avatar.player.position,
-      cellReady: (x: number, y: number, z: number) => world.cellReady(x, y, z),
-      blockCount: world.blocks.length,
-      cellsInSphere,
-      chunkRadius,
-      chunkRadiusY,
-    };
-  }
 
   /**
    * The player's hearts and the death sequence. When a zombie's swing empties
@@ -729,13 +733,110 @@ export const createVoxelscape = ({
   /** Seconds of contact damage each lava burn deals (about a quarter of a heart per burn). */
   const LAVA_BURN = 1;
 
+  // Benchmarks drive the real world through a URL flag, the way `#perf` does.
+  // The page is handed the moving body, what the window has streamed and
+  // drawn, the console the world already answers, the probe recording the
+  // frame, and the routes the player can be sent along.
+  if (window.location.hash.includes("bench")) {
+    (window as unknown as { __voxelscape?: object }).__voxelscape = {
+      player: avatar.player.position,
+      cellReady: (x: number, y: number, z: number) => world.cellReady(x, y, z),
+      loading: () => loading(),
+      blockCount: world.blocks.length,
+      cellsInSphere,
+      chunkRadius,
+      chunkRadiusY,
+      run: (line: string) => commands.run(line),
+      queues: () => ({
+        fillPending: world.fillPendingCount,
+        fillInFlight: world.fillInFlightCount,
+        meshPending: world.renderer.meshPendingCount,
+        meshInFlight: world.renderer.meshInFlightCount,
+        dirtySuperchunks: world.renderer.dirtySuperchunkCount,
+      }),
+      probe,
+      drive: (next: BenchRoute) => {
+        route = { ...next, remaining: next.seconds };
+      },
+      driving: () => route !== undefined,
+    };
+  }
+
   /** Advances everything by `dt` seconds, leaving the scene ready to draw. */
+  /** The benchmark route being driven, and how much of its time is left. */
+  let route: (BenchRoute & { remaining: number }) | undefined;
+
+  /**
+   * Carries the player one frame along the route: forward over the terrain
+   * surface, turning the view, and asking the world to scroll to where they
+   * now stand. The scroll is asked for here because the frame's own scroll
+   * sits behind the gate that holds physics while the player's cell streams
+   * in, and a route that outruns the streaming would otherwise never ask for
+   * the cell it is standing in.
+   */
+  const driveRoute = (dt: number): void => {
+    if (route === undefined) {
+      return;
+    }
+    route.remaining -= dt;
+    if (route.remaining <= 0) {
+      route = undefined;
+      return;
+    }
+    const position = avatar.player.position;
+    if (route.speed !== 0) {
+      position.x += Math.sin(route.heading) * route.speed * dt;
+      position.z += Math.cos(route.heading) * route.speed * dt;
+      position.y =
+        world.heightAt(position.x, position.z) +
+        avatar.player.config.halfSize +
+        0.1;
+      avatar.player.vx = 0;
+      avatar.player.vy = 0;
+      avatar.player.vz = 0;
+      avatar.player.onGround = true;
+    }
+    if (route.turn !== 0) {
+      avatar.player.yaw += route.turn * dt;
+    }
+    avatar.place();
+    world.scrollTo(position.x, position.y, position.z);
+  };
+
+  /** Hands the probe this frame's queue depths, counters and player position. */
+  const reportGauges = (): void => {
+    if (!probe.armed) {
+      return;
+    }
+    const renderer = world.renderer;
+    probe.gauge(Field.uploadBytes, renderer.lastTickUploadBytes);
+    probe.gauge(Field.triangles, renderer.triangleCount);
+    probe.gauge(Field.occluded, renderer.occlusions);
+    probe.gauge(Field.visible, renderer.lastVisibleCount);
+    probe.gauge(Field.meshPending, renderer.meshPendingCount);
+    probe.gauge(Field.meshInFlight, renderer.meshInFlightCount);
+    probe.gauge(Field.dirtySuperchunks, renderer.dirtySuperchunkCount);
+    probe.gauge(Field.fillPending, world.fillPendingCount);
+    probe.gauge(Field.fillInFlight, world.fillInFlightCount);
+    const position = avatar.player.position;
+    probe.gauge(
+      Field.cellReady,
+      world.cellReady(position.x, position.y, position.z) ? 1 : 0,
+    );
+    probe.gauge(Field.playerX, position.x);
+    probe.gauge(Field.playerY, position.y);
+    probe.gauge(Field.playerZ, position.z);
+  };
+
   const advance = (dt: number): void => {
     const progress = loading();
     if (progress.drawn < progress.total) {
       // These frames cost what generating terrain costs, not what drawing it
       // does, and the resolution would drop to fit a load that is about to end.
       resolution.hold();
+    }
+    if (progress.spawnDrawn) {
+      driveRoute(dt);
     }
     // Only the player waits. Moving the renderers' tick in here deadlocks:
     // it is what builds the geometry this is waiting for. The world-ready
@@ -761,8 +862,10 @@ export const createVoxelscape = ({
         setTarget(null);
         hand.show(null, null);
       } else {
+        probe.begin(Phase.player);
         const snapshot = input.consume();
         avatar.move(dt, snapshot);
+        probe.end(Phase.player);
         // Selecting first, so the rest of the frame — the pick, both buttons,
         // and what the hand draws — all belong to the same tool.
         if (snapshot.select !== null) {
@@ -835,11 +938,13 @@ export const createVoxelscape = ({
             setEditStatus(result);
           }
         }
+        probe.begin(Phase.scroll);
         world.scrollTo(
           avatar.player.position.x,
           avatar.player.position.y,
           avatar.player.position.z,
         );
+        probe.end(Phase.scroll);
         avatar.place();
         tool.update(dt, snapshot);
         hand.show(
@@ -858,12 +963,19 @@ export const createVoxelscape = ({
           lavaBurnCooldown = 0.5;
         }
       }
+      probe.begin(Phase.flow);
       flow.tick(dt);
+      probe.end(Phase.flow);
+      probe.begin(Phase.multiplayer);
       multiplayer.tick(dt);
+      probe.end(Phase.multiplayer);
+      probe.begin(Phase.monsters);
       monsters.tick(dt);
       monsterRender.tick(dt);
       npcFigures.tick(dt);
+      probe.end(Phase.monsters);
     }
+    probe.begin(Phase.environment);
     const lighting = environment.tick(dt, camera);
     skyColor.set(
       lighting.skyColor[0],
@@ -876,7 +988,11 @@ export const createVoxelscape = ({
     monsterRender.applyLighting(lighting);
     npcFigures.applyLighting(lighting);
     hand.applyLighting(lighting);
+    probe.end(Phase.environment);
+    probe.begin(Phase.rendererTick);
     world.renderer.tick(dt, camera);
+    probe.end(Phase.rendererTick);
+    reportGauges();
   };
 
   const mount = (canvas: HTMLCanvasElement): (() => void) => {

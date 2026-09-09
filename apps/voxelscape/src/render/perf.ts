@@ -25,6 +25,8 @@ export class GpuTimer {
   private queries: WebGLQuery[];
   private frame: number = 0;
   ms: number = 0;
+  /** Whether any query has come back yet, so a card that never answers is not read as instant. */
+  answered: boolean = false;
 
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl;
@@ -55,6 +57,7 @@ export class GpuTimer {
       if (this.gl.getQueryParameter(q, this.ext.QUERY_RESULT_AVAILABLE)) {
         const nanos = this.gl.getQueryParameter(q, this.ext.QUERY_RESULT);
         this.ms = Number(nanos) / 1e6;
+        this.answered = true;
       }
     }
     this.frame++;

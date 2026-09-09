@@ -13,6 +13,7 @@ import type { VoxelTileConfig } from "../renderers/atlas";
 import type { TerrainConfig } from "./noise";
 import { fillStore, type BorderSizes, type FillStoreFn } from "./voxel-store";
 import { WorldWorkerPool } from "./worker-pool";
+import { Counter, probe } from "../render/perf-probe";
 
 export interface FillClientParams {
   terrain: TerrainConfig;
@@ -106,7 +107,7 @@ export class FillClient {
   /** The point the nearest-first sort measures distance from, the latest request's. */
   private pendingFocus: Dim3 = [0, 0, 0];
   /** How many fill jobs each worker is owed for the batch it is running. */
-  private readonly inFlightCount = new Map<Worker, number>();
+  private readonly workerLoad = new Map<Worker, number>();
   /** Slots with an outstanding worker fill request (for error recovery). */
   private readonly fillInflight = new Set<number>();
   private readonly blocks: WorldBlock[];
@@ -203,6 +204,7 @@ export class FillClient {
         continue;
       }
       this.fillInflight.delete(i);
+      probe.count(Counter.fillsLanded);
       applyLevelData(this.blocks[i], {
         storeData: msg.storeData[j],
         mightHaveVoxels: msg.mightHaveVoxels[j],
@@ -240,6 +242,7 @@ export class FillClient {
       return;
     }
     this.fillInflight.delete(i);
+    probe.count(Counter.fillsLanded);
     // The meshes were textured against the tile list the request carried. If
     // the atlas moved on while this job was in the worker (it first loads a
     // fraction of a second after the spawn fill is sent, and can reload), the
@@ -264,6 +267,7 @@ export class FillClient {
       this.onBlockChanged(i);
       return;
     }
+    probe.count(Counter.meshesFromFill);
     this.onBlockChanged(i, { terrain: msg.terrain, water: msg.water });
   }
 
@@ -278,11 +282,11 @@ export class FillClient {
     if (data?.type !== "fill" && data?.type !== "fillMesh") {
       return;
     }
-    const owed = (this.inFlightCount.get(worker) ?? 0) - 1;
+    const owed = (this.workerLoad.get(worker) ?? 0) - 1;
     if (owed <= 0) {
-      this.inFlightCount.delete(worker);
+      this.workerLoad.delete(worker);
     } else {
-      this.inFlightCount.set(worker, owed);
+      this.workerLoad.set(worker, owed);
     }
     this.drainWorkerFills();
   }
@@ -298,8 +302,18 @@ export class FillClient {
       this.syncFillBlock(i, this.fillLod[i], this.fillBorder[i]);
     }
     this.fillInflight.clear();
-    this.inFlightCount.clear();
+    this.workerLoad.clear();
     this.drainWorkerFills();
+  }
+
+  /** Slots waiting for terrain data, on a worker batch or on the main thread. */
+  get pendingCount(): number {
+    return this.pendingFills.size + this.pendingSyncFills.size;
+  }
+
+  /** Slots a worker is generating terrain data for right now. */
+  get inFlightCount(): number {
+    return this.fillInflight.size;
   }
 
   /**
@@ -337,6 +351,7 @@ export class FillClient {
     borderSizes?: BorderSizes[],
     focus?: Dim3,
   ): void {
+    probe.count(Counter.fillsRequested, indices.length);
     if (this.pool.workers.length === 0) {
       // One block per task rather than one loop over all of them: generating a
       // block takes long enough that a whole window's worth in a single task
@@ -389,7 +404,7 @@ export class FillClient {
     const combined = this.tileRects !== undefined;
     let offset = 0;
     for (const worker of workers) {
-      if ((this.inFlightCount.get(worker) ?? 0) > 0) {
+      if ((this.workerLoad.get(worker) ?? 0) > 0) {
         continue;
       }
       const indices = sorted.slice(offset, offset + MAX_FILLS_PER_WORKER);
@@ -484,9 +499,9 @@ export class FillClient {
     for (const i of indices) {
       this.fillInflight.add(i);
     }
-    this.inFlightCount.set(
+    this.workerLoad.set(
       worker,
-      (this.inFlightCount.get(worker) ?? 0) + indices.length,
+      (this.workerLoad.get(worker) ?? 0) + indices.length,
     );
   }
 

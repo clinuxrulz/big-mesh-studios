@@ -6,6 +6,7 @@ import {
 } from "@random-mesh/rmsl/scene";
 import { AdaptiveResolution } from "./adaptive";
 import { GpuTimer } from "./perf";
+import { Phase, probe } from "./perf-probe";
 
 /** How many frames between each debug-perf GPU readback, which stalls the pipeline. */
 const SAMPLE_EVERY = 24;
@@ -97,19 +98,27 @@ export const createRenderLoop = ({
    * the resolution.
    */
   const render = (): boolean => {
-    if (!debugPerf()) {
+    const showStats = debugPerf();
+    if (!showStats && !probe.armed) {
       beforeRender?.(renderer, camera);
       renderer.render(scene, camera);
       return false;
     }
     timer ??= new GpuTimer(renderer.gl);
     timer.begin();
+    probe.begin(Phase.occlusion);
     beforeRender?.(renderer, camera);
+    probe.end(Phase.occlusion);
+    probe.begin(Phase.draw);
     renderer.render(scene, camera);
+    probe.end(Phase.draw);
     timer.end();
     timer.poll();
     frameCounter++;
     const sample = frameCounter % SAMPLE_EVERY === 0;
+    if (!showStats) {
+      return sample;
+    }
     const stats = describeStats?.(
       renderer.gl,
       renderer.canvas.width,
@@ -139,14 +148,22 @@ export const createRenderLoop = ({
   };
 
   const animate = (time: number): void => {
+    const gapMs = lastFrameTime > 0 ? time - lastFrameTime : 0;
     const dt =
       lastFrameTime > 0
         ? Math.min(0.05, (time - lastFrameTime) / 1000)
         : 1 / 60;
     lastFrameTime = time;
+    probe.begin(Phase.advance);
     onFrame(dt);
+    probe.end(Phase.advance);
     renderer.setClearColor(clearColor(), 1);
     const sampled = render();
+    probe.frame(
+      gapMs,
+      timer !== undefined && timer.answered ? timer.ms : -1,
+      adaptive.scale,
+    );
     // A hidden page still gets frames, roughly one a second rather than sixty,
     // and every one of them misses its deadline by any measure taken here. The
     // resolution would walk itself down for as long as the player was in

@@ -30,6 +30,8 @@
     "build-lib": "vite build --config vite.config.lib.ts && tsc -p tsconfig.lib.json",
     "serve": "vite preview",
     "test": "vitest run",
+    "bench": "node --experimental-transform-types e2e/bench/run.ts",
+    "bench:compare": "node --experimental-transform-types e2e/bench/compare.ts",
     "check-types": "tsc --noEmit"
   },
   "keywords": [],

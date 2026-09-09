@@ -143,6 +143,10 @@ export interface VoxelWorld {
   blockIndexAtVoxel(w: WorldVoxel): number | undefined;
   /** Writes the edit overlay to IndexedDB, batched. */
   scheduleSave(): void;
+  /** Slots waiting for terrain data, on a worker batch or on the main thread. */
+  readonly fillPendingCount: number;
+  /** Slots a worker is generating terrain data for right now. */
+  readonly fillInFlightCount: number;
   dispose(): void;
 }
 
@@ -393,6 +397,12 @@ export const createVoxelWorld = ({
   return {
     blocks: blockGrid.blocks,
     renderer,
+    get fillPendingCount() {
+      return sphere.fillPendingCount;
+    },
+    get fillInFlightCount() {
+      return sphere.fillInFlightCount;
+    },
     terrain: renderer.terrain,
     water: renderer.water,
     underwaterTint: renderer.underwaterTint,

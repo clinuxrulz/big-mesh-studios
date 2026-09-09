@@ -45,6 +45,7 @@ import {
   type MeshArrays,
 } from "./mesh";
 import { MeshClient } from "./mesh-client";
+import { Counter, Phase, probe } from "../render/perf-probe";
 import type { WorldWorkerPool } from "../world/worker-pool";
 import { OcclusionDebugMaterial } from "./occlusion-debug-material";
 import { OcclusionProbeMaterial } from "./occlusion-probe-material";
@@ -1061,6 +1062,7 @@ export class TriangleRenderer {
       committed.waterVerts,
     );
     this.scLastUpload.set(key, this.frame);
+    probe.count(Counter.uploads);
     // Count what this upload marked before the committed counters catch up, so
     // the frame's debug figure reflects the merged bytes actually reaching the
     // GPU rather than the pre-merge estimate the pacing spent against.
@@ -1463,6 +1465,21 @@ export class TriangleRenderer {
     return this.uploadBytesThisFrame;
   }
 
+  /** Superchunks holding block geometry that has not been merged and uploaded yet. */
+  get dirtySuperchunkCount(): number {
+    return this.dirty.size;
+  }
+
+  /** Blocks queued for a geometry rebuild that no worker has started yet. */
+  get meshPendingCount(): number {
+    return this.meshes.pendingCount;
+  }
+
+  /** Blocks a worker is building geometry for right now. */
+  get meshInFlightCount(): number {
+    return this.meshes.inFlightCount;
+  }
+
   repositionBlock(index: number, center: Dim3): void {
     const newKey = scKey(superchunkCellOf(center));
     const oldKey = this.blockSc.get(index);
@@ -1587,7 +1604,9 @@ export class TriangleRenderer {
   tick(_dt: number, camera: PerspectiveCamera): void {
     // keep draining the mesh-build queue a few blocks per frame (the worker
     // does the heavy lifting off the main thread)
+    probe.begin(Phase.meshDrain);
     this.meshes.drain();
+    probe.end(Phase.meshDrain);
     // Merging landed block results into superchunk geometry keeps a burst of
     // builds reading as a few draw calls rather than a few thousand, and the
     // tick below spends a byte budget on those merges each frame so no single
@@ -1666,6 +1685,7 @@ export class TriangleRenderer {
     }
     due.sort((a, b) => a.d2 - b.d2);
     let spent = 0;
+    probe.begin(Phase.merge);
     for (const candidate of due) {
       if (spent > 0 && spent + candidate.bytes > this.uploadBudgetBytes) {
         this.dirty.add(candidate.key);
@@ -1673,8 +1693,10 @@ export class TriangleRenderer {
       }
       if (this.rebuildSuperchunk(candidate.key)) {
         spent += candidate.bytes;
+        probe.count(Counter.merges);
       }
     }
+    probe.end(Phase.merge);
     // Hide what the camera is not looking at, now that this frame's rebuilds
     // have decided which superchunks have geometry.
     this.applyVisibility(planes, playerKey);

@@ -21,6 +21,7 @@ import type { BorderSizes, FillStoreFn } from "./voxel-store";
 import type { VoxelTileConfig } from "../renderers/atlas";
 import type { BlockMeshes } from "../renderers/mesh";
 import type { WorldWorkerPool } from "./worker-pool";
+import { Counter, probe } from "../render/perf-probe";
 
 export interface CellCoord {
   x: number;
@@ -244,6 +245,16 @@ export class ChunkSphere {
     return this.cellIndex.get(cellKey({ x: cx, y: cy, z: cz }));
   }
 
+  /** Slots waiting for terrain data, on a worker batch or on the main thread. */
+  get fillPendingCount(): number {
+    return this.fillClient.pendingCount;
+  }
+
+  /** Slots a worker is generating terrain data for right now. */
+  get fillInFlightCount(): number {
+    return this.fillClient.inFlightCount;
+  }
+
   /**
    * Requests terrain for every cell of the window, nearest (`x`, `y`, `z`)
    * first, so the ball fills outward from under the player's feet. Results
@@ -387,6 +398,8 @@ export class ChunkSphere {
     this.centerCell = { x: cx, y: cy, z: cz };
 
     const toFill = [...entering, ...refill];
+    probe.count(Counter.scrolls);
+    probe.count(Counter.blocksStreamed, toFill.length);
     if (toFill.length === 0) {
       return;
     }

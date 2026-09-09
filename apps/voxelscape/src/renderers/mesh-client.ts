@@ -1,6 +1,7 @@
 import type { VoxelTileConfig } from "./atlas";
 import type { WorldBlock } from "../world/level-data";
 import { WorldWorkerPool } from "../world/worker-pool";
+import { Counter, probe } from "../render/perf-probe";
 import {
   buildBlockMesh,
   buildWaterMesh,
@@ -149,6 +150,7 @@ export class MeshClient {
       this.releaseBuffer(msg.blockLight);
       return;
     }
+    probe.count(Counter.meshesLanded);
     this.onMeshBuilt(msg.id, msg.terrain, msg.water);
     this.releaseBuffer(msg.data);
     this.releaseBuffer(msg.skyLight);
@@ -270,8 +272,20 @@ export class MeshClient {
     return this.rects;
   }
 
+  /** Blocks queued for a geometry rebuild that no worker has started yet. */
+  get pendingCount(): number {
+    return this.pending.size;
+  }
+
+  /** Blocks a worker is building geometry for right now. */
+  get inFlightCount(): number {
+    return this.inFlight.size;
+  }
+
   private buildOnThisThread(indices: number[]): void {
     const tiles = [...this.tilesById.values()];
+    probe.count(Counter.meshesRequested, indices.length);
+    probe.count(Counter.meshesLanded, indices.length);
     for (const index of indices) {
       if (!this.hasSurfaceData(index)) {
         this.onMeshBuilt(index, EMPTY_MESH, EMPTY_MESH);
@@ -304,6 +318,7 @@ export class MeshClient {
   private send(index: number): void {
     this.generation[index]++;
     this.inFlight.set(index, this.generation[index]);
+    probe.count(Counter.meshesRequested);
     const store = this.blocks[index].store;
     const light = this.blocks[index].light;
     const data = this.acquireBuffer(store.data.byteLength);

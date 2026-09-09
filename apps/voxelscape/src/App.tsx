@@ -52,6 +52,7 @@ const World: Component<{ launch: LaunchConfig }> = (props) => {
   const voxelscape = createVoxelscape({
     terrain: props.launch.terrain,
     spawn: props.launch.spawn,
+    chunkRadius: radiusInUrl(),
     onDebugStats: (line) => {
       if (hud !== undefined) {
         hud.textContent = line;
@@ -127,6 +128,22 @@ const Joining: Component<{ line: string }> = (props) => (
 /** The place the address bar names, or null when it names none. */
 const placeInUrl = (): string | null =>
   new URLSearchParams(window.location.search).get("place");
+
+/**
+ * The chunk window's horizontal radius the address bar asks for, or undefined
+ * when it asks for none. A benchmark run trades window size for how long the
+ * first fill takes, so it names the radius it wants to measure at.
+ */
+const radiusInUrl = (): number | undefined => {
+  const asked = new URLSearchParams(window.location.search).get("radius");
+  if (asked === null) {
+    return undefined;
+  }
+  const radius = Number(asked);
+  return Number.isInteger(radius) && radius >= 1 && radius <= 8
+    ? radius
+    : undefined;
+};
 
 const App: Component<{}> = () => {
   const [launch, setLaunch] = createSignal<LaunchConfig | null>(null);
