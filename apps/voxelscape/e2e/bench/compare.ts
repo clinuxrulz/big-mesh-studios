@@ -8,9 +8,9 @@
 // Nothing here passes or fails. Two runs on the same machine, a few minutes
 // apart, differ by a few percent on every number; what is worth reading is a
 // change large enough to stand out from the spread the repeats show.
-import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { outDir } from "../out-dir.ts";
+import { reportsByAge } from "./html.ts";
 import { representative } from "./report.ts";
 import type { BenchReport, ScenarioReport } from "./report.ts";
 import type { RunSummary } from "./summarize.ts";
@@ -18,22 +18,15 @@ import type { RunSummary } from "./summarize.ts";
 /** The change worth drawing the eye to, as a share of the earlier value. */
 const NOTABLE = 0.1;
 
-/** The two most recent reports in the output directory, oldest first. */
+/** The two most recent reports in the output directory, older one first. */
 const twoMostRecent = (): [string, string] => {
-  const directory = outDir();
-  // The names carry the millisecond they were written at, so they sort by age.
-  const reports = readdirSync(directory)
-    .filter((name) => name.startsWith("bench-") && name.endsWith(".json"))
-    .sort();
+  const reports = reportsByAge();
   if (reports.length < 2) {
     throw new Error(
-      `need two reports to compare and found ${reports.length} in ${directory}`,
+      `need two reports to compare and found ${reports.length} in ${outDir()}`,
     );
   }
-  return [
-    join(directory, reports[reports.length - 2]),
-    join(directory, reports[reports.length - 1]),
-  ];
+  return [reports[reports.length - 2], reports[reports.length - 1]];
 };
 
 const read = (path: string): BenchReport =>

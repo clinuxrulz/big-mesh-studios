@@ -34,6 +34,18 @@ export interface RunContext {
   pacing: "paced" | "unlocked";
 }
 
+/**
+ * Every frame of one run, as the probe recorded it: the flat rows and the
+ * names of the columns they are laid out in. Kept so a chart can be drawn from
+ * the frames themselves rather than from the summary above them.
+ */
+export interface RunSamples {
+  rows: number[];
+  rowStride: number;
+  fieldNames: string[];
+  phaseNames: string[];
+}
+
 /** One scenario's measurements, one entry per repeat. */
 export interface ScenarioReport {
   name: string;
@@ -41,6 +53,8 @@ export interface ScenarioReport {
   /** World units the route should have covered, for checking that it did. */
   expectedUnits: number;
   repeats: RunSummary[];
+  /** The frames of the repeat the scenario reports as its result. */
+  samples?: RunSamples;
 }
 
 /** A whole run: the conditions it was measured under, and every scenario in it. */
@@ -54,11 +68,21 @@ const micro = (value: number): string => `${value.toFixed(2)}ms`;
 const megabytes = (bytes: number): string =>
   `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 
-/** The repeat a scenario reports as its result: the one with the middle 95th-percentile gap. */
-export const representative = (repeats: RunSummary[]): RunSummary => {
-  const ordered = [...repeats].sort((a, b) => a.gap.p95 - b.gap.p95);
-  return ordered[Math.floor(ordered.length / 2)];
+/**
+ * Which repeat a scenario reports as its result: the one with the middle
+ * 95th-percentile gap, so a run is described by neither its luckiest pass nor
+ * its unluckiest.
+ */
+export const representativeIndex = (repeats: RunSummary[]): number => {
+  const ordered = repeats
+    .map((repeat, at) => ({ at, tail: repeat.gap.p95 }))
+    .sort((a, b) => a.tail - b.tail);
+  return ordered[Math.floor(ordered.length / 2)].at;
 };
+
+/** The repeat a scenario reports as its result. */
+export const representative = (repeats: RunSummary[]): RunSummary =>
+  repeats[representativeIndex(repeats)];
 
 /**
  * The phases worth printing, costliest first, as a mean and the worst single

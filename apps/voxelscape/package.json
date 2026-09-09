@@ -32,6 +32,7 @@
     "test": "vitest run",
     "bench": "node --experimental-transform-types e2e/bench/run.ts",
     "bench:compare": "node --experimental-transform-types e2e/bench/compare.ts",
+    "bench:html": "node --experimental-transform-types e2e/bench/html.ts",
     "check-types": "tsc --noEmit"
   },
   "keywords": [],

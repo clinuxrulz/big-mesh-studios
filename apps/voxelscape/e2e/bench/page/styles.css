@@ -1,0 +1,350 @@
+/*
+ * The report's own colours. The six series slots are the validated categorical
+ * order; three of the light steps sit below the contrast a small mark needs, so
+ * every chart carries a legend and the figures behind it are written out in the
+ * table under each scenario.
+ */
+.viz-root {
+  color-scheme: light;
+  --surface-1: #fcfcfb;
+  --surface-2: #f2f1ee;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #78766f;
+  --hairline: #e0dfda;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --warning: #fab219;
+  --critical: #d03b3b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz-root {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --surface-2: #242422;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8f8e85;
+    --hairline: #383835;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+  }
+}
+
+:root[data-theme="dark"] .viz-root {
+  color-scheme: dark;
+  --surface-1: #1a1a19;
+  --surface-2: #242422;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #8f8e85;
+  --hairline: #383835;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+}
+
+body {
+  margin: 0;
+  background: var(--surface-1, #fcfcfb);
+  font:
+    14px/1.5 ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+}
+
+.viz-root {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 6rem;
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+h2 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+h3 {
+  margin: 0 0 1rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+h4 {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.lede {
+  margin: 0.125rem 0 0;
+  color: var(--text-secondary);
+}
+
+.meta {
+  margin: 0.125rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+header {
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.scenario,
+.trace {
+  padding: 2rem 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 1px;
+  margin: 1.25rem 0 0;
+  background: var(--hairline);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.tile {
+  padding: 0.75rem 0.875rem;
+  background: var(--surface-1);
+}
+
+.tile dt {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  text-transform: lowercase;
+}
+
+.tile dd {
+  margin: 0.125rem 0 0;
+  font-size: 1.375rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.tile small {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+/* A tile turns only when its own number has crossed something. */
+.tile[data-tone="warning"] dd {
+  color: var(--warning);
+}
+
+.tile[data-tone="critical"] dd {
+  color: var(--critical);
+}
+
+.chart {
+  margin: 1.75rem 0 0;
+}
+
+.chart figcaption p {
+  margin: 0.125rem 0 0;
+  max-width: 62ch;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
+.chart svg {
+  display: block;
+  width: 100%;
+  height: 180px;
+  margin-top: 0.5rem;
+  overflow: visible;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0.625rem 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
+.legend li {
+  display: flex;
+  gap: 0.375rem;
+  align-items: center;
+}
+
+.swatch {
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 2px;
+}
+
+.swatch[data-slot="1"],
+.band[data-slot="1"],
+.bar[data-slot="1"] {
+  fill: var(--series-1);
+  background: var(--series-1);
+}
+.swatch[data-slot="2"],
+.band[data-slot="2"] {
+  fill: var(--series-2);
+  background: var(--series-2);
+}
+.swatch[data-slot="3"],
+.band[data-slot="3"] {
+  fill: var(--series-3);
+  background: var(--series-3);
+}
+.swatch[data-slot="4"],
+.band[data-slot="4"] {
+  fill: var(--series-4);
+  background: var(--series-4);
+}
+.swatch[data-slot="5"],
+.band[data-slot="5"] {
+  fill: var(--series-5);
+  background: var(--series-5);
+}
+.swatch[data-slot="6"],
+.band[data-slot="6"] {
+  fill: var(--series-6);
+  background: var(--series-6);
+}
+
+.line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.line[data-slot="1"] {
+  stroke: var(--series-1);
+}
+.line[data-slot="2"] {
+  stroke: var(--series-2);
+}
+.line[data-slot="3"] {
+  stroke: var(--series-3);
+}
+.line[data-slot="4"] {
+  stroke: var(--series-4);
+}
+.line[data-slot="5"] {
+  stroke: var(--series-5);
+}
+.line[data-slot="6"] {
+  stroke: var(--series-6);
+}
+
+/* A hairline of the surface between stacked bands, so their edges read apart. */
+.band {
+  stroke: var(--surface-1);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.bar {
+  stroke: none;
+}
+
+.grid,
+.axis {
+  stroke: var(--hairline);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.rule {
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  stroke-dasharray: none;
+  opacity: 0.7;
+  vector-effect: non-scaling-stroke;
+}
+
+.tick,
+.ruleLabel {
+  fill: var(--text-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tick {
+  text-anchor: end;
+}
+
+.ruleLabel {
+  text-anchor: end;
+}
+
+.numbers {
+  width: 100%;
+  margin-top: 1.5rem;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.numbers caption {
+  padding-bottom: 0.5rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-align: left;
+}
+
+.numbers th,
+.numbers td {
+  padding: 0.375rem 0.5rem 0.375rem 0;
+  border-bottom: 1px solid var(--hairline);
+  text-align: left;
+  vertical-align: top;
+}
+
+.numbers th {
+  width: 16rem;
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.numbers td {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.traceGrid {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.empty {
+  color: var(--text-muted);
+}

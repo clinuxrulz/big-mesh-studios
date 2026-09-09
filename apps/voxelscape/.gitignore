@@ -30,6 +30,8 @@ gitignore
 e2e/profiles/
 e2e/run/
 e2e/shot-*.png
+# The report page compiled for the server, rebuilt whenever its sources change
+e2e/bench/page/.ssr/
 
 # Worktrees
 .worktrees

@@ -27,7 +27,7 @@ import type { Scenario } from "./scenarios.ts";
 import { profileNamed } from "./profiles.ts";
 import type { MachineProfile } from "./profiles.ts";
 import { summarize } from "./summarize.ts";
-import { formatReport } from "./report.ts";
+import { formatReport, representativeIndex } from "./report.ts";
 import type { BenchReport, ScenarioReport } from "./report.ts";
 import type { PerfDrain } from "../../src/render/perf-probe.ts";
 import {
@@ -38,6 +38,7 @@ import {
   summarizeTrace,
 } from "./trace.ts";
 import type { TraceSummary } from "./trace.ts";
+import { writeHtmlReport } from "./html.ts";
 
 /** The application directory, whatever directory the script was started from. */
 const APP_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -421,6 +422,7 @@ const main = async (): Promise<void> => {
     const traces: TraceSummary[] = [];
     for (const scenario of options.scenarios) {
       const repeats = [];
+      const drains: PerfDrain[] = [];
       for (let repeat = 0; repeat < options.repeat; repeat++) {
         process.stdout.write(
           `measuring ${scenario.name} (${repeat + 1}/${options.repeat})…\n`,
@@ -436,15 +438,23 @@ const main = async (): Promise<void> => {
             : undefined;
         const measured = await measure(page, scenario, tracing);
         repeats.push(summarize(measured.drain));
+        drains.push(measured.drain);
         if (measured.trace !== undefined) {
           traces.push(measured.trace);
         }
       }
+      const reported = drains[representativeIndex(repeats)];
       scenarios.push({
         name: scenario.name,
         description: scenario.description,
         expectedUnits: routeDistance(scenario.route),
         repeats,
+        samples: {
+          rows: reported.rows,
+          rowStride: reported.rowStride,
+          fieldNames: reported.fieldNames,
+          phaseNames: reported.phaseNames,
+        },
       });
     }
 
@@ -470,9 +480,16 @@ const main = async (): Promise<void> => {
 
     const file = outPath(`bench-${report.context.commit}-${Date.now()}.json`);
     writeFileSync(file, JSON.stringify(report, null, 2));
+    const drawn = await writeHtmlReport(
+      report,
+      traces,
+      file.replace(/\.json$/, ".html"),
+    );
     const traceLines =
       traces.length === 0 ? "" : `\n\n${traces.map(formatTrace).join("\n\n")}`;
-    console.log(`\n${formatReport(report)}${traceLines}\n\nwritten to ${file}`);
+    console.log(
+      `\n${formatReport(report)}${traceLines}\n\nwritten to ${file}\ndrawn in ${drawn}`,
+    );
   } finally {
     await browser?.close();
     stopServer();
