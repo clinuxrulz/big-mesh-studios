@@ -5,12 +5,16 @@
 //   pnpm bench:compare
 //   pnpm bench:compare e2e/.out/bench-abc1234-…json e2e/.out/bench-def5678-…json
 //
-// Nothing here passes or fails. Two runs on the same machine, a few minutes
-// apart, differ by a few percent on every number; what is worth reading is a
-// change large enough to stand out from the spread the repeats show.
+// Nothing here passes or fails, and each side is shown through one
+// representative repeat of the run. Two runs on the same machine, a few
+// minutes apart, differ by a few percent on every number, and one repeat
+// cannot say whether a difference is larger than that; `pnpm bench:ab` keeps
+// every repeat and answers that question directly.
 import { readFileSync } from "node:fs";
 import { outDir } from "../out-dir.ts";
 import { reportsByAge } from "./html.ts";
+import { METRICS, show } from "./metrics.ts";
+import type { Metric } from "./metrics.ts";
 import { representative } from "./report.ts";
 import type { BenchReport, ScenarioReport } from "./report.ts";
 import type { RunSummary } from "./summarize.ts";
@@ -31,48 +35,6 @@ const twoMostRecent = (): [string, string] => {
 
 const read = (path: string): BenchReport =>
   JSON.parse(readFileSync(path, "utf8")) as BenchReport;
-
-/** One metric read out of a run, by the name it is printed under. */
-interface Metric {
-  name: string;
-  of: (run: RunSummary) => number;
-  /** How to write the value; also decides whether a rise is worth remarking on. */
-  unit: "ms" | "count" | "bytes";
-}
-
-const METRICS: Metric[] = [
-  { name: "gap p50", of: (run) => run.gap.median, unit: "ms" },
-  { name: "gap p95", of: (run) => run.gap.p95, unit: "ms" },
-  { name: "gap p99", of: (run) => run.gap.p99, unit: "ms" },
-  { name: "worst frame", of: (run) => run.gap.max, unit: "ms" },
-  { name: "dropped frames", of: (run) => run.drops.count, unit: "count" },
-  { name: "render scale", of: (run) => run.scale.median, unit: "count" },
-  { name: "triangles", of: (run) => run.triangles.median, unit: "count" },
-  {
-    name: "fills landed",
-    of: (run) => run.counters.fillsLanded,
-    unit: "count",
-  },
-  { name: "merges", of: (run) => run.counters.merges, unit: "count" },
-  { name: "uploaded", of: (run) => run.upload.totalBytes, unit: "bytes" },
-  {
-    name: "biggest upload",
-    of: (run) => run.upload.maxFrameBytes,
-    unit: "bytes",
-  },
-  { name: "peak heap", of: (run) => run.heap.maxBytes, unit: "bytes" },
-  { name: "outrun frames", of: (run) => run.outrun.frames, unit: "count" },
-];
-
-const show = (value: number, unit: Metric["unit"]): string => {
-  if (unit === "ms") {
-    return `${value.toFixed(2)}ms`;
-  }
-  if (unit === "bytes") {
-    return `${(value / (1024 * 1024)).toFixed(1)}MB`;
-  }
-  return value >= 100 ? value.toFixed(0) : value.toFixed(2);
-};
 
 /** One metric's line: both values, and the change between them. */
 const line = (
