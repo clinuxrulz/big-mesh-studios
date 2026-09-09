@@ -77,6 +77,7 @@
 /* The frame the preview stands at, typed into the bar the motion is played from. */
 .frame {
   width: var(--size);
+  height: var(--size);
   padding-inline: var(--margin);
   border: 0;
   background: transparent;
