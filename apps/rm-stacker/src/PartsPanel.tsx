@@ -3,6 +3,7 @@
 // outline, and the arrows at it. What it is drawn inside — the panel it opens
 // in — is the caller's to say.
 import { Vector3D } from "@big-mesh-studios/maths";
+import type { Part } from "@big-mesh-studios/stacker/renderer";
 import { createPopover } from "@big-mesh-studios/utils/create-popover";
 import { For, Show, useContext } from "solid-js";
 import { widgetAxes, type WidgetAxis } from "./arm-widget";
@@ -77,8 +78,7 @@ export function PartsPanel() {
     doCommand(Command.scalePart(part.name, scale), true, "Scale Part");
   }
 
-  function askForName() {
-    const part = selectedPart();
+  function askForName(part: Part) {
     const typed = window.prompt("What should this part be called?", part.name);
 
     if (typed !== null) {
@@ -118,20 +118,20 @@ export function PartsPanel() {
                     <IconButton
                       class={styles.action}
                       kind="pen"
-                      onClick={() => askForName()}
+                      onClick={() => askForName(part)}
                       title="Call this motion something else"
                     />
                     <IconButton
                       class={styles.action}
                       kind="clone"
-                      onClick={() => duplicatePart(selectedPart().name)}
+                      onClick={() => duplicatePart(part.name)}
                       title="Duplicate this part"
                     />
                     <Show when={parts().length > 1}>
                       <IconButton
                         class={styles.action}
                         kind="trash"
-                        onClick={() => removePart(selectedPart().name)}
+                        onClick={() => removePart(part.name)}
 
                         title="Remove this part"
                       />
