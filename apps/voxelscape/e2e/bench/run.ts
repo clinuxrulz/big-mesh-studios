@@ -11,6 +11,14 @@
 //   pnpm bench --scale 0.5           # pin the render scale somewhere else
 //   pnpm bench --adaptive            # let the resolution scaler run, to
 //                                    # measure the scaler itself
+//   pnpm bench --at bcf5696          # measure some other commit, checked out
+//                                    # beside this one, with this harness
+//
+// A commit is measured through the harness in this checkout, so the scenarios,
+// the report and its page are whatever they are here; only the application
+// being driven comes from the commit. A commit from before the application
+// carried a bench surface cannot be measured, and shows up as the wait for
+// that surface timing out.
 //
 // A headed browser is not optional: headless Chromium draws through a software
 // rasterizer, where every frame is slow enough to drown the numbers being
@@ -102,6 +110,8 @@ interface Options {
    * buffers and textures, which the page has no way to count.
    */
   trace: boolean;
+  /** The commit to measure, if not the one this checkout stands on. */
+  at?: string;
 }
 
 const parseOptions = (argv: string[]): Options => {
@@ -115,6 +125,7 @@ const parseOptions = (argv: string[]): Options => {
   let adaptive = false;
   let trace = false;
   let scale: number | undefined;
+  let at: string | undefined;
   let profile = profileNamed("native");
   for (let i = 0; i < argv.length; i++) {
     const argument = argv[i];
@@ -138,6 +149,8 @@ const parseOptions = (argv: string[]): Options => {
       radius = Number(argv[++i]);
     } else if (argument === "--port") {
       port = Number(argv[++i]);
+    } else if (argument === "--at") {
+      at = argv[++i];
     } else if (argument.startsWith("--")) {
       throw new Error(`unknown option ${argument}`);
     } else {
@@ -169,11 +182,63 @@ const parseOptions = (argv: string[]): Options => {
     adaptive,
     trace,
     scale,
+    at,
   };
 };
 
 const git = (...args: string[]): string =>
   execFileSync("git", args, { cwd: APP_DIR, encoding: "utf8" }).trim();
+
+/** Where a commit checked out to be measured is kept. */
+const WORKTREE_DIR = join(APP_DIR, "..", "..", ".worktrees");
+
+/** The application a run measures, and what the report says it was. */
+interface Subject {
+  /** The application directory to build and serve. */
+  dir: string;
+  /** The commit the report is stamped with, short. */
+  commit: string;
+  /** Whether that directory carries changes the commit does not. */
+  dirty: boolean;
+}
+
+/** The checkout the harness is being read from, changes and all. */
+const thisCheckout = (): Subject => ({
+  dir: APP_DIR,
+  commit: git("rev-parse", "--short", "HEAD"),
+  dirty: git("status", "--porcelain") !== "",
+});
+
+/**
+ * Checks `revision` out into a worktree of its own and installs what it asks
+ * for, so a run can measure a commit without disturbing the checkout being
+ * worked in. What a commit depends on belongs to it as much as its source
+ * does — the renderer the world draws through is a package like any other,
+ * and two commits can name different versions of it — so the worktree gets
+ * its own installation rather than borrowing this one's.
+ *
+ * The worktree is left behind, and a later run of the same commit reuses it
+ * as it stands; `git worktree remove` clears one out.
+ *
+ * @param revision Anything git can resolve to a commit.
+ * @returns The application under test in that worktree.
+ */
+const checkOut = (revision: string): Subject => {
+  const commit = git("rev-parse", "--short", `${revision}^{commit}`);
+  const worktree = join(WORKTREE_DIR, `bench-${commit}`);
+  if (!existsSync(worktree)) {
+    console.log(`checking ${commit} out into ${worktree}`);
+    execFileSync("git", ["worktree", "add", "--detach", worktree, commit], {
+      cwd: APP_DIR,
+      stdio: "inherit",
+    });
+    execFileSync("pnpm", ["install", "--frozen-lockfile"], {
+      cwd: worktree,
+      stdio: "inherit",
+    });
+  }
+  return { dir: join(worktree, "apps", "voxelscape"), commit, dirty: false };
+};
 
 /** The most recently changed file anywhere under a directory. */
 const newestChange = (directory: string): number => {
@@ -188,17 +253,17 @@ const newestChange = (directory: string): number => {
   return newest;
 };
 
-/** Builds the site when the sources have moved on since the last build. */
-const buildIfStale = (): void => {
-  const built = join(APP_DIR, "dist", "index.html");
+/** Builds the site in `dir` when its sources have moved on since its last build. */
+const buildIfStale = (dir: string): void => {
+  const built = join(dir, "dist", "index.html");
   if (
     existsSync(built) &&
-    statSync(built).mtimeMs > newestChange(join(APP_DIR, "src"))
+    statSync(built).mtimeMs > newestChange(join(dir, "src"))
   ) {
     return;
   }
   console.log("building the site (sources are newer than the last build)");
-  execFileSync("pnpm", ["build"], { cwd: APP_DIR, stdio: "inherit" });
+  execFileSync("pnpm", ["build"], { cwd: dir, stdio: "inherit" });
 };
 
 const answers = async (url: string): Promise<boolean> => {
@@ -214,15 +279,22 @@ const answers = async (url: string): Promise<boolean> => {
  * A preview server on the wanted port: the one already running if there is
  * one, or a new one this run starts and stops again.
  */
-const serve = async (port: number): Promise<() => void> => {
+const serve = async (port: number, subject: Subject): Promise<() => void> => {
   const url = `http://127.0.0.1:${port}/`;
   if (await answers(url)) {
+    // A server that was already up is serving a build nothing here chose, so
+    // a run that was asked for one particular commit cannot take it on trust.
+    if (subject.dir !== APP_DIR) {
+      throw new Error(
+        `something already answers on port ${port}, and a run measuring ${subject.commit} cannot tell which build that is; stop it, or pass --port`,
+      );
+    }
     console.log(`using the preview server already on port ${port}`);
     return () => {};
   }
-  buildIfStale();
+  buildIfStale(subject.dir);
   const server = spawn("pnpm", ["serve", "--port", String(port)], {
-    cwd: APP_DIR,
+    cwd: subject.dir,
     stdio: "ignore",
   });
   for (let attempt = 0; attempt < 60; attempt++) {
@@ -370,7 +442,9 @@ const describeMachine = (page: Page) =>
 
 const main = async (): Promise<void> => {
   const options = parseOptions(process.argv.slice(2));
-  const stopServer = await serve(options.port);
+  const subject =
+    options.at === undefined ? thisCheckout() : checkOut(options.at);
+  const stopServer = await serve(options.port, subject);
   let browser: Browser | undefined;
   try {
     browser = await chromium.launch({
@@ -469,8 +543,8 @@ const main = async (): Promise<void> => {
 
     const report: BenchReport = {
       context: {
-        commit: git("rev-parse", "--short", "HEAD"),
-        dirty: git("status", "--porcelain") !== "",
+        commit: subject.commit,
+        dirty: subject.dirty,
         finishedAt: new Date().toISOString(),
         graphicsCard: machine.graphicsCard,
         cores: machine.cores,
