@@ -1,4 +1,5 @@
 import type { TriangleRenderer } from "./renderers/triangle-renderer";
+import type { WorldWorkerPool } from "./world/worker-pool";
 import type { AtprotoController } from "./atproto/atproto-controller";
 import type { ModelLibrary } from "./atproto/models";
 import { MONSTER_MODEL_NAME } from "./atproto/models";
@@ -83,6 +84,8 @@ export class Commander {
 export interface CommandsParams {
   /** What draws the world's blocks, for the triangle count it reports. */
   renderer: TriangleRenderer;
+  /** The world's shared fill-and-mesh worker pool, to report and resize it. */
+  workerPool: WorldWorkerPool;
   dayNight: DayNightController;
   weather: WeatherController;
   sound: SoundController;
@@ -184,6 +187,7 @@ const readPlaceRequest = (
 /** Every debug console command, declared as a single object literal keyed by command name. */
 export const createCommands = ({
   renderer,
+  workerPool,
   dayNight,
   weather,
   sound,
@@ -271,6 +275,25 @@ export const createCommands = ({
     "/clock:state": {
       description: "show the current clock state",
       run: () => dayNight.describe(),
+    },
+    "/world:workers": {
+      description: "report, pin, or reset the world's worker count",
+      args: "auto|<0..8>",
+      run: (rest) => {
+        const argument = rest[0];
+        if (argument === undefined || argument === "auto") {
+          if (argument === "auto") {
+            workerPool.setAuto();
+          }
+          return workerPool.describe();
+        }
+        const count = Number(argument);
+        if (Number.isInteger(count) && count >= 0 && count <= 8) {
+          workerPool.setCount(count);
+          return workerPool.describe();
+        }
+        return "usage: /world:workers auto|<0..8>  (0 runs fills and meshes on the main thread)";
+      },
     },
     "/render:resolution": {
       description: "adapt the render resolution, or pin it",

@@ -18,6 +18,7 @@ import { FillClient } from "./fill-client";
 import type { EditLayer } from "./edit-layer";
 import type { TerrainConfig } from "./noise";
 import type { BorderSizes, FillStoreFn } from "./voxel-store";
+import type { WorldWorkerPool } from "./worker-pool";
 
 export interface CellCoord {
   x: number;
@@ -137,6 +138,19 @@ export interface ChunkSphereParams {
   customFillStoreUrl?: string;
   /** Applied to each block after its terrain is generated (see `FillClient`). */
   editLayer?: EditLayer;
+  /**
+   * The world's shared worker pool, used by the mesh client too. A caller
+   * that hands over a pool pools one set of workers for both jobs; a caller
+   * that hands over nothing gets a private pool of `hardwareConcurrency`-1
+   * combined workers (or the main-thread fallback).
+   */
+  pool?: WorldWorkerPool;
+  /**
+   * Supplies the workers of the pool built when `pool` is omitted. A caller
+   * that hands over one worker (or nothing) gets a single worker (or the
+   * main-thread fallback) instead.
+   */
+  createWorker?: () => Worker | undefined;
 }
 
 /**
@@ -204,6 +218,8 @@ export class ChunkSphere {
       editLayer: params.editLayer,
       customFillStore: params.customFillStore,
       customFillStoreUrl: params.customFillStoreUrl,
+      pool: params.pool,
+      createWorker: params.createWorker,
     });
   }
 

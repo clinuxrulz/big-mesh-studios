@@ -9,6 +9,7 @@ import type { EditLayer } from "./edit-layer";
 import { type FillBatchResult, type FillConfig } from "./fill-worker";
 import type { TerrainConfig } from "./noise";
 import { fillStore, type BorderSizes, type FillStoreFn } from "./voxel-store";
+import { WorldWorkerPool } from "./worker-pool";
 
 export interface FillClientParams {
   terrain: TerrainConfig;
@@ -29,24 +30,19 @@ export interface FillClientParams {
   customFillStore?: FillStoreFn;
   customFillStoreUrl?: string;
   /**
-   * Supplies the workers that fill blocks. Defaults to a pool of
-   * `hardwareConcurrency`-bounded module workers; a caller that hands over
-   * one worker (or nothing) gets a single worker (or the main-thread
-   * fallback) instead.
+   * The world's shared worker pool, used by the mesh client too. A caller
+   * that hands over a pool pools one set of workers for both jobs; a caller
+   * that hands over nothing gets a private pool of `hardwareConcurrency`-1
+   * combined workers (or the main-thread fallback).
+   */
+  pool?: WorldWorkerPool;
+  /**
+   * Supplies the workers of the pool built when `pool` is omitted. A caller
+   * that hands over one worker (or nothing) gets a single worker (or the
+   * main-thread fallback) instead.
    */
   createWorker?: () => Worker | undefined;
 }
-
-/** How many fill workers to run: a small pool parallelizes a scroll's entering cap. */
-const workerCount = (): number => {
-  if (
-    typeof navigator === "undefined" ||
-    typeof navigator.hardwareConcurrency !== "number"
-  ) {
-    return 2;
-  }
-  return Math.max(1, Math.min(4, navigator.hardwareConcurrency));
-};
 
 /**
  * Generates blocks' procedural voxel data and derived GPU level layout off
@@ -72,8 +68,7 @@ export class FillClient {
   private readonly customFillStore?: FillStoreFn;
   private readonly customFillStoreUrl?: string;
   private readonly editLayer?: EditLayer;
-  private readonly workers: Worker[] = [];
-  private workerAvailable = true;
+  private readonly pool: WorldWorkerPool;
   private warnedWorkerError = false;
   /** Slots waiting to be generated on the main thread, one task each. */
   private readonly pendingSyncFills = new Set<number>();
@@ -94,41 +89,40 @@ export class FillClient {
     this.fillLod = new Array(params.blocks.length).fill(0);
     this.fillBorder = new Array(params.blocks.length).fill(undefined);
 
-    const count = params.createWorker === undefined ? workerCount() : 1;
-    for (let i = 0; i < count; i++) {
-      try {
-        const worker =
-          params.createWorker === undefined
-            ? new Worker(new URL("./fill-worker.ts", import.meta.url), {
-                type: "module",
-              })
-            : params.createWorker();
-        if (worker === undefined) {
-          this.workerAvailable = false;
-          break;
-        }
-        const fillConfig: FillConfig = {
-          terrain: this.terrain,
-          customFillStoreUrl: this.customFillStoreUrl,
-        };
-        worker.postMessage({ type: "config", config: fillConfig });
-        worker.onmessage = (ev) => {
-          this.onWorkerMessage(ev.data as FillBatchResult);
-        };
-        worker.onerror = () => {
-          this.onWorkerError(worker);
-        };
-        this.workers.push(worker);
-      } catch {
-        if (this.workers.length === 0) {
-          this.workerAvailable = false;
-        }
-        break;
-      }
+    this.pool =
+      params.pool ??
+      new WorldWorkerPool(
+        params.createWorker === undefined
+          ? {}
+          : { createWorker: params.createWorker, count: 1 },
+      );
+    this.pool.onMessage((ev) => {
+      this.onWorkerMessage(ev.data as FillBatchResult);
+    });
+    this.pool.onWorkerLost(() => {
+      this.onWorkerLost();
+    });
+    this.pool.onWorkerAdded((worker) => {
+      this.sendFillConfig(worker);
+    });
+    for (const worker of this.pool.workers) {
+      this.sendFillConfig(worker);
     }
   }
 
+  /** The terrain configuration each pool worker fills with, posted once per worker. */
+  private sendFillConfig(worker: Worker): void {
+    const fillConfig: FillConfig = {
+      terrain: this.terrain,
+      customFillStoreUrl: this.customFillStoreUrl,
+    };
+    worker.postMessage({ type: "config", config: fillConfig });
+  }
+
   private onWorkerMessage(msg: FillBatchResult): void {
+    if (msg.type !== "fill") {
+      return;
+    }
     for (let j = 0; j < msg.indices.length; j++) {
       const i = msg.indices[j];
       // The result carries the generation the request it answers was sent
@@ -160,17 +154,11 @@ export class FillClient {
     }
   }
 
-  private onWorkerError(failed: Worker): void {
-    const stillAlive = this.workers.filter((w) => w !== failed);
-    this.workers.length = 0;
-    this.workers.push(...stillAlive);
-    if (this.workers.length === 0) {
-      this.workerAvailable = false;
-    }
+  private onWorkerLost(): void {
     if (!this.warnedWorkerError) {
       this.warnedWorkerError = true;
       console.warn(
-        "[fill] worker errored; falling back to the remaining workers or synchronous fills",
+        "[fills] worker unavailable; falling back to the remaining workers or synchronous fills",
       );
     }
     for (const i of this.fillInflight) {
@@ -211,7 +199,7 @@ export class FillClient {
     lods: number[],
     borderSizes?: BorderSizes[],
   ): void {
-    if (this.workers.length > 0 && this.workerAvailable) {
+    if (this.pool.workers.length > 0) {
       // Split the batch across the pool, round-robin, so a scroll's entering
       // shell generates on several threads at once.
       const batches: Array<{
@@ -219,7 +207,7 @@ export class FillClient {
         centers: Dim3[];
         lods: number[];
         borderSizes: BorderSizes[];
-      }> = this.workers.map(() => ({
+      }> = this.pool.workers.map(() => ({
         indices: [],
         centers: [],
         lods: [],
@@ -231,7 +219,7 @@ export class FillClient {
         batches[k % batches.length].lods.push(lods[k]);
         batches[k % batches.length].borderSizes.push(borderSizes?.[k] ?? {});
       }
-      for (let w = 0; w < this.workers.length; w++) {
+      for (let w = 0; w < this.pool.workers.length; w++) {
         const batch = batches[w];
         if (batch.indices.length > 0) {
           this.sendFillBatch(
@@ -239,7 +227,7 @@ export class FillClient {
             batch.centers,
             batch.lods,
             batch.borderSizes,
-            this.workers[w],
+            this.pool.workers[w],
           );
         }
       }
@@ -340,8 +328,6 @@ export class FillClient {
   }
 
   dispose(): void {
-    for (const worker of this.workers) {
-      worker.terminate();
-    }
+    this.pool.dispose();
   }
 }

@@ -684,6 +684,8 @@ export const meshArraysToGeometry = (mesh: MeshArrays): BufferGeometry => {
  * neighbour data of its own; the worker returns both meshes' arrays back.
  */
 export interface MeshBuildRequest {
+  /** The kind of message; mesh workers dispatch on it. */
+  type: "mesh";
   id: number;
   voxels: [number, number, number];
   scale: number;
@@ -698,6 +700,8 @@ export interface MeshBuildRequest {
 }
 
 export interface MeshBuildResult {
+  /** The kind of result; mesh clients ignore every other kind a shared worker posts. */
+  type: "mesh";
   id: number;
   terrain: MeshArrays;
   water: MeshArrays;

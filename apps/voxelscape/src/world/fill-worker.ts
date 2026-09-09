@@ -1,11 +1,12 @@
-// Web worker that generates a block's procedural voxel data (noise fill) and
-// its derived GPU level layout (surface sweep) off the main thread. The main
-// thread sends a configuration once, then `fill` requests carrying the centres
-// of the blocks it wants — the whole window at startup, the changed slots of a
-// ring step afterwards. Each block is posted back on its own as it is
-// generated, its three arrays (store data, broad grid, fine chunks)
-// transferred (moved, not copied) and adopted zero-copy into the block's store
-// and level.
+// The fill half of the world worker's protocol: generating a block's
+// procedural voxel data (noise fill) and its derived GPU level layout (surface
+// sweep). The main thread sends a configuration once, then `fill` requests
+// carrying the centres of the blocks it wants — the whole window at startup,
+// the changed slots of a ring step afterwards. Each block is posted back on
+// its own as it is generated, its three arrays (store data, broad grid, fine
+// chunks) transferred (moved, not copied) and adopted zero-copy into the
+// block's store and level. Pure: the worker entry that runs this lives in
+// `world-worker.ts`.
 import { buildBlockData, type Dim3, type TerrainConfig } from "./level-data";
 import type { BorderSizes, FillStoreFn } from "./voxel-store";
 
@@ -35,6 +36,8 @@ export interface FillBatchRequest {
 }
 
 export interface FillBatchResult {
+  /** The kind of result; fill clients ignore every other kind a shared worker posts. */
+  type: "fill";
   indices: number[];
   gens: number[];
   /** Each block's level of detail, echoed like `gens`. */
@@ -87,6 +90,7 @@ export async function* buildFillResults(
       borderSizes: req.borderSizes?.[i],
     });
     yield {
+      type: "fill",
       indices: [req.indices[i]],
       gens: [req.gens[i]],
       lods: [req.lods[i]],
@@ -134,37 +138,3 @@ export const handleFillMessage = (
   }
   return { results: buildFillResults(msg, config) };
 };
-
-/**
- * The TypeScript DOM types define `self` as `Window`, whose `postMessage`
- * needs a target origin; in a dedicated worker the global is a
- * `DedicatedWorkerGlobalScope`. Guarded so importing this module in Node.js
- * (for the protocol tests) doesn't evaluate `self`.
- */
-const workerSelf =
-  typeof self !== "undefined"
-    ? (self as unknown as {
-        onmessage: ((ev: MessageEvent) => void) | null;
-        postMessage: (
-          message: FillBatchResult,
-          transfer: Transferable[],
-        ) => void;
-      })
-    : undefined;
-
-let config: FillConfig | undefined;
-
-if (workerSelf !== undefined) {
-  workerSelf.onmessage = async (ev) => {
-    const out = handleFillMessage(ev.data as FillWorkerMessage, config);
-    if (out.config !== undefined) {
-      config = out.config;
-      return;
-    }
-    if (out.results !== undefined) {
-      for await (const result of out.results) {
-        workerSelf.postMessage(result, fillResultTransfers(result));
-      }
-    }
-  };
-}

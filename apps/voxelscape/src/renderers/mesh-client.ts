@@ -1,5 +1,6 @@
 import type { VoxelTileConfig } from "./atlas";
 import type { WorldBlock } from "../world/level-data";
+import { WorldWorkerPool } from "../world/worker-pool";
 import {
   buildBlockMesh,
   buildWaterMesh,
@@ -21,17 +22,6 @@ const MAX_BUILDS_PER_DRAIN = 12;
  * are handed back to the garbage collector instead.
  */
 const MAX_BUFFER_POOL_SOURCES = 2 * MAX_BUILDS_PER_DRAIN;
-
-/** How many mesh workers to run: a small pool parallelizes the burst of builds a sphere scroll queues. */
-const workerCount = (): number => {
-  if (
-    typeof navigator === "undefined" ||
-    typeof navigator.hardwareConcurrency !== "number"
-  ) {
-    return 2;
-  }
-  return Math.max(1, Math.min(4, navigator.hardwareConcurrency));
-};
 
 /** The geometry of a chunk that holds no surface: nothing to draw. */
 const EMPTY_MESH: MeshArrays = {
@@ -58,10 +48,16 @@ export interface MeshClientParams {
   /** How many builds one `drain` hands the workers, in total. Defaults to twelve. */
   buildsPerDrain?: number;
   /**
-   * Supplies the worker that builds the meshes. Defaults to a pool of
-   * `hardwareConcurrency`-bounded module workers; a caller that hands over
-   * one worker (or nothing) gets a single worker (or the main-thread fallback)
-   * instead.
+   * The world's shared worker pool, used by the fill client too. A caller
+   * that hands over a pool pools one set of workers for both jobs; a caller
+   * that hands over nothing gets a private pool of `hardwareConcurrency`-1
+   * combined workers (or the main-thread fallback).
+   */
+  pool?: WorldWorkerPool;
+  /**
+   * Supplies the workers of the pool built when `pool` is omitted. A caller
+   * that hands over one worker (or nothing) gets a single worker (or the
+   * main-thread fallback) instead.
    */
   createWorker?: () => Worker | undefined;
 }
@@ -104,8 +100,7 @@ export class MeshClient {
    * from nothing, which is why `setTiles` invalidates every block.
    */
   private readonly tilesById = new Map<number, VoxelTileConfig>();
-  private readonly workers: Worker[] = [];
-  private workerAvailable = true;
+  private readonly pool: WorldWorkerPool;
   private warnedWorkerError = false;
   private nextWorker = 0;
 
@@ -115,36 +110,25 @@ export class MeshClient {
     this.buildsPerDrain = params.buildsPerDrain ?? MAX_BUILDS_PER_DRAIN;
     this.generation = new Array(params.blocks.length).fill(0);
 
-    const count = params.createWorker === undefined ? workerCount() : 1;
-    for (let i = 0; i < count; i++) {
-      try {
-        const worker =
-          params.createWorker === undefined
-            ? new Worker(new URL("./mesh-worker.ts", import.meta.url), {
-                type: "module",
-              })
-            : params.createWorker();
-        if (worker === undefined) {
-          this.workerAvailable = false;
-          break;
-        }
-        worker.onmessage = (ev) => {
-          this.onWorkerMessage(ev.data as MeshBuildResult);
-        };
-        worker.onerror = () => {
-          this.onWorkerError(worker);
-        };
-        this.workers.push(worker);
-      } catch {
-        if (this.workers.length === 0) {
-          this.workerAvailable = false;
-        }
-        break;
-      }
-    }
+    this.pool =
+      params.pool ??
+      new WorldWorkerPool(
+        params.createWorker === undefined
+          ? {}
+          : { createWorker: params.createWorker, count: 1 },
+      );
+    this.pool.onMessage((ev) => {
+      this.onWorkerMessage(ev.data as MeshBuildResult);
+    });
+    this.pool.onWorkerLost(() => {
+      this.onWorkerLost();
+    });
   }
 
   private onWorkerMessage(msg: MeshBuildResult): void {
+    if (msg.type !== "mesh") {
+      return;
+    }
     const requestedAt = this.inFlight.get(msg.id);
     if (requestedAt === undefined) {
       return;
@@ -165,20 +149,14 @@ export class MeshClient {
     this.releaseBuffer(msg.blockLight);
   }
 
-  private onWorkerError(failed: Worker): void {
-    const stillAlive = this.workers.filter((w) => w !== failed);
-    this.workers.length = 0;
-    this.workers.push(...stillAlive);
-    if (this.workers.length === 0) {
-      this.workerAvailable = false;
-    }
+  private onWorkerLost(): void {
     if (!this.warnedWorkerError) {
       this.warnedWorkerError = true;
       console.warn(
-        "[mesh] worker errored; falling back to the remaining workers or the main thread",
+        "[meshes] worker unavailable; falling back to the remaining workers or the main thread",
       );
     }
-    // The builds the dead worker had in flight are owed and will not be
+    // The builds the lost worker had in flight are owed and will not be
     // delivered; put them back on the queue for a live worker or the main
     // thread to redo.
     for (const index of this.inFlight.keys()) {
@@ -219,7 +197,7 @@ export class MeshClient {
    * block here if there isn't one. Called once a frame.
    */
   drain(): void {
-    if (this.workers.length === 0 || !this.workerAvailable) {
+    if (this.pool.workers.length === 0) {
       const queued = [...this.pending];
       this.pending.clear();
       this.buildOnThisThread(queued);
@@ -303,6 +281,7 @@ export class MeshClient {
     const blockLight = this.acquireBuffer(light.blocklight.byteLength);
     blockLight.set(light.blocklight);
     const request: MeshBuildRequest = {
+      type: "mesh",
       id: index,
       voxels: store.voxels,
       scale: store.scale,
@@ -312,7 +291,8 @@ export class MeshClient {
       blockLight,
       tileRects: [...this.tilesById.values()],
     };
-    const worker = this.workers[this.nextWorker % this.workers.length];
+    const worker =
+      this.pool.workers[this.nextWorker % this.pool.workers.length];
     this.nextWorker++;
     worker?.postMessage(request, [
       request.data.buffer,
@@ -344,8 +324,6 @@ export class MeshClient {
   }
 
   dispose(): void {
-    for (const worker of this.workers) {
-      worker.terminate();
-    }
+    this.pool.dispose();
   }
 }

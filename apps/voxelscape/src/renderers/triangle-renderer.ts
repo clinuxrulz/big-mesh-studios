@@ -40,6 +40,7 @@ import type { VoxelTileConfig } from "./atlas";
 import { BLOCK_WORLD, type Dim3, type WorldBlock } from "../world/level-data";
 import { setGeometryData, setOcclusionColors, type MeshArrays } from "./mesh";
 import { MeshClient } from "./mesh-client";
+import type { WorldWorkerPool } from "../world/worker-pool";
 import { OcclusionDebugMaterial } from "./occlusion-debug-material";
 import { OcclusionProbeMaterial } from "./occlusion-probe-material";
 import {
@@ -308,6 +309,19 @@ export interface TriangleRendererParams {
    * make a single frame's spending observable.
    */
   uploadBytesPerFrame?: number;
+  /**
+   * The world's shared worker pool, used by the fill client too. A caller
+   * that hands over a pool pools one set of workers for both jobs; a caller
+   * that hands over nothing gets a private pool of `hardwareConcurrency`-1
+   * combined workers (or the main-thread fallback).
+   */
+  pool?: WorldWorkerPool;
+  /**
+   * Supplies the workers of the pool built when `pool` is omitted. A caller
+   * that hands over one worker (or nothing) gets a single worker (or the
+   * main-thread fallback) instead.
+   */
+  createWorker?: () => Worker | undefined;
 }
 
 /** Chunk cells per superchunk per axis: 2 chunks of 64³ voxels, 256³ world units. */
@@ -792,6 +806,8 @@ export class TriangleRenderer {
 
     this.meshes = new MeshClient({
       blocks,
+      pool: params.pool,
+      createWorker: params.createWorker,
       onMeshBuilt: (index, terrain, water) => {
         // Cache the per-chunk build so the merger can re-read it, then defer
         // the superchunk upload to the next tick so a burst of results lands

@@ -2,6 +2,7 @@ import type { Group } from "@random-mesh/rmsl/scene";
 import { TriangleRenderer } from "../renderers/triangle-renderer";
 import { loadVoxelTiles } from "../renderers/tile-loader";
 import { ChunkSphere } from "./chunk-sphere";
+import { WorldWorkerPool } from "./worker-pool";
 import {
   blockWorldVoxelRange,
   EditLayer,
@@ -59,6 +60,13 @@ export interface VoxelWorldConfig {
    * construction, but what draws it waits on the spritesheet.
    */
   onInitialDraw?: (progress: InitialDrawProgress) => void;
+  /**
+   * Supplies the workers of the single pool the fill and mesh clients share.
+   * A caller that hands over one worker (or nothing) gets a single worker (or
+   * the main-thread fallback) instead of the automatic `hardwareConcurrency`-1
+   * pool.
+   */
+  createWorker?: () => Worker | undefined;
 }
 
 export interface VoxelWorld {
@@ -84,6 +92,11 @@ export interface VoxelWorld {
   editLayer: EditLayer;
   /** The farthest the ring's outer edge can be from the player, in world units. */
   ringRadius: number;
+  /**
+   * The world's worker threads, shared by the fill and mesh clients, so the
+   * console can report and resize them.
+   */
+  workerPool: WorldWorkerPool;
   /** Highest solid surface in the column at (`x`, `z`), for spawning and for weather. */
   heightAt(x: number, z: number): number;
   /** Highest solid surface at or below (`x`, `y`, `z`), or `-Infinity` where the column has none. */
@@ -142,6 +155,7 @@ export const createVoxelWorld = ({
   terrain,
   spawn,
   onInitialDraw,
+  createWorker,
 }: VoxelWorldConfig): VoxelWorld => {
   const ringRadius = chunkRadius * BLOCK_WORLD[0];
   /**
@@ -156,6 +170,14 @@ export const createVoxelWorld = ({
   const editPersistence = createEditPersistence(editLayer);
   /** Callbacks run whenever a block's fill lands; the flow sim wakes through these. */
   const filledListeners: Array<(index: number) => void> = [];
+  /**
+   * The single worker pool the fill and mesh clients share, so a scroll's
+   * entering shell fills and meshes on the same threads without ever running
+   * two pools' worth.
+   */
+  const workerPool = new WorldWorkerPool(
+    createWorker === undefined ? {} : { createWorker, count: 1 },
+  );
 
   let releaseHandler: ((index: number) => void) | undefined;
   const sphere = new ChunkSphere({
@@ -188,6 +210,7 @@ export const createVoxelWorld = ({
     },
     onBlockRelease: (i) => releaseHandler?.(i),
     editLayer,
+    pool: workerPool,
   });
   const blockGrid = { blocks: sphere.blocks };
 
@@ -269,6 +292,7 @@ export const createVoxelWorld = ({
     blocks: blockGrid.blocks,
     waterExtinction: WATER_EXTINCTION,
     seaLevel: terrain.seaLevel,
+    pool: workerPool,
     onBlockMeshed: (i) => {
       // The spritesheet landing invalidates every slot's mesh at once, so
       // slots still waiting for their terrain are drawn too, as the nothing
@@ -370,6 +394,7 @@ export const createVoxelWorld = ({
     underwaterTint: renderer.underwaterTint,
     editLayer,
     ringRadius,
+    workerPool,
     reapplyEdits,
     applyEdits,
 

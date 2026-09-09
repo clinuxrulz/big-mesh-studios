@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { MeshClient } from "./mesh-client";
+import { WorldWorkerPool } from "../world/worker-pool";
 import { buildBlockShell, type WorldBlock } from "../world/level-data";
 import { VOXEL_GRASS } from "../world/voxel-store";
 import type { MeshBuildRequest, MeshBuildResult } from "./mesh";
@@ -8,13 +9,38 @@ import type { MeshBuildRequest, MeshBuildResult } from "./mesh";
 /**
  * A worker that records what it is sent and hands results back only when told
  * to, so a result can be made to arrive after the block it was built from has
- * already changed.
+ * already changed. Speaks the pool's listener interface (`addEventListener`)
+ * rather than the `onmessage`/`onerror` properties, because a `WorldWorkerPool`
+ * shares its workers between the fill and mesh clients.
  */
 class FakeMeshWorker {
-  onmessage: ((ev: MessageEvent) => void) | null = null;
-  onerror: ((ev: unknown) => void) | null = null;
   readonly sent: MeshBuildRequest[] = [];
+  readonly messageListeners: Array<(ev: MessageEvent) => void> = [];
+  readonly errorListeners: Array<(ev: MessageEvent) => void> = [];
   terminated = false;
+
+  addEventListener(
+    type: "message" | "error",
+    listener: (ev: MessageEvent) => void,
+  ): void {
+    if (type === "message") {
+      this.messageListeners.push(listener);
+    } else {
+      this.errorListeners.push(listener);
+    }
+  }
+
+  removeEventListener(
+    type: "message" | "error",
+    listener: (ev: MessageEvent) => void,
+  ): void {
+    const listeners =
+      type === "message" ? this.messageListeners : this.errorListeners;
+    const index = listeners.indexOf(listener);
+    if (index >= 0) {
+      listeners.splice(index, 1);
+    }
+  }
 
   postMessage(request: MeshBuildRequest): void {
     this.sent.push(request);
@@ -24,10 +50,18 @@ class FakeMeshWorker {
     this.terminated = true;
   }
 
+  /** Fires the worker's error listeners, as the pool's dropped-worker path does. */
+  error(): void {
+    for (const listener of this.errorListeners) {
+      listener({} as MessageEvent);
+    }
+  }
+
   /** Delivers a result for the request at `sentIndex`, as the worker would. */
   deliver(sentIndex: number): void {
     const request = this.sent[sentIndex];
     const result: MeshBuildResult = {
+      type: "mesh",
       id: request.id,
       terrain: {
         positions: [],
@@ -49,7 +83,9 @@ class FakeMeshWorker {
       skyLight: request.skyLight,
       blockLight: request.blockLight,
     };
-    this.onmessage?.({ data: result } as MessageEvent);
+    for (const listener of this.messageListeners) {
+      listener({ data: result } as MessageEvent);
+    }
   }
 }
 
@@ -178,7 +214,7 @@ describe("MeshClient", () => {
     client.drain();
     expect(built).toEqual([]);
 
-    worker?.onerror?.({});
+    worker?.error();
     // The build that was in flight is owed and nothing will deliver it, so it
     // goes back on the queue for this thread to build.
     client.drain();
@@ -234,8 +270,81 @@ describe("MeshClient", () => {
   it("warns once when the worker errors", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { worker } = setup(2);
-    worker?.onerror?.({});
+    worker?.error();
     expect(warn).toHaveBeenCalledOnce();
     warn.mockRestore();
+  });
+
+  it("splits the drain across a shared pool's workers, round-robin", () => {
+    const first = new FakeMeshWorker();
+    const second = new FakeMeshWorker();
+    let spawned = 0;
+    const pool = new WorldWorkerPool({
+      createWorker: () => {
+        spawned++;
+        return (spawned === 1 ? first : second) as unknown as Worker;
+      },
+      count: 2,
+    });
+    const blocks: WorldBlock[] = [];
+    for (let i = 0; i < 4; i++) {
+      const block = buildBlockShell({ center: [i * 192, 0, 0] });
+      block.store.set(0, 0, 0, VOXEL_GRASS);
+      blocks.push(block);
+    }
+    const client = new MeshClient({
+      blocks,
+      onMeshBuilt: () => {},
+      pool,
+    });
+    for (let index = 0; index < 4; index++) {
+      client.requestBuild(index);
+    }
+
+    client.drain();
+
+    expect(first.sent.map((r) => r.id)).toEqual([0, 2]);
+    expect(second.sent.map((r) => r.id)).toEqual([1, 3]);
+    client.dispose();
+  });
+
+  it("ignores a fill result posted on the same shared pool", () => {
+    const worker = new FakeMeshWorker();
+    const pool = new WorldWorkerPool({
+      createWorker: () => worker as unknown as Worker,
+      count: 1,
+    });
+    const blocks = [buildBlockShell({ center: [0, 0, 0] })];
+    blocks[0].store.set(0, 0, 0, VOXEL_GRASS);
+    const built: number[] = [];
+    const client = new MeshClient({
+      blocks,
+      onMeshBuilt: (index) => built.push(index),
+      pool,
+    });
+    client.requestBuild(0);
+    client.drain();
+
+    // The shared pool's worker answers the fill client too; a fill result must
+    // not be mistaken for the build the mesh client is waiting on.
+    for (const listener of worker.messageListeners) {
+      listener({
+        data: {
+          type: "fill",
+          indices: [0],
+          gens: [1],
+          lods: [0],
+          storeData: [new Uint8Array(0)],
+          mightHaveVoxels: [false],
+          hasWater: [false],
+          skyLight: [new Uint8Array(0)],
+          blockLight: [new Uint8Array(0)],
+        },
+      } as MessageEvent);
+    }
+    expect(built).toEqual([]);
+
+    worker.deliver(0);
+    expect(built).toEqual([0]);
   });
 });
