@@ -24,7 +24,7 @@ import {
 } from "../renderers/mesh";
 import type { VoxelTileConfig } from "../renderers/atlas";
 import { meshArraysTransfers } from "../renderers/mesh-worker";
-import { customFillStoreOf, type FillConfig } from "./fill-worker";
+import { customFillStoreOf, lentArrays, type FillConfig } from "./fill-worker";
 
 export interface FillMeshBatchRequest {
   type: "fillMesh";
@@ -45,6 +45,14 @@ export interface FillMeshBatchRequest {
   gens: number[];
   /** The atlas's current tile rectangles, baked into each vertex's texture coordinates. */
   tileRects: VoxelTileConfig[];
+  /**
+   * One set of a slot's three arrays per block, lent for this fill to write
+   * into and carried back on the result. A request that names none leaves the
+   * worker to allocate, which is what a client without spares to lend does.
+   */
+  stores?: Uint8Array[];
+  skyLights?: Uint8Array[];
+  blockLights?: Uint8Array[];
 }
 
 export interface FillMeshBlockResult {
@@ -91,6 +99,7 @@ export async function* buildFillMeshResults(
       terrain: cfg.terrain,
       customFillStore,
       borderSizes: req.borderSizes?.[i],
+      into: lentArrays(req, i),
     });
     let terrain: MeshArrays = emptyMesh();
     let water: MeshArrays = emptyMesh();

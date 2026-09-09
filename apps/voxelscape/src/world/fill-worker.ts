@@ -7,8 +7,36 @@
 // chunks) transferred (moved, not copied) and adopted zero-copy into the
 // block's store and level. Pure: the worker entry that runs this lives in
 // `world-worker.ts`.
-import { buildBlockData, type Dim3, type TerrainConfig } from "./level-data";
+import {
+  buildBlockData,
+  type BlockArrays,
+  type Dim3,
+  type TerrainConfig,
+} from "./level-data";
 import type { BorderSizes, FillStoreFn } from "./voxel-store";
+
+/**
+ * The arrays a request lent for block `at`, or undefined where it lent none.
+ * Every set is named or none is, so a request that carries them for one block
+ * carries them for all.
+ */
+export const lentArrays = (
+  req: {
+    stores?: Uint8Array[];
+    skyLights?: Uint8Array[];
+    blockLights?: Uint8Array[];
+  },
+  at: number,
+): BlockArrays | undefined => {
+  const storeData = req.stores?.[at];
+  const skyLight = req.skyLights?.[at];
+  const blockLight = req.blockLights?.[at];
+  return storeData === undefined ||
+    skyLight === undefined ||
+    blockLight === undefined
+    ? undefined
+    : { storeData, skyLight, blockLight };
+};
 
 export interface FillConfig {
   terrain: TerrainConfig;
@@ -33,6 +61,14 @@ export interface FillBatchRequest {
    * different cell — can be told apart from the request it actually answers.
    */
   gens: number[];
+  /**
+   * One set of a slot's three arrays per block, lent for this fill to write
+   * into and carried back on the result. A request that names none leaves the
+   * worker to allocate, which is what a client without spares to lend does.
+   */
+  stores?: Uint8Array[];
+  skyLights?: Uint8Array[];
+  blockLights?: Uint8Array[];
 }
 
 export interface FillBatchResult {
@@ -101,6 +137,7 @@ export async function* buildFillResults(
       terrain: cfg.terrain,
       customFillStore,
       borderSizes: req.borderSizes?.[i],
+      into: lentArrays(req, i),
     });
     yield {
       type: "fill",

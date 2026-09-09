@@ -42,10 +42,17 @@ test, rather than a number that has to be measured to be known.
 
 **Buffers are lent, never copied, and always come back.** Transferring a buffer
 through `postMessage` already moves its ownership; this makes that a loop rather
-than a one-way street. The fill client lends a slot's arrays with the request,
-the worker fills them in place, and the worker lends them back. At any moment a
-block's data exists once, in one nameable place: held by a slot, or lent to a
-worker.
+than a one-way street. The fill client lends a set of three arrays with the
+request, the worker fills them in place, and the result hands them back. At any
+moment a block's data exists once, in one nameable place: held by a slot, or lent
+to a worker.
+
+What is lent is never the slot's own set. A transferred buffer leaves this side
+detached, and a slot whose arrays were detached would answer nothing while its
+fill ran — the flow controller, an edit and the picker all read a slot's voxels
+between a request and its result. So the client lends a spare set, and the sets
+rotate: the slot adopts what the fill filled, and what the slot was holding
+becomes the next lend.
 
 **One representation for each kind of data.** Voxels and light are `Uint8Array`,
 with a voxel's skylight and blocklight in one array as two four-bit values
@@ -67,24 +74,27 @@ and landed 48, the 307 results nobody wanted were simply garbage. Under lending,
 a fill whose answer is no longer wanted still holds a slot's only copy of its
 arrays, and a slot whose arrays never come back has nothing to draw ever again.
 
-So returning is not part of answering. A worker that has been lent a slot's
-arrays returns them whatever happens to the result: a `returning` message
-carries the buffers back with no geometry attached, and the client seats them on
-the slot without adopting anything else. A worker that is terminated mid-fill
-takes its lend with it, which is why the client also holds one spare set per
-worker: a lend that never returns costs a spare rather than a slot, and the pool
-replaces the worker with a fresh lend from the spare.
+The rotation answers it without a protocol of its own. A result carries its set
+home whether anybody wants its terrain or not, so the client takes the set back
+on the path where it refuses the result — the generation check — exactly as it
+does on the path where it adopts one. No slot is ever without arrays, because no
+slot ever gave its own away.
 
-The world's total is then closed:
+A worker terminated mid-fill takes its lend with it. That costs one set, not one
+slot: the pool is short until the next fill allocates a replacement, and the slot
+it was filling still holds everything it had.
+
+The world's total is then closed by the window and the fill drain together:
 
 ```
-slots × bytes-a-slot  +  workers × bytes-a-slot
-73 × 842KiB + 4 × 842KiB  =  60MiB + 3.4MiB   (as it stands)
-73 × 561KiB + 4 × 561KiB  =  40MiB + 2.2MiB   (with light packed)
+slots × bytes-a-slot  +  fills in flight × bytes-a-slot
+73 × 842KiB + up to 16 × 842KiB  =  60MiB + up to 13MiB   (as it stands)
+73 × 561KiB + up to 16 × 561KiB  =  40MiB + up to  9MiB   (with light packed)
 ```
 
-A slot whose lend is outstanding draws the geometry it already had, which is
-what a slot waiting for a fill does today.
+Sixteen is the drain's own ceiling — `MAX_FILLS_PER_WORKER` slots for each of
+`MAX_WORKERS` workers — and the spare pool is capped at the same number, so a
+lend that never comes home cannot make the pool grow instead.
 
 ### The check that keeps it
 
@@ -118,9 +128,10 @@ into the spread of policies it replaced.
 
 ## Consequences
 
-- The fill request grows the three buffers it lends, and the fill result loses
-  them: `fillMeshResultTransfers` moves the same arrays in the other direction.
-  A `returning` message joins the two result kinds the world worker answers.
+- The fill request grows the three buffers it lends, transferred out; the result
+  already carried the same three home, so no new message kind is needed and the
+  worker's protocol keeps the two result kinds it had. What is new is that both
+  paths through a result — adopting it and refusing it — hand the set back.
 - `VoxelStore` and `LightStore` stop allocating in their constructors and adopt
   the arrays they are handed, which is what `applyLevelData` already does to a
   block. Nothing in the world builds a store without arrays for it.

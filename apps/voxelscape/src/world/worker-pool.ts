@@ -4,7 +4,7 @@
  * threads mostly compete for the same memory bandwidth rather than adding
  * throughput.
  */
-const MAX_WORKERS = 4;
+export const MAX_WORKERS = 4;
 
 /** The most a console override may ask for, so a mistyped number cannot swamp the machine. */
 const MAX_WORKER_OVERRIDE = 8;

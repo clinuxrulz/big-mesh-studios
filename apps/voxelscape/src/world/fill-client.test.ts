@@ -75,6 +75,28 @@ class FakeFillWorker {
     }
   }
 
+  /**
+   * Delivers a result carrying back the very arrays the request lent, which is
+   * what a real worker does: it fills them in place and transfers them home.
+   */
+  deliverLent(sentIndex: number): void {
+    const request = this.sent[sentIndex];
+    const result: FillBatchResult = {
+      type: "fill",
+      indices: request.indices,
+      gens: request.gens,
+      lods: request.lods,
+      storeData: request.indices.map((_, at) => request.stores![at]),
+      mightHaveVoxels: request.indices.map(() => true),
+      hasWater: request.indices.map(() => false),
+      skyLight: request.indices.map((_, at) => request.skyLights![at]),
+      blockLight: request.indices.map((_, at) => request.blockLights![at]),
+    };
+    for (const listener of this.messageListeners) {
+      listener({ data: result } as MessageEvent);
+    }
+  }
+
   /** Delivers a result for the request at `sentIndex`, as the worker would. */
   deliver(sentIndex: number): void {
     const request = this.sent[sentIndex];
@@ -94,6 +116,72 @@ class FakeFillWorker {
     }
   }
 }
+
+describe("FillClient lending", () => {
+  const clientFor = (
+    blocks: ReturnType<typeof buildBlockShell>[],
+    worker: FakeFillWorker,
+  ): FillClient =>
+    new FillClient({
+      terrain: DEFAULT_TERRAIN,
+      blocks,
+      onBlockChanged: () => {},
+      createWorker: () => worker as unknown as Worker | undefined,
+    });
+
+  it("lends a fill three arrays of a slot's size to write into", () => {
+    const blocks = [buildBlockShell({ center: [0, 0, 0] })];
+    const worker = new FakeFillWorker();
+    clientFor(blocks, worker).requestFill([0], [[0, 0, 0]], [0]);
+
+    const length = blocks[0].store.data.length;
+    const [request] = worker.sent;
+    expect(request.stores?.[0]).toHaveLength(length);
+    expect(request.skyLights?.[0]).toHaveLength(length);
+    expect(request.blockLights?.[0]).toHaveLength(length);
+  });
+
+  it("lends the arrays a slot let go of, so a filled window allocates no more", () => {
+    const blocks = [buildBlockShell({ center: [0, 0, 0] })];
+    const worker = new FakeFillWorker();
+    const client = clientFor(blocks, worker);
+
+    // The slot's own arrays before anything is filled, which is what it should
+    // hand over once it has adopted the fill's.
+    const held = blocks[0].store.data;
+    client.requestFill([0], [[0, 0, 0]], [0]);
+    const firstLend = worker.sent[0].stores![0];
+    expect(firstLend).not.toBe(held);
+
+    worker.deliverLent(0);
+    // The slot is holding what the fill filled, and what it held is free.
+    expect(blocks[0].store.data).toBe(firstLend);
+
+    client.requestFill([0], [[0, 0, 0]], [0]);
+    expect(worker.sent[1].stores![0]).toBe(held);
+  });
+
+  it("takes back the lend of a fill nobody wants any more", () => {
+    // A slot re-requested while its fill is running refuses the answer when it
+    // lands. The arrays that answer carries were lent to it, so refusing it has
+    // to keep them: dropping them would leave the window a set short every time
+    // a scroll outran a fill.
+    const blocks = [buildBlockShell({ center: [0, 0, 0] })];
+    const worker = new FakeFillWorker();
+    const client = clientFor(blocks, worker);
+
+    client.requestFill([0], [[0, 0, 0]], [0]);
+    const staleLend = worker.sent[0].stores![0];
+    blocks[0].center = [128, 0, 0];
+    client.requestFill([0], [[128, 0, 0]], [0]);
+
+    // The stale answer lands and is refused, which frees the worker for the
+    // re-request — and that re-request is lent the refused answer's arrays.
+    worker.deliverLent(0);
+    expect(worker.sent).toHaveLength(2);
+    expect(worker.sent[1].stores![0]).toBe(staleLend);
+  });
+});
 
 describe("FillClient", () => {
   it("drops a stale fill for a re-requested slot and re-sends the current one", () => {

@@ -2,6 +2,7 @@ import {
   applyLevelData,
   blockConfig,
   fillLight,
+  type BlockArrays,
   type Dim3,
   type WorldBlock,
 } from "./level-data";
@@ -11,8 +12,13 @@ import type { FillMeshBlockResult } from "./fill-mesh-worker";
 import type { BlockMeshes } from "../renderers/mesh";
 import type { VoxelTileConfig } from "../renderers/atlas";
 import type { TerrainConfig } from "./noise";
-import { fillStore, type BorderSizes, type FillStoreFn } from "./voxel-store";
-import { WorldWorkerPool } from "./worker-pool";
+import {
+  fillStore,
+  paddedVoxelCount,
+  type BorderSizes,
+  type FillStoreFn,
+} from "./voxel-store";
+import { MAX_WORKERS, WorldWorkerPool } from "./worker-pool";
 import { Counter, probe } from "../render/perf-probe";
 
 export interface FillClientParams {
@@ -70,6 +76,45 @@ export interface FillClientParams {
 const MAX_FILLS_PER_WORKER = 4;
 
 /**
+ * Sets of a block's three arrays kept to lend to the next fill, per array
+ * length. A fill is lent a set to write into and hands it back on its result,
+ * where it becomes the slot's own and the slot's previous arrays become the next
+ * lend — so once the fills in flight have each been lent one, no fill allocates
+ * a block again. The pool never holds more than the drain can have in flight at
+ * once; anything past that is let go rather than kept against a lend that is
+ * not coming.
+ */
+const MAX_SPARE_SETS = MAX_FILLS_PER_WORKER * MAX_WORKERS;
+
+/**
+ * A batch's lends as a request carries them — one array per block, per channel —
+ * and the buffers to move with the message. A transferred buffer leaves this
+ * side detached, which is the point: the worker holds the only copy until its
+ * result hands it back.
+ */
+const lent = (
+  sets: BlockArrays[],
+): {
+  named: {
+    stores: Uint8Array[];
+    skyLights: Uint8Array[];
+    blockLights: Uint8Array[];
+  };
+  buffers: ArrayBuffer[];
+} => ({
+  named: {
+    stores: sets.map((set) => set.storeData),
+    skyLights: sets.map((set) => set.skyLight),
+    blockLights: sets.map((set) => set.blockLight),
+  },
+  buffers: sets.flatMap((set) => [
+    set.storeData.buffer as ArrayBuffer,
+    set.skyLight.buffer as ArrayBuffer,
+    set.blockLight.buffer as ArrayBuffer,
+  ]),
+});
+
+/**
  * Generates blocks' procedural voxel data and derived GPU level layout off
  * the main thread, falling back to generating them synchronously if no worker
  * is available or they all error. A pool of workers shares the load of a
@@ -110,6 +155,11 @@ export class FillClient {
   private readonly workerLoad = new Map<Worker, number>();
   /** Slots with an outstanding worker fill request (for error recovery). */
   private readonly fillInflight = new Set<number>();
+  /**
+   * Sets of three arrays waiting to be lent to a fill, by the length they hold
+   * — a block's arrays are one length per level of detail. See `MAX_SPARE_SETS`.
+   */
+  private readonly spares = new Map<number, BlockArrays[]>();
   private readonly blocks: WorldBlock[];
   private readonly terrain: TerrainConfig;
   private readonly onBlockChanged: (
@@ -201,10 +251,18 @@ export class FillClient {
       // and this stale fill must be dropped — applying it would paint the
       // old cell's terrain at the new one.
       if (msg.gens[j] !== this.fillGen[i]) {
+        // The arrays this result carries were lent to it, and dropping the
+        // result on the floor would drop them with it.
+        this.returnSpare({
+          storeData: msg.storeData[j],
+          skyLight: msg.skyLight[j],
+          blockLight: msg.blockLight[j],
+        });
         continue;
       }
       this.fillInflight.delete(i);
       probe.count(Counter.fillsLanded);
+      const held = this.arraysOf(i);
       applyLevelData(this.blocks[i], {
         storeData: msg.storeData[j],
         mightHaveVoxels: msg.mightHaveVoxels[j],
@@ -213,6 +271,7 @@ export class FillClient {
         skyLight: msg.skyLight[j],
         blockLight: msg.blockLight[j],
       });
+      this.returnSpare(held);
       // The worker generated and lit the un-edited terrain, so re-lighting is
       // owed only where the overlay changed a voxel of this block (an edit can
       // make a new emitter or open the sky). A pristine block keeps the
@@ -239,6 +298,13 @@ export class FillClient {
   private applyMeshedFillResult(msg: FillMeshBlockResult): void {
     const i = msg.index;
     if (msg.gen !== this.fillGen[i]) {
+      // The arrays this result carries were lent to it; a slot whose lend is
+      // dropped here would have nothing to be filled into next time.
+      this.returnSpare({
+        storeData: msg.storeData,
+        skyLight: msg.skyLight,
+        blockLight: msg.blockLight,
+      });
       return;
     }
     this.fillInflight.delete(i);
@@ -250,6 +316,7 @@ export class FillClient {
     const currentRects = this.tileRects?.() ?? [];
     const meshesMatch = this.fillRects.get(i) === currentRects;
     this.fillRects.delete(i);
+    const held = this.arraysOf(i);
     applyLevelData(this.blocks[i], {
       storeData: msg.storeData,
       mightHaveVoxels: msg.mightHaveVoxels,
@@ -258,6 +325,7 @@ export class FillClient {
       skyLight: msg.skyLight,
       blockLight: msg.blockLight,
     });
+    this.returnSpare(held);
     if (this.applyEdits(i) > 0) {
       fillLight(this.blocks[i], this.terrain);
       this.onBlockChanged(i);
@@ -490,6 +558,55 @@ export class FillClient {
   }
 
   /**
+   * A set of three arrays for a fill at `lod` to write into: one that a
+   * previous fill handed back where there is one, and a fresh one otherwise.
+   * The fresh ones are the only blocks this client ever allocates, and it stops
+   * allocating them once every fill in flight has been lent one.
+   */
+  private takeSpare(lod: number): BlockArrays {
+    const length = paddedVoxelCount(blockConfig(lod).voxels);
+    const held = this.spares.get(length)?.pop();
+    return (
+      held ?? {
+        storeData: new Uint8Array(length),
+        skyLight: new Uint8Array(length),
+        blockLight: new Uint8Array(length),
+      }
+    );
+  }
+
+  /**
+   * Takes a set back: the arrays a slot held before it adopted a fill's, or the
+   * ones a stale result carried, which is the case that would otherwise leave a
+   * lend nowhere — a result dropped for being stale still owns a slot's worth of
+   * arrays.
+   */
+  private returnSpare(arrays: BlockArrays): void {
+    const length = arrays.storeData.length;
+    // A detached buffer is what a transfer leaves behind; there is nothing to
+    // lend in it.
+    if (length === 0) {
+      return;
+    }
+    const held = this.spares.get(length) ?? [];
+    if (held.length >= MAX_SPARE_SETS) {
+      return;
+    }
+    held.push(arrays);
+    this.spares.set(length, held);
+  }
+
+  /** What a slot is holding now, to be handed back once it has adopted a fill's. */
+  private arraysOf(index: number): BlockArrays {
+    const block = this.blocks[index];
+    return {
+      storeData: block.store.data,
+      skyLight: block.light.skylight,
+      blockLight: block.light.blocklight,
+    };
+  }
+
+  /**
    * Marks the batch's slots in flight on this worker, so a result frees the
    * worker for its next batch and a lost worker's restoration knows what it
    * owed. The generations rise with each request, never at the send; `gensOf`
@@ -517,14 +634,19 @@ export class FillClient {
     worker: Worker,
   ): void {
     this.attachBatch(indices, worker);
-    worker.postMessage({
-      type: "fill",
-      indices,
-      centers,
-      lods,
-      borderSizes,
-      gens: this.gensOf(indices),
-    });
+    const lends = lent(indices.map((_, at) => this.takeSpare(lods[at])));
+    worker.postMessage(
+      {
+        type: "fill",
+        indices,
+        centers,
+        lods,
+        borderSizes,
+        gens: this.gensOf(indices),
+        ...lends.named,
+      },
+      lends.buffers,
+    );
   }
 
   private sendMeshedFillBatch(
@@ -539,15 +661,20 @@ export class FillClient {
     for (const index of indices) {
       this.fillRects.set(index, rects);
     }
-    worker.postMessage({
-      type: "fillMesh",
-      indices,
-      centers,
-      lods,
-      borderSizes,
-      gens: this.gensOf(indices),
-      tileRects: rects,
-    });
+    const lends = lent(indices.map((_, at) => this.takeSpare(lods[at])));
+    worker.postMessage(
+      {
+        type: "fillMesh",
+        indices,
+        centers,
+        lods,
+        borderSizes,
+        gens: this.gensOf(indices),
+        tileRects: rects,
+        ...lends.named,
+      },
+      lends.buffers,
+    );
   }
 
   dispose(): void {

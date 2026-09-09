@@ -61,6 +61,17 @@ export const BLOCK_WORLD: Dim3 = [
   CHUNK_VOXELS * VOXEL_SIZE,
 ];
 
+/**
+ * The three arrays one block's data lives in: its voxels and the two light
+ * channels shadowing them, each `paddedVoxelCount` bytes long. They are what a
+ * slot owns and what a fill is lent — see docs/adr/0034.
+ */
+export interface BlockArrays {
+  storeData: Uint8Array;
+  skyLight: Uint8Array;
+  blockLight: Uint8Array;
+}
+
 export interface WorldBlock {
   center: Dim3;
   /** The voxels themselves, which an edit changes and a mesh is built from. */
@@ -83,13 +94,38 @@ export interface WorldBlock {
 export const buildBlockShell = (params: {
   center: Dim3;
   lod?: number;
+  /**
+   * A slot's three arrays to build into, lent by whoever owns them. They come
+   * back holding the last block they were filled with, so they are emptied
+   * here: a fill writes every voxel it means to, and light propagates from
+   * zero. A shell built without them allocates its own, which is what the
+   * window does once for each of its slots.
+   */
+  into?: BlockArrays;
 }): WorldBlock => {
   const lod = params.lod ?? 0;
   const { dimensions, voxels, voxelSize } = blockConfig(lod);
+  const into = params.into;
+  if (into !== undefined) {
+    into.storeData.fill(0);
+    into.skyLight.fill(0);
+    into.blockLight.fill(0);
+  }
   return {
     center: params.center,
-    store: new VoxelStore({ dims: dimensions, voxels, scale: voxelSize }),
-    light: new LightStore(voxels),
+    store: new VoxelStore({
+      dims: dimensions,
+      voxels,
+      scale: voxelSize,
+      data: into?.storeData,
+    }),
+    light:
+      into === undefined
+        ? new LightStore(voxels)
+        : new LightStore(voxels, {
+            skylight: into.skyLight,
+            blocklight: into.blockLight,
+          }),
     targetLod: lod,
   };
 };
@@ -108,6 +144,8 @@ export const buildBlock = (params: {
   terrain?: TerrainConfig;
   customFillStore?: FillStoreFn;
   borderSizes?: BorderSizes;
+  /** Arrays to fill, lent by their owner; see `buildBlockShell`. */
+  into?: BlockArrays;
 }): WorldBlock => {
   const block = buildBlockShell(params);
   const fill = params.customFillStore ?? fillStore;
@@ -442,6 +480,8 @@ export const buildBlockData = (params: {
   terrain?: TerrainConfig;
   customFillStore?: FillStoreFn;
   borderSizes?: BorderSizes;
+  /** Arrays to fill, lent by their owner; see `buildBlockShell`. */
+  into?: BlockArrays;
 }): BlockData => {
   const lod = params.lod ?? 0;
   const { store, light } = buildBlock({ ...params, lod });
