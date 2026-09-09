@@ -1,11 +1,12 @@
 import { For, Show } from "solid-js";
 import type { JSX } from "@solidjs/web/jsx-runtime";
 import { representative } from "../report.ts";
-import type { BenchReport, ScenarioReport } from "../report.ts";
+import type { BenchReport, RunSamples, ScenarioReport } from "../report.ts";
 import type { RunSummary } from "../summarize.ts";
 import type { TraceSummary } from "../trace.ts";
 import { Bars, Chart } from "./Charts.tsx";
 import { describePower } from "../power.ts";
+import { lateFrames, uploadsOverBudget } from "./late.ts";
 import {
   framesOf,
   memoryBands,
@@ -180,6 +181,64 @@ function Numbers(props: {
   );
 }
 
+/**
+ * The frames that cost more than a sixtieth of a second, and what each was
+ * doing. The charts show the shape of a run; a run is judged by these.
+ */
+function LateFrames(props: { scenario: ScenarioReport }): JSX.Element {
+  const samples = props.scenario.samples;
+  const late =
+    samples === undefined ? [] : lateFrames(samples, FRAME_BUDGET_MS, 8);
+  return (
+    <Show
+      when={late.length > 0}
+      fallback={
+        <p class="empty">
+          No frame in this run cost the main thread more than a sixtieth of a
+          second.
+        </p>
+      }
+    >
+      <table class="frames">
+        <caption>
+          The frames that went over, costliest first — one run's worth, the same
+          run the charts above are drawn from.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">at</th>
+            <th scope="col">main thread</th>
+            <th scope="col">gap</th>
+            <th scope="col">uploaded</th>
+            <th scope="col">merges</th>
+            <th scope="col">where it went</th>
+          </tr>
+        </thead>
+        <tbody>
+          <For each={late}>
+            {(frame) => (
+              <tr>
+                <td>{`${frame.at.toFixed(1)}s`}</td>
+                <td>{ms(frame.mainMs)}</td>
+                <td>{ms(frame.gapMs)}</td>
+                <td>
+                  {frame.uploadBytes === 0 ? "—" : megabytes(frame.uploadBytes)}
+                </td>
+                <td>{frame.merges === 0 ? "—" : count(frame.merges)}</td>
+                <td class="spent">
+                  {frame.spent
+                    .map((phase) => `${phase.name} ${ms(phase.ms)}`)
+                    .join(" · ")}
+                </td>
+              </tr>
+            )}
+          </For>
+        </tbody>
+      </table>
+    </Show>
+  );
+}
+
 function Scenario(props: {
   scenario: ScenarioReport;
   paced: boolean;
@@ -190,6 +249,13 @@ function Scenario(props: {
       ? []
       : framesOf(props.scenario.samples);
   const at = frames.map((frame) => frame.at);
+  /** How the run fared against the budget one frame's uploads are paced to. */
+  const overBudget = (samples: RunSamples): string => {
+    const over = uploadsOverBudget(samples, UPLOAD_BUDGET_BYTES);
+    return over === 0
+      ? `No frame sent more than the ${megabytes(UPLOAD_BUDGET_BYTES)} a frame is paced to.`
+      : `${count(over)} ${over === 1 ? "frame sent" : "frames sent"} more than the ${megabytes(UPLOAD_BUDGET_BYTES)} a frame is paced to, in one go.`;
+  };
   const phases = phaseBands(frames);
   const memory = memoryBands(frames);
   const queues = queueLines(frames);
@@ -231,7 +297,7 @@ function Scenario(props: {
           {(samples) => (
             <Bars
               title="What was sent to the graphics card"
-              caption="Bytes uploaded, frame by frame. A column here is the largest frame in its slice, because an upload lands on a handful of a run's frames and the costliest frame is rarely one of them."
+              caption={`Bytes uploaded, frame by frame. A column here is the largest frame in its slice, because an upload lands on a handful of a run's frames and the costliest frame is rarely one of them. ${overBudget(samples())}`}
               values={uploadBars(samples(), at.length)}
               format={megabytes}
               rule={{
@@ -243,6 +309,7 @@ function Scenario(props: {
         </Show>
       </Show>
       <Numbers run={run} scenario={props.scenario} />
+      <LateFrames scenario={props.scenario} />
     </section>
   );
 }
