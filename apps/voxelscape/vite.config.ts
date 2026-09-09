@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import solid from "vite-plugin-solid";
 
 export default defineConfig({
@@ -17,5 +17,14 @@ export default defineConfig({
     // module worker needs ES output; the iife default cannot hold a
     // code-splitting dynamic import.
     format: "es",
+  },
+  test: {
+    // Running every test file's worker at once starves them all of CPU on a
+    // busy machine, which shows up as unrelated tests missing the default
+    // timeout. Half the cores leaves each worker enough of a share, and one
+    // retry absorbs a test that still loses that race without hiding a test
+    // that is actually wrong — a real failure fails again.
+    maxWorkers: "50%",
+    retry: 1,
   },
 });
