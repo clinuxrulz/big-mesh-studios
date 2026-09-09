@@ -3,6 +3,11 @@
 //
 //   pnpm bench:html
 //   pnpm bench:html e2e/.out/bench-abc1234-…json
+//   pnpm bench:html e2e/.out/ab-abc1234-def5678-…json
+//
+// Both kinds of report are drawn here: one run against its own numbers, and
+// one commit against another. They share a stylesheet and a document, and
+// differ in the page they render.
 //
 // The page is Solid rendered to a file, the way the homepage is: the numbers
 // have already happened, so nothing on the page reacts and nothing is sent to
@@ -15,6 +20,7 @@ import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { outDir, outPath } from "../out-dir.ts";
+import type { AbReport } from "./ab-report.ts";
 import type { BenchReport } from "./report.ts";
 import type { TraceSummary } from "./trace.ts";
 
@@ -67,6 +73,38 @@ const buildPage = (): void => {
   );
 };
 
+/** The compiled page's two renderers. */
+const renderers = async (): Promise<{
+  render: (report: BenchReport, traces: TraceSummary[]) => string;
+  renderAb: (report: AbReport) => string;
+}> => {
+  buildPage();
+  return (await import(pathToFileURL(BUILT).href)) as {
+    render: (report: BenchReport, traces: TraceSummary[]) => string;
+    renderAb: (report: AbReport) => string;
+  };
+};
+
+/** Wraps rendered markup in the document that carries the report's styles. */
+const document = (title: string, markup: string): string => {
+  const styles = readFileSync(join(PAGE_DIR, "styles.css"), "utf8");
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${title}</title>
+    <style>
+${styles.trimEnd()}
+    </style>
+  </head>
+  <body>
+${markup}
+  </body>
+</html>
+`;
+};
+
 /**
  * Writes `report` out as a page beside it.
  *
@@ -80,27 +118,36 @@ export const writeHtmlReport = async (
   traces: TraceSummary[],
   file: string,
 ): Promise<string> => {
-  buildPage();
-  const { render } = (await import(pathToFileURL(BUILT).href)) as {
-    render: (report: BenchReport, traces: TraceSummary[]) => string;
-  };
-  const styles = readFileSync(join(PAGE_DIR, "styles.css"), "utf8");
-  const document = `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>voxelscape, measured — ${report.context.commit}</title>
-    <style>
-${styles.trimEnd()}
-    </style>
-  </head>
-  <body>
-${render(report, traces)}
-  </body>
-</html>
-`;
-  await writeFile(file, document);
+  const { render } = await renderers();
+  await writeFile(
+    file,
+    document(
+      `voxelscape, measured — ${report.context.commit}`,
+      render(report, traces),
+    ),
+  );
+  return file;
+};
+
+/**
+ * Writes one commit-against-commit comparison out as a page.
+ *
+ * @param report What the comparison found.
+ * @param file Where to write the page.
+ * @returns The path written.
+ */
+export const writeAbHtmlReport = async (
+  report: AbReport,
+  file: string,
+): Promise<string> => {
+  const { renderAb } = await renderers();
+  await writeFile(
+    file,
+    document(
+      `${report.before.commit} against ${report.after.commit}`,
+      renderAb(report),
+    ),
+  );
   return file;
 };
 
@@ -121,19 +168,22 @@ const main = async (): Promise<void> => {
   if (path === undefined) {
     throw new Error(`no report to draw in ${outDir()}`);
   }
-  const report = JSON.parse(readFileSync(path, "utf8")) as BenchReport;
-  const written = await writeHtmlReport(
-    report,
-    [],
-    outPath(
-      `${
-        path
-          .split("/")
-          .pop()
-          ?.replace(/\.json$/, "") ?? "bench"
-      }.html`,
-    ),
+  const report = JSON.parse(readFileSync(path, "utf8")) as
+    BenchReport | AbReport;
+  const beside = outPath(
+    `${
+      path
+        .split("/")
+        .pop()
+        ?.replace(/\.json$/, "") ?? "bench"
+    }.html`,
   );
+  // A run and a comparison are both reports and both land in this directory;
+  // which one this is decides which page draws it.
+  const written =
+    "scenarios" in report && "context" in report
+      ? await writeHtmlReport(report, [], beside)
+      : await writeAbHtmlReport(report as AbReport, beside);
   console.log(`drew ${path} as ${written}`);
 };
 

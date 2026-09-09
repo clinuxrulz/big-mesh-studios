@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { median, powerMismatch, standsApart } from "./ab.ts";
+import { median, powerMismatch, standsApart } from "./ab-report.ts";
 
 describe("median", () => {
   it("takes the middle of an odd number of values", () => {

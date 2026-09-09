@@ -25,65 +25,17 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { outPath } from "../out-dir.ts";
-import { reportsByAge } from "./html.ts";
-import { metricsFor, phaseMetrics, show } from "./metrics.ts";
-import { describePower, samePower } from "./power.ts";
-import type { PowerState } from "./power.ts";
-import type { Metric } from "./metrics.ts";
-import type { BenchReport, RunContext } from "./report.ts";
+import { clearOfTheSpread, compareSides } from "./ab-report.ts";
+import type { AbReport, MetricComparison, Side } from "./ab-report.ts";
+import { reportsByAge, writeAbHtmlReport } from "./html.ts";
+import { show } from "./metrics.ts";
+import type { BenchReport } from "./report.ts";
 import type { RunSummary } from "./summarize.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The application directory, whatever directory the script was started from. */
 const APP_DIR = join(HERE, "..", "..");
 const RUNNER = join(HERE, "run.ts");
-
-/** What one side of the comparison measured, pooled across its rounds. */
-interface Side {
-  /** The commit measured, as its reports name it. */
-  commit: string;
-  /** Whether the runs' frames waited for the display, which both sides share. */
-  pacing: RunContext["pacing"];
-  /** How the machine was powered for each round this side was measured over. */
-  power: PowerState[];
-  /** Every repeat of every round, keyed by the scenario it belongs to. */
-  repeats: Map<string, RunSummary[]>;
-  /** What each scenario is, for the report to say. */
-  descriptions: Map<string, string>;
-}
-
-/** The middle value of `values`, which is not changed by one wild run. */
-export const median = (values: number[]): number => {
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)];
-};
-
-/**
- * Whether a metric's repeats from one commit stay clear of the repeats from
- * the other. Two runs of the same commit differ, so a difference between the
- * commits is only worth reading when it is larger than that: every value from
- * one side above every value from the other, or every one below.
- *
- * A side measured only once has no spread to be judged against, so nothing is
- * ever called clear on one repeat.
- *
- * @param before Every repeat of the metric on one commit.
- * @param after Every repeat of the same metric on the other.
- * @returns Whether the two sets of values are disjoint.
- */
-export const standsApart = (before: number[], after: number[]): boolean => {
-  if (before.length < 2 || after.length < 2) {
-    return false;
-  }
-  return (
-    Math.min(...before) > Math.max(...after) ||
-    Math.min(...after) > Math.max(...before)
-  );
-};
-
-/** The share of `before` that the step from it to `after` amounts to. */
-const changeBetween = (before: number, after: number): number =>
-  before === 0 ? (after === 0 ? 0 : 1) : (after - before) / before;
 
 /** Runs the benchmark once with `args`, and reads back the report it wrote. */
 const measure = (args: string[]): BenchReport => {
@@ -125,103 +77,32 @@ const pool = (side: Side | undefined, report: BenchReport): Side => {
   return into;
 };
 
+/** How a change reads as a percentage, signed. */
+const percent = (change: number): string =>
+  `${change >= 0 ? "+" : ""}${(change * 100).toFixed(1)}%`;
+
 /** One metric's line: both commits' middles and ranges, and the step between. */
-const line = (
-  metric: Metric,
-  before: number[],
-  after: number[],
-): { text: string; apart: boolean; change: number } => {
-  const middles = [median(before), median(after)] as const;
-  const change = changeBetween(middles[0], middles[1]);
-  const range = (values: number[]): string =>
-    `${show(median(values), metric.unit)} [${show(Math.min(...values), metric.unit)}–${show(Math.max(...values), metric.unit)}]`;
-  const percent = `${change >= 0 ? "+" : ""}${(change * 100).toFixed(1)}%`;
-  const apart = standsApart(before, after);
-  return {
-    text: `  ${metric.name.padEnd(16)} ${range(before).padStart(26)} → ${range(after).padStart(26)} ${percent.padStart(8)}${apart ? "  clear of the spread" : ""}`,
-    apart,
-    change,
-  };
+const line = (metric: MetricComparison): string => {
+  const range = (values: number[], middle: number): string =>
+    `${show(middle, metric.unit)} [${show(Math.min(...values), metric.unit)}–${show(Math.max(...values), metric.unit)}]`;
+  return `  ${metric.name.padEnd(16)} ${range(metric.before, metric.beforeMiddle).padStart(26)} → ${range(metric.after, metric.afterMiddle).padStart(26)} ${percent(metric.change).padStart(8)}${metric.apart ? "  clear of the spread" : ""}`;
 };
 
-/**
- * What to say about two sides that were not powered alike, or null when they
- * were. A machine on its battery, or holding itself back to save power, draws
- * slower than the same machine on the wall, so a difference measured across
- * such a change is partly the wall socket. The runs are still reported: they
- * measured what they measured, and this says what to hold against them.
- *
- * @param before Every power state the earlier commit was measured under.
- * @param after The same for this checkout.
- * @returns The line to print above the numbers, or null.
- */
-export const powerMismatch = (
-  before: { commit: string; power: PowerState[] },
-  after: { commit: string; power: PowerState[] },
-): string | null => {
-  const every = [...before.power, ...after.power];
-  if (every.length === 0 || every.every((one) => samePower(one, every[0]))) {
-    return null;
-  }
-  const side = (one: { commit: string; power: PowerState[] }): string =>
-    `${one.commit} ${[...new Set(one.power.map(describePower))].join(", then ")}`;
-  return [
-    "the two were not powered alike, and a machine draws slower on its battery than on the wall:",
-    `  ${side(before)}`,
-    `  ${side(after)}`,
-    "the numbers below stand as they were measured; a difference between them may be the power rather than the commit.",
-  ].join("\n");
-};
-
-/** Everything that moved further than the repeats of one commit disagree. */
-interface Clear {
-  scenario: string;
-  metric: string;
-  before: number;
-  after: number;
-  unit: Metric["unit"];
-  change: number;
-}
-
-const report = (before: Side, after: Side): string => {
+/** The comparison as it reads in a terminal. */
+export const formatAb = (report: AbReport): string => {
   const lines: string[] = [];
-  const clear: Clear[] = [];
-  const mismatch = powerMismatch(before, after);
-  if (mismatch !== null) {
-    lines.push(mismatch);
+  if (report.powerMismatch !== null) {
+    lines.push(report.powerMismatch);
   }
-  for (const [scenario, afterRepeats] of after.repeats) {
-    const beforeRepeats = before.repeats.get(scenario);
-    if (beforeRepeats === undefined) {
-      lines.push(`\n${scenario} — only measured on ${after.commit}`);
-      continue;
-    }
+  for (const scenario of report.scenarios) {
     lines.push(
-      `\n${scenario} — ${after.descriptions.get(scenario) ?? ""}`,
-      `  ${beforeRepeats.length} repeats of ${before.commit} against ${afterRepeats.length} of ${after.commit}, middle [lowest–highest]`,
+      `\n${scenario.name} — ${scenario.description}`,
+      `  ${scenario.beforeRepeats} repeats of ${report.before.commit} against ${scenario.afterRepeats} of ${report.after.commit}, middle [lowest–highest]`,
+      ...scenario.metrics.map(line),
     );
-    const metrics = [
-      ...metricsFor(after.pacing),
-      ...phaseMetrics([...beforeRepeats, ...afterRepeats]),
-    ];
-    for (const metric of metrics) {
-      const beforeValues = beforeRepeats.map(metric.of);
-      const afterValues = afterRepeats.map(metric.of);
-      const drawn = line(metric, beforeValues, afterValues);
-      lines.push(drawn.text);
-      if (drawn.apart) {
-        clear.push({
-          scenario,
-          metric: metric.name,
-          before: median(beforeValues),
-          after: median(afterValues),
-          unit: metric.unit,
-          change: drawn.change,
-        });
-      }
-    }
   }
   lines.push("");
+  const clear = clearOfTheSpread(report);
   if (clear.length === 0) {
     lines.push(
       "nothing moved further than the repeats of one commit disagree among themselves.",
@@ -229,11 +110,9 @@ const report = (before: Side, after: Side): string => {
     return lines.join("\n");
   }
   lines.push("clear of the run-to-run spread:");
-  for (const one of clear.sort(
-    (a, b) => Math.abs(b.change) - Math.abs(a.change),
-  )) {
+  for (const one of clear) {
     lines.push(
-      `  ${one.scenario.padEnd(8)} ${one.metric.padEnd(16)} ${show(one.before, one.unit)} → ${show(one.after, one.unit)}  ${one.change >= 0 ? "+" : ""}${(one.change * 100).toFixed(1)}%`,
+      `  ${one.scenario.padEnd(8)} ${one.metric.name.padEnd(16)} ${show(one.metric.beforeMiddle, one.metric.unit)} → ${show(one.metric.afterMiddle, one.metric.unit)}  ${percent(one.metric.change)}`,
     );
   }
   lines.push(
@@ -243,7 +122,7 @@ const report = (before: Side, after: Side): string => {
   return lines.join("\n");
 };
 
-const main = (): void => {
+const main = async (): Promise<void> => {
   const argv = process.argv.slice(2);
   let revision: string | undefined;
   let rounds = 1;
@@ -276,15 +155,17 @@ const main = (): void => {
   if (before === undefined || after === undefined) {
     throw new Error("--rounds asks for at least one round");
   }
-  const written = report(before, after);
-  const file = outPath(
-    `ab-${before.commit.replace("+", "")}-${after.commit.replace("+", "")}-${Date.now()}.txt`,
+  const compared = compareSides(before, after);
+  const stem = `ab-${before.commit.replace("+", "")}-${after.commit.replace("+", "")}-${Date.now()}`;
+  const file = outPath(`${stem}.json`);
+  writeFileSync(file, JSON.stringify(compared, null, 2));
+  const drawn = await writeAbHtmlReport(compared, outPath(`${stem}.html`));
+  console.log(
+    `\n${formatAb(compared)}\n\nwritten to ${file}\ndrawn in ${drawn}`,
   );
-  writeFileSync(file, `${written}\n`);
-  console.log(`\n${written}\n\nwritten to ${file}`);
 };
 
 // Only when run as a command; the tests import the reasoning above instead.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main();
+  await main();
 }
