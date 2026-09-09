@@ -60,6 +60,10 @@ export interface RunSummary {
     totalBytes: number;
     maxFrameBytes: number;
     framesWithUpload: number;
+    /** Superchunks merged in the frame that uploaded the most. */
+    mergesInBiggestFrame: number;
+    /** The most superchunks merged in any one frame. */
+    maxFrameMerges: number;
   };
   triangles: { median: number; max: number };
   heap: { startBytes: number; endBytes: number; maxBytes: number };
@@ -175,6 +179,7 @@ export const summarize = (drain: PerfDrain): RunSummary => {
   // The first frame has no previous frame to measure a gap from.
   const realGaps = gaps.filter((gap) => gap > 0);
   const uploads = columnFor(drain, "uploadBytes");
+  const merges = columnFor(drain, "merges");
   const heap = columnFor(drain, "heapBytes").filter((bytes) => bytes > 0);
   const x = columnFor(drain, "playerX");
   const z = columnFor(drain, "playerZ");
@@ -224,6 +229,8 @@ export const summarize = (drain: PerfDrain): RunSummary => {
       totalBytes: uploads.reduce((sum, bytes) => sum + bytes, 0),
       maxFrameBytes: maxOf(uploads),
       framesWithUpload: uploads.filter((bytes) => bytes > 0).length,
+      mergesInBiggestFrame: merges[uploads.indexOf(maxOf(uploads))] ?? 0,
+      maxFrameMerges: maxOf(merges),
     },
     triangles: {
       median: spreadOf(columnFor(drain, "triangles")).median,

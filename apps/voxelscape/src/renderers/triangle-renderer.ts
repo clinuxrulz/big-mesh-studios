@@ -689,6 +689,8 @@ export class TriangleRenderer {
   private readonly uploadBudgetBytes: number;
   /** Bytes of merged geometry marked for upload on this tick's merges, for the debug line. */
   private uploadBytesThisFrame = 0;
+  /** Superchunks merged and marked for upload during this tick. */
+  private mergesThisFrame = 0;
 
   private totalTriangles: number = 0;
   /**
@@ -964,6 +966,7 @@ export class TriangleRenderer {
     let state: SuperchunkState;
     let appended = false;
     if (wasFull) {
+      probe.count(Counter.fullRejoins);
       const geometry = this.takeGeometryPair();
       state = {
         slots: new Set(),
@@ -1465,6 +1468,11 @@ export class TriangleRenderer {
     return this.uploadBytesThisFrame;
   }
 
+  /** Superchunks the last tick merged and marked for upload. */
+  get lastTickMerges(): number {
+    return this.mergesThisFrame;
+  }
+
   /** Superchunks holding block geometry that has not been merged and uploaded yet. */
   get dirtySuperchunkCount(): number {
     return this.dirty.size;
@@ -1615,6 +1623,7 @@ export class TriangleRenderer {
     // backstop trips).
     this.frame++;
     this.uploadBytesThisFrame = 0;
+    this.mergesThisFrame = 0;
     // A block whose rebuild never arrives must not hold its neighbours off the
     // screen forever; past the stall backstop the group gives up whatever has
     // landed so far, and anything later uploads on its own.
@@ -1693,6 +1702,7 @@ export class TriangleRenderer {
       }
       if (this.rebuildSuperchunk(candidate.key)) {
         spent += candidate.bytes;
+        this.mergesThisFrame++;
         probe.count(Counter.merges);
       }
     }

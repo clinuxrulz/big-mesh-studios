@@ -32,9 +32,15 @@ export const Counter = {
   /** Geometry adopted straight from a fill, which no mesh request ever asked for. */
   meshesFromFill: 4,
   merges: 5,
-  uploads: 6,
-  scrolls: 7,
-  blocksStreamed: 8,
+  /**
+   * Merges that rebuilt a superchunk's geometry from every member rather than
+   * appending to what was already there, which owes the graphics card the
+   * whole superchunk again.
+   */
+  fullRejoins: 6,
+  uploads: 7,
+  scrolls: 8,
+  blocksStreamed: 9,
 } as const;
 
 /** Each counter's name, at the index that counter is kept under. */
@@ -54,33 +60,35 @@ export const Field = {
   scale: 2,
   /** Bytes uploaded to the graphics card during the frame. */
   uploadBytes: 3,
+  /** Superchunks whose geometry was merged and uploaded during the frame. */
+  merges: 4,
   /** Triangles in the drawn geometry. */
-  triangles: 4,
+  triangles: 5,
   /** Superchunks the occlusion pass found hidden. */
-  occluded: 5,
+  occluded: 6,
   /** Superchunks that survived to be drawn. */
-  visible: 6,
+  visible: 7,
   /** Blocks waiting for terrain data. */
-  fillPending: 7,
+  fillPending: 8,
   /** Blocks whose terrain data a worker is generating. */
-  fillInFlight: 8,
+  fillInFlight: 9,
   /** Blocks waiting for geometry. */
-  meshPending: 9,
+  meshPending: 10,
   /** Blocks whose geometry a worker is building. */
-  meshInFlight: 10,
+  meshInFlight: 11,
   /** Superchunks whose merged geometry is out of date. */
-  dirtySuperchunks: 11,
+  dirtySuperchunks: 12,
   /** The JavaScript heap in bytes, sampled about once a second. */
-  heapBytes: 12,
+  heapBytes: 13,
   /**
    * Whether the block the player stands in has its terrain, as 1 or 0. The
    * world holds the player still while it is 0, so a run of zeroes is the
    * player having outrun what the workers could stream.
    */
-  cellReady: 13,
-  playerX: 14,
-  playerY: 15,
-  playerZ: 16,
+  cellReady: 14,
+  playerX: 15,
+  playerY: 16,
+  playerZ: 17,
 } as const;
 
 /** Each per-frame value's name, at the column it is recorded in. */
@@ -247,6 +255,7 @@ export class PerfProbe {
     // The bytes uploaded and the superchunks merged are counted for one frame
     // each, unlike the queue depths, which stand until they change.
     this.gauges[Field.uploadBytes] = 0;
+    this.gauges[Field.merges] = 0;
 
     this._framesSeen++;
     this.cursor += ROW_STRIDE;

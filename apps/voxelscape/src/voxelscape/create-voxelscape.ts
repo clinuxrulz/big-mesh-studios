@@ -810,6 +810,7 @@ export const createVoxelscape = ({
     }
     const renderer = world.renderer;
     probe.gauge(Field.uploadBytes, renderer.lastTickUploadBytes);
+    probe.gauge(Field.merges, renderer.lastTickMerges);
     probe.gauge(Field.triangles, renderer.triangleCount);
     probe.gauge(Field.occluded, renderer.occlusions);
     probe.gauge(Field.visible, renderer.lastVisibleCount);

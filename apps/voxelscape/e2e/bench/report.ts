@@ -102,7 +102,8 @@ export const formatScenario = (scenario: ScenarioReport): string => {
       `meshes ${run.counters.meshesRequested}→${run.counters.meshesLanded} ` +
       `(${run.counters.meshesFromFill} arrived with their fill) · ` +
       `${run.counters.scrolls} scrolls streaming ${run.counters.blocksStreamed} blocks · ` +
-      `${run.counters.merges} merges, ${run.counters.uploads} uploads`,
+      `${run.counters.merges} merges (${run.counters.fullRejoins} rebuilt whole), ` +
+      `${run.counters.uploads} uploads`,
   );
   lines.push(
     `  queues   fill ${run.queues.fillPending}/${run.queues.fillInFlight} · ` +
@@ -111,7 +112,9 @@ export const formatScenario = (scenario: ScenarioReport): string => {
   );
   lines.push(
     `  upload   ${megabytes(run.upload.totalBytes)} over ${run.upload.framesWithUpload} frames, ` +
-      `most ${megabytes(run.upload.maxFrameBytes)} in one`,
+      `most ${megabytes(run.upload.maxFrameBytes)} in one ` +
+      `(${run.upload.mergesInBiggestFrame} superchunks merged; ` +
+      `${run.upload.maxFrameMerges} is the most in any frame)`,
   );
   lines.push(
     `  memory   heap ${megabytes(run.heap.startBytes)} → ${megabytes(run.heap.endBytes)} ` +
