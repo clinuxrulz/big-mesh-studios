@@ -107,13 +107,14 @@ export async function* buildFillMeshResults(
         dims: BLOCK_WORLD,
         voxels,
         scale: voxelSize,
+        data: data.storeData,
       });
-      store.data = data.storeData;
       store.mightHaveVoxels = data.mightHaveVoxels;
       store.hasWater = data.hasWater;
-      const light = new LightStore(voxels);
-      light.skylight = data.skyLight;
-      light.blocklight = data.blockLight;
+      const light = new LightStore(voxels, {
+        skylight: data.skyLight,
+        blocklight: data.blockLight,
+      });
       terrain = toTyped(buildBlockMesh(store, req.tileRects, light));
       water = toTyped(buildWaterMesh(store, light));
     }

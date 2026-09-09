@@ -5,6 +5,7 @@
 // corner's light across the meshing border exactly as they read its voxel.
 import type { Dim3 } from "./level-data";
 import {
+  paddedVoxelCount,
   VOXEL_LAVA,
   VOXEL_LAVA_LEVEL_1,
   VOXEL_LAVA_LEVEL_7,
@@ -46,12 +47,19 @@ export class LightStore {
   blocklight: Uint8Array;
   readonly padding: number = VOXEL_PADDING;
 
-  constructor(public voxels: Dim3) {
-    const p = this.padding;
-    const size =
-      (voxels[0] + 2 * p) * (voxels[1] + 2 * p) * (voxels[2] + 2 * p);
-    this.skylight = new Uint8Array(size);
-    this.blocklight = new Uint8Array(size);
+  /**
+   * @param voxels The interior volume this shadows, border excluded.
+   * @param channels Light to adopt, border included. A store built without it
+   *   allocates its own, which is what the window does once for each of its
+   *   slots; a worker that has just lit a slot hands the arrays it wrote.
+   */
+  constructor(
+    public voxels: Dim3,
+    channels?: { skylight: Uint8Array; blocklight: Uint8Array },
+  ) {
+    const size = paddedVoxelCount(voxels, this.padding);
+    this.skylight = channels?.skylight ?? new Uint8Array(size);
+    this.blocklight = channels?.blocklight ?? new Uint8Array(size);
   }
 
   /** The flat index of a signed voxel, border included. */

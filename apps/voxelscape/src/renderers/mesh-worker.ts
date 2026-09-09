@@ -81,12 +81,13 @@ export const handleMeshMessage = (
     dims: [voxels[0] * scale, voxels[1] * scale, voxels[2] * scale],
     voxels,
     scale,
+    data,
   });
-  store.data = data;
   store.hasWater = hasWater;
-  const light = new LightStore(voxels);
-  light.skylight = skyLight;
-  light.blocklight = blockLight;
+  const light = new LightStore(voxels, {
+    skylight: skyLight,
+    blocklight: blockLight,
+  });
   return {
     type: "mesh",
     id,

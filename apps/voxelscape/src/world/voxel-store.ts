@@ -85,6 +85,23 @@ export const fluidLevel = (id: number): number => {
 export const VOXEL_PADDING = 1;
 
 /**
+ * How many voxels one block's array holds, border included — the length of a
+ * store's `data` and of each of a `LightStore`'s channels, and the number every
+ * statement about what the window costs is built from.
+ *
+ * @param voxels The interior volume, border excluded.
+ * @param padding Border rows on each face; `VOXEL_PADDING` unless a caller has
+ *   its own.
+ */
+export const paddedVoxelCount = (
+  voxels: Dim3,
+  padding: number = VOXEL_PADDING,
+): number =>
+  (voxels[0] + 2 * padding) *
+  (voxels[1] + 2 * padding) *
+  (voxels[2] + 2 * padding);
+
+/**
  * CPU-side source of truth for one block's voxels, independent of the GPU
  * chunk textures. The renderer's `Level` is derived from this store by
  * `syncLevelFromStore`, which sweeps it for surface voxels. Mutating the
@@ -136,16 +153,25 @@ export class VoxelStore {
    */
   hasFlowing = false;
 
-  constructor(params: { dims: Dim3; voxels: Dim3; scale: number }) {
+  /**
+   * @param params.data Voxels to adopt, border included, as `paddedVoxelCount`
+   *   counts them. A store built without them allocates its own, which is what
+   *   the window does once for each of its slots; a worker filling a slot's
+   *   voxels hands the arrays it filled instead, so nothing allocates a volume
+   *   only to overwrite it.
+   */
+  constructor(params: {
+    dims: Dim3;
+    voxels: Dim3;
+    scale: number;
+    data?: Uint8Array;
+  }) {
     this.dims = params.dims;
     this.voxels = params.voxels;
     this.scale = params.scale;
-    const p = this.padding;
-    this.data = new Uint8Array(
-      (params.voxels[0] + 2 * p) *
-        (params.voxels[1] + 2 * p) *
-        (params.voxels[2] + 2 * p),
-    );
+    this.data =
+      params.data ??
+      new Uint8Array(paddedVoxelCount(params.voxels, this.padding));
   }
 
   /** Index of an interior voxel (including the border offset). */

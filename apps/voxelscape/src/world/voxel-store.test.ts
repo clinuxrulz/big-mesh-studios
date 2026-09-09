@@ -12,6 +12,7 @@ import {
   VOXEL_WATER,
   VoxelStore,
   fillStore,
+  paddedVoxelCount,
 } from "./voxel-store";
 
 /**
@@ -22,6 +23,28 @@ const smallStore = (): VoxelStore =>
   new VoxelStore({ dims: [8, 8, 8], voxels: [4, 4, 4], scale: 2 });
 
 describe("VoxelStore", () => {
+  it("holds one byte a voxel, border included", () => {
+    // The number every statement about what the window costs is built from: a
+    // slot's array is this long, and there are three of them per slot.
+    expect(paddedVoxelCount([4, 4, 4])).toBe(6 * 6 * 6);
+    expect(smallStore().data.length).toBe(paddedVoxelCount([4, 4, 4]));
+  });
+
+  it("adopts the voxels it is handed instead of allocating a volume to overwrite", () => {
+    // A worker that has just filled a slot's voxels hands the array it filled.
+    // A store that allocated its own here would zero a volume nobody reads.
+    const filled = new Uint8Array(paddedVoxelCount([4, 4, 4]));
+    filled.fill(VOXEL_STONE);
+    const store = new VoxelStore({
+      dims: [8, 8, 8],
+      voxels: [4, 4, 4],
+      scale: 2,
+      data: filled,
+    });
+    expect(store.data).toBe(filled);
+    expect(store.get(0, 0, 0)).toBe(VOXEL_STONE);
+  });
+
   it("stores and reads voxel ids", () => {
     const store = smallStore();
     expect(store.get(0, 0, 0)).toBe(VOXEL_AIR);

@@ -11,6 +11,29 @@ const smallStore = (): VoxelStore =>
     scale: 2,
   });
 
+describe("LightStore", () => {
+  it("adopts the light it is handed instead of allocating channels to overwrite", () => {
+    // The worker lights a slot into the arrays it was given and hands them
+    // back; a store allocating its own here would zero two volumes nobody
+    // reads.
+    const store = smallStore();
+    const skylight = new Uint8Array(store.data.length);
+    const blocklight = new Uint8Array(store.data.length);
+    skylight[0] = MAX_LIGHT;
+    const light = new LightStore(store.voxels, { skylight, blocklight });
+    expect(light.skylight).toBe(skylight);
+    expect(light.blocklight).toBe(blocklight);
+    expect(light.skylight[0]).toBe(MAX_LIGHT);
+  });
+
+  it("allocates its own channels when it is handed none", () => {
+    const store = smallStore();
+    const light = new LightStore(store.voxels);
+    expect(light.skylight.length).toBe(store.data.length);
+    expect(light.blocklight.length).toBe(store.data.length);
+  });
+});
+
 describe("fillBlockLight", () => {
   it("seeds an emissive voxel at its listed level", () => {
     const store = smallStore();
