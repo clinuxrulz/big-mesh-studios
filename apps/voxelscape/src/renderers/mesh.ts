@@ -649,24 +649,6 @@ export const setGeometryData = (
 };
 
 /**
- * Applies the per-vertex probe colours (three floats per vertex, one 0..1
- * channel each) to a geometry already uploaded with `setGeometryData`. The
- * occlusion-culled probe material reads the `occlusionColor` attribute; a
- * material that does not reference it — every other material in the world —
- * never has it bound. `committedVertices` behaves as in `setGeometryData`.
- */
-export const setOcclusionColors = (
-  geometry: BufferGeometry,
-  colors: number[] | Float32Array,
-  committedVertices = 0,
-): void => {
-  geometry.setAttribute(
-    "occlusionColor",
-    attrWithRange(colors, 3, committedVertices),
-  );
-};
-
-/**
  * Wraps extracted arrays into a fresh rmsl geometry (for tests and one-off
  * geometry); runtime block meshes should reuse a persistent geometry via
  * `setGeometryData` instead.

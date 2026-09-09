@@ -1,24 +1,39 @@
 // The flat-colour pass the hardware occlusion culler draws, shown on screen so
 // a viewer can see which chunk each region of the world belongs to. It reads
-// the same per-vertex `occlusionColor` attribute the probe pass writes — the
-// packed slot id — and remaps that id to a colour the eye can tell apart: the
-// probe's own colour packs the id into the three 8-bit channels, which shades
-// adjacent slot ids one byte apart and so reads as a smear. Here the id is
-// unpacked and rotated through hue space by the golden angle, so even
-// neighbouring slots land on clearly different hues. The readback logic is
-// untouched: this is a view of the id, not a different way of encoding it.
-import { mat3, vec3, vec4, type Node } from "@random-mesh/rmsl";
+// the same `slotColor` uniform the probe pass writes — the packed slot id —
+// and remaps that id to a colour the eye can tell apart: the probe's own
+// colour packs the id into the three 8-bit channels, which shades adjacent
+// slot ids one byte apart and so reads as a smear. Here the id is unpacked
+// and rotated through hue space by the golden angle, so even neighbouring
+// slots land on clearly different hues. The readback logic is untouched: this
+// is a view of the id, not a different way of encoding it.
+import {
+  mat3,
+  vec3,
+  vec4,
+  type Node,
+  type UniformNode,
+} from "@random-mesh/rmsl";
 import { Builder, NodeMaterial } from "@random-mesh/rmsl/scene";
+import type { SlotColoured } from "./occlusion-probe-material";
 
-export class OcclusionDebugMaterial extends NodeMaterial {
+export class OcclusionDebugMaterial
+  extends NodeMaterial
+  implements SlotColoured
+{
+  slotColor: [number, number, number] = [0, 0, 0];
+
+  private slotColorUniform: UniformNode<"vec3"> | undefined;
+
   protected setup(b: Builder): void {
-    void b.attribute("occlusionColor", "vec3");
-    void b.varying("occlusionColor", "vec3");
+    this.slotColorUniform = b.materialUniform(
+      "slotColor",
+      "vec3",
+      () => this.slotColor,
+    );
   }
 
   protected buildVertexBody(b: Builder): Node<"vec4"> {
-    const colourVarying = b.varying("occlusionColor", "vec3");
-    colourVarying.assign(b.attribute("occlusionColor", "vec3"));
     const position4 = vec4(b.position, 1);
     const localPosition = b.instancing
       ? b.instanceMatrix.mul(position4)
@@ -38,7 +53,9 @@ export class OcclusionDebugMaterial extends NodeMaterial {
   }
 
   protected buildFragmentBody(b: Builder): Node<"vec4"> {
-    const packed = b.varying("occlusionColor", "vec3");
+    const packed =
+      this.slotColorUniform ??
+      b.materialUniform("slotColor", "vec3", () => this.slotColor);
     const red = packed.element(0).mul(255).round();
     const green = packed.element(1).mul(255).round();
     const blue = packed.element(2).mul(255).round();

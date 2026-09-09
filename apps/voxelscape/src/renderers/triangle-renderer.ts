@@ -38,17 +38,13 @@ import {
 import type { PerspectiveCamera } from "@random-mesh/rmsl/scene";
 import type { VoxelTileConfig } from "./atlas";
 import { BLOCK_WORLD, type Dim3, type WorldBlock } from "../world/level-data";
-import {
-  setGeometryData,
-  setOcclusionColors,
-  type BlockMeshes,
-  type MeshArrays,
-} from "./mesh";
+import { setGeometryData, type BlockMeshes, type MeshArrays } from "./mesh";
 import { MeshClient } from "./mesh-client";
 import { Counter, Phase, probe } from "../render/perf-probe";
 import type { WorldWorkerPool } from "../world/worker-pool";
 import { OcclusionDebugMaterial } from "./occlusion-debug-material";
 import { OcclusionProbeMaterial } from "./occlusion-probe-material";
+import type { SlotColoured } from "./occlusion-probe-material";
 import {
   isNearCell,
   probeColor,
@@ -358,11 +354,11 @@ const MAX_UPLOAD_BYTES_PER_FRAME = 2 * 1024 * 1024;
 
 /**
  * The bytes one vertex of merged geometry adds to the GPU upload: position 12
- * + normal 12 + uv 8 + brightness 4 + the probe colour 12 the merge stamps on
- * every vertex. A pass without UVs is over-counted by its 8 bytes, which only
- * tightens the frame's budget. Indices are counted at `INDEX_UPLOAD_BYTES`.
+ * + normal 12 + uv 8 + brightness 4. A pass without UVs is over-counted by its
+ * 8 bytes, which only tightens the frame's budget. Indices are counted at
+ * `INDEX_UPLOAD_BYTES`.
  */
-const VERTEX_UPLOAD_BYTES = 48;
+const VERTEX_UPLOAD_BYTES = 36;
 
 /** The bytes one index of merged geometry adds to the GPU upload. */
 const INDEX_UPLOAD_BYTES = 4;
@@ -519,10 +515,6 @@ type MergedArrays = {
   normals: Growable<Float32Array>;
   uvs: Growable<Float32Array>;
   indices: Growable<Uint32Array>;
-  /** Three 0..1 channels per vertex. The occlusion probe material reads this
-   * as the chunk's flat colour, so the merged geometry carries what slot each
-   * run of its vertices belongs to. */
-  colors: Growable<Float32Array>;
   /** One 0..1 brightness per vertex, carried from the per-chunk bake. */
   brightness: Growable<Float32Array>;
 };
@@ -532,7 +524,6 @@ const emptyArrays = (): MergedArrays => ({
   normals: new Growable(Float32Array),
   uvs: new Growable(Float32Array),
   indices: new Growable(Uint32Array),
-  colors: new Growable(Float32Array),
   brightness: new Growable(Float32Array),
 });
 
@@ -561,13 +552,12 @@ const meshArraysBytes = (arrays: MeshArrays): number =>
   (arrays.positions.length / 3) * VERTEX_UPLOAD_BYTES +
   arrays.indices.length * INDEX_UPLOAD_BYTES;
 
-/** Bytes a superchunk's six merged attribute buffers occupy. */
+/** Bytes a superchunk's five merged attribute buffers occupy. */
 const mergedArraysBytes = (arrays: MergedArrays): number =>
   arrays.positions.capacityBytes +
   arrays.normals.capacityBytes +
   arrays.uvs.capacityBytes +
   arrays.indices.capacityBytes +
-  arrays.colors.capacityBytes +
   arrays.brightness.capacityBytes;
 
 /**
@@ -632,9 +622,8 @@ const inFrustum = (
  * Appends one chunk's geometry to a superchunk's merged arrays at the
  * superchunk's origin: the chunk's block-local vertices are re-origined by
  * `(blockCenter - superchunkCenter)` and its indices are re-based on the
- * running vertex count. Every appended vertex also receives the chunk's probe
- * colour, so the merged geometry tells the occlusion pass which slot each run
- * of triangles belongs to.
+ * running vertex count. Which slot a run of triangles belongs to is not
+ * written here: the probe mesh drawing that run carries its own slot id.
  */
 const appendArrays = (
   into: MergedArrays,
@@ -642,12 +631,9 @@ const appendArrays = (
   dx: number,
   dy: number,
   dz: number,
-  color: [number, number, number],
 ): void => {
   const base = into.positions.count / 3;
-  const vertices = a.positions.length / 3;
   into.positions.pushOffset(a.positions, dx, dy, dz);
-  into.colors.pushTris(color[0], color[1], color[2], vertices);
   into.normals.pushMany(a.normals);
   into.uvs.pushMany(a.uvs);
   into.brightness.pushMany(a.brightness);
@@ -1075,11 +1061,7 @@ export class TriangleRenderer {
       committed.terrainVerts,
       committed.terrainIndices,
     );
-    setOcclusionColors(
-      state.terrainGeometry,
-      state.terrain.colors.array(),
-      committed.terrainVerts,
-    );
+
     setGeometryData(
       state.waterGeometry,
       {
@@ -1092,11 +1074,7 @@ export class TriangleRenderer {
       committed.waterVerts,
       committed.waterIndices,
     );
-    setOcclusionColors(
-      state.waterGeometry,
-      state.water.colors.array(),
-      committed.waterVerts,
-    );
+
     this.scLastUpload.set(key, this.frame);
     probe.count(Counter.uploads);
     // Count what this upload marked before the committed counters catch up, so
@@ -1185,15 +1163,14 @@ export class TriangleRenderer {
     const dx = m.center[0] - center[0];
     const dy = m.center[1] - center[1];
     const dz = m.center[2] - center[2];
-    const color = probeColor(m.index);
     const terrainStart = state.terrain.indices.count;
-    appendArrays(state.terrain, mesh.terrain, dx, dy, dz, color);
+    appendArrays(state.terrain, mesh.terrain, dx, dy, dz);
     state.terrainRanges.set(m.index, {
       start: terrainStart,
       count: mesh.terrain.indices.length,
     });
     const waterStart = state.water.indices.count;
-    appendArrays(state.water, mesh.water, dx, dy, dz, color);
+    appendArrays(state.water, mesh.water, dx, dy, dz);
     state.waterRanges.set(m.index, {
       start: waterStart,
       count: mesh.water.indices.length,
@@ -1227,11 +1204,7 @@ export class TriangleRenderer {
           center,
           terrainRange,
         );
-        const probe = this.slotMesh(
-          this.scProbeTerrain,
-          this.occlusionScene,
-          m.index,
-        );
+        const probe = this.probeMesh(this.scProbeTerrain, m.index);
         this.seatSlotMesh(
           probe,
           state.terrainGeometry,
@@ -1249,11 +1222,7 @@ export class TriangleRenderer {
           center,
           waterRange,
         );
-        const probe = this.slotMesh(
-          this.scProbeWater,
-          this.occlusionScene,
-          m.index,
-        );
+        const probe = this.probeMesh(this.scProbeWater, m.index);
         this.seatSlotMesh(
           probe,
           state.waterGeometry,
@@ -1272,6 +1241,26 @@ export class TriangleRenderer {
         this.contentSlots.delete(m.index);
       }
     }
+  }
+
+  /**
+   * Gets a slot's probe mesh, creating it the first time under the occlusion
+   * scene and seating the slot id it paints itself in. The id is the same for
+   * every vertex the mesh draws and the material is shared with every other
+   * probe, so the mesh writes it to the material it is about to be drawn with
+   * rather than the geometry carrying a copy on each vertex.
+   */
+  private probeMesh(map: Map<number, Mesh>, slot: number): Mesh {
+    const existing = map.get(slot);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const mesh = this.slotMesh(map, this.occlusionScene, slot);
+    const color = probeColor(slot);
+    mesh.onBeforeRender = () => {
+      (mesh.material as unknown as SlotColoured).slotColor = color;
+    };
+    return mesh;
   }
 
   /** Gets a slot's mesh from `map`, creating it under `container` the first time. */

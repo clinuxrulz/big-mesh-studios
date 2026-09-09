@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { PerspectiveCamera } from "@random-mesh/rmsl/scene";
 import { scBounds, TriangleRenderer } from "./triangle-renderer";
+import { probeColor } from "./occlusion";
 import { buildBlockShell, type WorldBlock } from "../world/level-data";
 import { VOXEL_GRASS } from "../world/voxel-store";
 import type { TileRect } from "./atlas";
@@ -258,3 +259,48 @@ describe("TriangleRenderer", () => {
     expect(renderer.triangleCount).toBeGreaterThan(0);
   });
 });
+
+describe("the occlusion probe's slot id", () => {
+  /** Every probe mesh the renderer put in its occlusion scene. */
+  const probes = (
+    renderer: TriangleRenderer,
+  ): { material: unknown; onBeforeRender?: () => void }[] => {
+    const inside = renderer as unknown as {
+      occlusionScene: { children: { material: unknown }[] };
+    };
+    return inside.occlusionScene.children;
+  };
+
+  /** A renderer with one meshed block, merged into its superchunk. */
+  const meshed = (): TriangleRenderer => {
+    const renderer = rendererFor(blockWithFloor());
+    renderer.repositionBlock(0, [0, 0, 0]);
+    renderer.onBlockChanged(0);
+    renderer.meshNow(0);
+    settle(renderer);
+    return renderer;
+  };
+
+  it("is painted on by the mesh that draws it, not carried on its vertices", () => {
+    const renderer = meshed();
+    const [probe] = probes(renderer);
+    expect(probe).toBeDefined();
+    const material = probe.material as { slotColor: [number, number, number] };
+    material.slotColor = [0, 0, 0];
+    probe.onBeforeRender?.();
+    expect(material.slotColor).toEqual(probeColor(0));
+  });
+
+  it("leaves no colour on the merged geometry", () => {
+    const renderer = meshed();
+    const [probe] = probes(renderer);
+    const geometry = (probe as unknown as { geometry: BufferGeometryLike })
+      .geometry;
+    expect(geometry.getAttribute("occlusionColor")).toBeUndefined();
+  });
+});
+
+/** As much of a geometry as the test above reads. */
+interface BufferGeometryLike {
+  getAttribute(name: string): unknown;
+}

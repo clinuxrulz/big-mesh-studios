@@ -1,26 +1,43 @@
 // The flat colour pass the hardware occlusion culler draws into its offscreen
 // target. One material is shared by every chunk's probes (terrain and water
-// get one instance each, differing only in whether they write depth), with the
-// chunk's slot id carried per vertex in the geometry's `occlusionColor`
-// attribute — so the whole probe scene compiles exactly two programs, whatever
-// the window holds. The fragment writes the interpolated id straight out: no
-// lighting, no texture, no fog, so the pixel the readback collects is exactly
-// the chunk that won the depth test there.
-import { mat3, vec4, type Node } from "@random-mesh/rmsl";
+// get one instance each, differing only in whether they write depth), so the
+// whole probe scene compiles exactly two programs whatever the window holds.
+// The fragment writes the slot id straight out: no lighting, no texture, no
+// fog, so the pixel the readback collects is exactly the chunk that won the
+// depth test there.
+//
+// The id is the same for every vertex a probe mesh draws, so it is a uniform
+// the mesh sets before it draws rather than a colour on each of its vertices.
+import { mat3, vec4, type Node, type UniformNode } from "@random-mesh/rmsl";
 import { Builder, NodeMaterial } from "@random-mesh/rmsl/scene";
 
-export class OcclusionProbeMaterial extends NodeMaterial {
+/**
+ * A material that paints whatever it draws in one slot's packed id. The
+ * renderer packs a material's uniforms once per object, so a mesh seats the
+ * id it belongs to before each of its draws.
+ */
+export interface SlotColoured {
+  /** The slot id being drawn, packed into three 0..1 channels. */
+  slotColor: [number, number, number];
+}
+
+export class OcclusionProbeMaterial
+  extends NodeMaterial
+  implements SlotColoured
+{
+  slotColor: [number, number, number] = [0, 0, 0];
+
+  private slotColorUniform: UniformNode<"vec3"> | undefined;
+
   protected setup(b: Builder): void {
-    // The varying and the attribute it is fed from are declared in `setup`, so
-    // both stages resolve the same names; the vertex body below writes the
-    // varying, the fragment body reads it back.
-    void b.attribute("occlusionColor", "vec3");
-    void b.varying("occlusionColor", "vec3");
+    this.slotColorUniform = b.materialUniform(
+      "slotColor",
+      "vec3",
+      () => this.slotColor,
+    );
   }
 
   protected buildVertexBody(b: Builder): Node<"vec4"> {
-    const colourVarying = b.varying("occlusionColor", "vec3");
-    colourVarying.assign(b.attribute("occlusionColor", "vec3"));
     const position4 = vec4(b.position, 1);
     const localPosition = b.instancing
       ? b.instanceMatrix.mul(position4)
@@ -40,6 +57,10 @@ export class OcclusionProbeMaterial extends NodeMaterial {
   }
 
   protected buildFragmentBody(b: Builder): Node<"vec4"> {
-    return vec4(b.varying("occlusionColor", "vec3"), 1);
+    return vec4(
+      this.slotColorUniform ??
+        b.materialUniform("slotColor", "vec3", () => this.slotColor),
+      1,
+    );
   }
 }
