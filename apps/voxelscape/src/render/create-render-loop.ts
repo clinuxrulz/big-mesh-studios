@@ -6,7 +6,7 @@ import {
 } from "@random-mesh/rmsl/scene";
 import { AdaptiveResolution } from "./adaptive";
 import { GpuTimer } from "./perf";
-import { Phase, probe } from "./perf-probe";
+import { Field, Phase, probe } from "./perf-probe";
 
 /** How many frames between each debug-perf GPU readback, which stalls the pipeline. */
 const SAMPLE_EVERY = 24;
@@ -81,6 +81,12 @@ export const createRenderLoop = ({
   renderer.setClearColor(clearColor(), 1);
   /** Built the first frame the statistics are asked for, and kept from then on. */
   let timer: GpuTimer | undefined;
+  /**
+   * Times the occlusion pass on the graphics card separately from the draw.
+   * The pass exists to save the card work, so what it costs the card is the
+   * other half of whether it is worth running.
+   */
+  let occlusionTimer: GpuTimer | undefined;
 
   const adaptive = resolution ?? new AdaptiveResolution();
   /** The canvas's layout size in device pixels; the scale is applied on top of it. */
@@ -105,10 +111,14 @@ export const createRenderLoop = ({
       return false;
     }
     timer ??= new GpuTimer(renderer.gl);
-    timer.begin();
+    occlusionTimer ??= new GpuTimer(renderer.gl);
+    occlusionTimer.begin();
     probe.begin(Phase.occlusion);
     beforeRender?.(renderer, camera);
     probe.end(Phase.occlusion);
+    occlusionTimer.end();
+    occlusionTimer.poll();
+    timer.begin();
     probe.begin(Phase.draw);
     renderer.render(scene, camera);
     probe.end(Phase.draw);
@@ -159,6 +169,9 @@ export const createRenderLoop = ({
     probe.end(Phase.advance);
     renderer.setClearColor(clearColor(), 1);
     const sampled = render();
+    if (occlusionTimer !== undefined && occlusionTimer.answered) {
+      probe.gauge(Field.gpuOcclusionMs, occlusionTimer.ms);
+    }
     probe.frame(
       gapMs,
       timer !== undefined && timer.answered ? timer.ms : -1,

@@ -6,12 +6,13 @@
 
 /**
  * Minimal typing for the `EXT_disjoint_timer_query_webgl2` WebGL extension,
- * which is missing from the TypeScript DOM library used here.
+ * which is missing from the TypeScript DOM library used here. The extension
+ * carries only the elapsed-time target; a result is read back through the
+ * context's own `QUERY_RESULT_AVAILABLE` and `QUERY_RESULT`, which WebGL 2
+ * already has and which the WebGL 1 extension had to add for itself.
  */
 interface ExtTimerQuery {
   readonly TIME_ELAPSED_EXT: GLenum;
-  readonly QUERY_RESULT_AVAILABLE: GLenum;
-  readonly QUERY_RESULT: GLenum;
 }
 
 /**
@@ -54,8 +55,8 @@ export class GpuTimer {
     if (!this.ext) return;
     if (this.frame > 0) {
       const q = this.queries[(this.frame - 1) % 2];
-      if (this.gl.getQueryParameter(q, this.ext.QUERY_RESULT_AVAILABLE)) {
-        const nanos = this.gl.getQueryParameter(q, this.ext.QUERY_RESULT);
+      if (this.gl.getQueryParameter(q, this.gl.QUERY_RESULT_AVAILABLE)) {
+        const nanos = this.gl.getQueryParameter(q, this.gl.QUERY_RESULT);
         this.ms = Number(nanos) / 1e6;
         this.answered = true;
       }

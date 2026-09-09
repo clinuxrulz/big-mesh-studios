@@ -8,6 +8,9 @@
 //   pnpm bench --profile phone       # as if on a mid-range phone
 //   pnpm bench --unlocked            # draw without waiting for the display,
 //                                    # so the gap measures what a frame costs
+//   pnpm bench --scale 0.5           # pin the render scale somewhere else
+//   pnpm bench --adaptive            # let the resolution scaler run, to
+//                                    # measure the scaler itself
 //
 // A headed browser is not optional: headless Chromium draws through a software
 // rasterizer, where every frame is slow enough to drown the numbers being
@@ -68,6 +71,15 @@ interface Options {
   port: number;
   headless: boolean;
   profile: MachineProfile;
+  /** The render scale to pin, or undefined to take the profile's. */
+  scale?: number;
+  /**
+   * Whether to leave the resolution scaler adapting. Off by default: a scaler
+   * free to lower the render scale answers a slower frame by drawing fewer
+   * pixels, so a renderer that got slower reports the same frame time on a
+   * smaller canvas and the regression never appears in the numbers.
+   */
+  adaptive: boolean;
   /**
    * Whether to let the browser draw as fast as it can rather than waiting for
    * the display. Waiting hides the cost of a frame behind the refresh rate;
@@ -84,6 +96,8 @@ const parseOptions = (argv: string[]): Options => {
   let headless = false;
   let all = false;
   let unlocked = false;
+  let adaptive = false;
+  let scale: number | undefined;
   let profile = profileNamed("native");
   for (let i = 0; i < argv.length; i++) {
     const argument = argv[i];
@@ -95,6 +109,10 @@ const parseOptions = (argv: string[]): Options => {
       unlocked = true;
     } else if (argument === "--profile") {
       profile = profileNamed(argv[++i]);
+    } else if (argument === "--adaptive") {
+      adaptive = true;
+    } else if (argument === "--scale") {
+      scale = Number(argv[++i]);
     } else if (argument === "--repeat") {
       repeat = Number(argv[++i]);
     } else if (argument === "--radius") {
@@ -121,7 +139,17 @@ const parseOptions = (argv: string[]): Options => {
     }
     return scenario;
   });
-  return { scenarios, repeat, radius, port, headless, profile, unlocked };
+  return {
+    scenarios,
+    repeat,
+    radius,
+    port,
+    headless,
+    profile,
+    unlocked,
+    adaptive,
+    scale,
+  };
 };
 
 const git = (...args: string[]): string =>
@@ -216,12 +244,21 @@ const waitForWindow = async (page: Page): Promise<void> => {
  */
 const pinConditions = async (
   page: Page,
-  pins: { scale: number; timeSeconds: number; workers?: number },
+  pins: {
+    scale: number;
+    adaptive: boolean;
+    timeSeconds: number;
+    workers?: number;
+  },
 ): Promise<string> =>
   page.evaluate(async (pins) => {
     const bench = (window as unknown as { __voxelscape: BenchWindow })
       .__voxelscape;
-    await bench.run(`/render:resolution ${pins.scale}`);
+    await bench.run(
+      pins.adaptive
+        ? "/render:resolution auto"
+        : `/render:resolution ${pins.scale}`,
+    );
     await bench.run("/clock:speed 0");
     await bench.run(`/clock:time ${pins.timeSeconds}`);
     await bench.run("/weather clear");
@@ -320,8 +357,10 @@ const main = async (): Promise<void> => {
     await waitForWindow(page);
     console.log("window loaded; settling");
     await page.waitForTimeout(SETTLE_MS);
+    const scale = options.scale ?? options.profile.scale;
     const workers = await pinConditions(page, {
-      scale: options.profile.scale,
+      scale,
+      adaptive: options.adaptive,
       timeSeconds: PINNED_TIME_SECONDS,
       workers: options.profile.workers,
     });
@@ -366,7 +405,8 @@ const main = async (): Promise<void> => {
         viewport,
         chunkRadius: machine.chunkRadius,
         blockCount: machine.blockCount,
-        pinnedScale: options.profile.scale,
+        pinnedScale: scale,
+        adaptiveResolution: options.adaptive,
         workers,
         profile: options.profile.name,
         cpuThrottle: options.profile.cpuThrottle,

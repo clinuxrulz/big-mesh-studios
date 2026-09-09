@@ -42,8 +42,10 @@ export interface RunSummary {
   wrapped: boolean;
   /** Milliseconds between animation callbacks. */
   gap: Spread;
-  /** Milliseconds the graphics card spent drawing. */
+  /** Milliseconds the graphics card spent drawing the scene. */
   gpu: Spread;
+  /** Milliseconds the graphics card spent on the occlusion pass. */
+  gpuOcclusion: Spread;
   /**
    * Milliseconds of main-thread work a frame: the world's tick, the occlusion
    * pass and the draw call together. Unlike the gap, this is not held down by
@@ -76,6 +78,8 @@ export interface RunSummary {
     maxFrameMerges: number;
   };
   triangles: { median: number; max: number };
+  /** What the occlusion pass hid against what it left to draw. */
+  culling: { occluded: number; visible: number };
   heap: { startBytes: number; endBytes: number; maxBytes: number };
   /** Bytes of voxels, light and geometry the world holds, counted rather than sampled. */
   resident: {
@@ -249,6 +253,9 @@ export const summarize = (drain: PerfDrain): RunSummary => {
     // A browser without the timer-query extension reports every frame as -1,
     // which leaves the spread empty rather than claiming the card took no time.
     gpu: spreadOf(columnFor(drain, "gpuMs").filter((ms) => ms >= 0)),
+    gpuOcclusion: spreadOf(
+      columnFor(drain, "gpuOcclusionMs").filter((ms) => ms > 0),
+    ),
     drops: dropsIn(realGaps),
     scale: {
       min: scale.length === 0 ? 0 : Math.min(...scale),
@@ -273,6 +280,10 @@ export const summarize = (drain: PerfDrain): RunSummary => {
     triangles: {
       median: spreadOf(columnFor(drain, "triangles")).median,
       max: maxOf(columnFor(drain, "triangles")),
+    },
+    culling: {
+      occluded: spreadOf(columnFor(drain, "occluded")).median,
+      visible: spreadOf(columnFor(drain, "visible")).median,
     },
     heap: {
       startBytes: heap[0] ?? 0,

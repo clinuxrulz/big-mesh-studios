@@ -19,6 +19,8 @@ export interface RunContext {
   blockCount: number;
   /** The render scale the run pinned, so the adaptive scaler could not absorb a regression. */
   pinnedScale: number;
+  /** Whether the scaler was left free to move it instead. */
+  adaptiveResolution: boolean;
   /** How the world's worker pool was sized. */
   workers: string;
   /** The machine the run stood in for, and how far its processor was slowed. */
@@ -112,11 +114,19 @@ export const formatScenario = (
   const gpu =
     run.gpu.count === 0
       ? "gpu timing unsupported by this browser"
-      : `gpu p50 ${micro(run.gpu.median)} p99 ${micro(run.gpu.p99)}`;
+      : `gpu draw p50 ${micro(run.gpu.median)} p99 ${micro(run.gpu.p99)}` +
+        (run.gpuOcclusion.count === 0
+          ? ""
+          : `, occlusion pass p50 ${micro(run.gpuOcclusion.median)} p99 ${micro(run.gpuOcclusion.p99)}`);
   lines.push(
     `  drawing  ${gpu} · ` +
       `scale ${run.scale.median.toFixed(3)}x (lowest ${run.scale.min.toFixed(3)}x) · ` +
       `${Math.round(run.triangles.median).toLocaleString()} triangles`,
+  );
+  lines.push(
+    `  culling  ${Math.round(run.culling.occluded)} superchunks hidden, ` +
+      `${Math.round(run.culling.visible)} drawn — what the occlusion pass buys ` +
+      `for what it costs the card above`,
   );
   const phases = busyPhases(run)
     .map(([name, mean, max]) => `${name} ${micro(mean)}/${micro(max)}`)
@@ -191,7 +201,10 @@ export const formatReport = (report: BenchReport): string => {
     `${context.graphicsCard} · ${context.cores} threads · ` +
       `${context.viewport.width}x${context.viewport.height} · ` +
       `radius ${context.chunkRadius} (${context.blockCount} blocks) · ` +
-      `scale pinned at ${context.pinnedScale} · ${context.workers}`,
+      (context.adaptiveResolution
+        ? "resolution adapting"
+        : `scale pinned at ${context.pinnedScale}`) +
+      ` · ${context.workers}`,
   ].join("\n");
   return [
     head,

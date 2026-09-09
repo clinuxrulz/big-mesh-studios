@@ -54,7 +54,7 @@ export const COUNTER_NAMES = Object.keys(Counter) as (keyof typeof Counter)[];
 export const Field = {
   /** Milliseconds between this frame's animation callback and the one before. */
   gapMs: 0,
-  /** Milliseconds the graphics card spent drawing, from `GpuTimer`. */
+  /** Milliseconds the graphics card spent drawing the scene, from `GpuTimer`. */
   gpuMs: 1,
   /** The render scale the frame was drawn at, where 1 is the display resolution. */
   scale: 2,
@@ -90,15 +90,17 @@ export const Field = {
   voxelBytes: 15,
   /** Of those, the bytes held as built and merged geometry. */
   geometryBytes: 16,
+  /** Milliseconds the graphics card spent on the occlusion pass, from its own `GpuTimer`. */
+  gpuOcclusionMs: 17,
   /**
    * Whether the block the player stands in has its terrain, as 1 or 0. The
    * world holds the player still while it is 0, so a run of zeroes is the
    * player having outrun what the workers could stream.
    */
-  cellReady: 17,
-  playerX: 18,
-  playerY: 19,
-  playerZ: 20,
+  cellReady: 18,
+  playerX: 19,
+  playerY: 20,
+  playerZ: 21,
 } as const;
 
 /** Each per-frame value's name, at the column it is recorded in. */
