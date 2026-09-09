@@ -183,27 +183,30 @@ function Scenario(props: {
   scenario: ScenarioReport;
   paced: boolean;
 }): JSX.Element {
-  const run = () => representative(props.scenario.repeats);
-  const frames = () =>
+  const run = representative(props.scenario.repeats);
+  const frames =
     props.scenario.samples === undefined
       ? []
       : framesOf(props.scenario.samples);
-  const at = () => frames().map((frame) => frame.at);
+  const at = frames.map((frame) => frame.at);
+  const phases = phaseBands(frames);
+  const memory = memoryBands(frames);
+  const queues = queueLines(frames);
 
   return (
     <section class="scenario">
       <h2>{props.scenario.name}</h2>
       <p class="lede">{props.scenario.description}</p>
-      <Tiles run={run()} scenario={props.scenario} paced={props.paced} />
+      <Tiles run={run} scenario={props.scenario} paced={props.paced} />
       <Show
-        when={frames().length > 0}
+        when={frames.length > 0}
         fallback={<p class="empty">This run kept no frames to draw.</p>}
       >
         <Chart
           title="Where each frame went"
           caption="The stretches of one frame that do not contain one another, stacked into what the frame cost the main thread. Each column is a whole real frame — the costliest in its slice of the run — so a tall column is a frame that happened."
-          at={at()}
-          series={phaseBands(frames())}
+          at={at}
+          series={phases}
           format={ms}
           rule={{ at: FRAME_BUDGET_MS, label: "one frame at 60 a second" }}
           stacked
@@ -211,16 +214,16 @@ function Scenario(props: {
         <Chart
           title="What the world held"
           caption="Voxels, the light shadowing them, and the geometry built from both — counted rather than sampled, so this is the same number on any machine."
-          at={at()}
-          series={memoryBands(frames())}
+          at={at}
+          series={memory}
           format={megabytes}
           stacked
         />
         <Chart
           title="What the world was waiting for"
           caption="How deep each queue stood. Fills waiting far above fills in flight means the window is asking for terrain faster than the workers can generate it."
-          at={at()}
-          series={queueLines(frames())}
+          at={at}
+          series={queues}
           format={count}
         />
         <Show when={props.scenario.samples}>
@@ -228,7 +231,7 @@ function Scenario(props: {
             <Bars
               title="What was sent to the graphics card"
               caption="Bytes uploaded, frame by frame. A column here is the largest frame in its slice, because an upload lands on a handful of a run's frames and the costliest frame is rarely one of them."
-              values={uploadBars(samples(), at().length)}
+              values={uploadBars(samples(), at.length)}
               format={megabytes}
               rule={{
                 at: UPLOAD_BUDGET_BYTES,
@@ -238,7 +241,7 @@ function Scenario(props: {
           )}
         </Show>
       </Show>
-      <Numbers run={run()} scenario={props.scenario} />
+      <Numbers run={run} scenario={props.scenario} />
     </section>
   );
 }

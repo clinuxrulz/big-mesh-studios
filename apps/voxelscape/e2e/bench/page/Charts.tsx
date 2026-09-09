@@ -60,48 +60,42 @@ const scaleFor = (most: number): { top: number; ticks: number[] } => {
  * out in the table beside the chart.
  */
 export function Chart(props: ChartProps): JSX.Element {
-  const columns = () => props.at.length;
-  const span = () => Math.max(props.at[columns() - 1] ?? 1, 0.001);
+  const columns = props.at.length;
+  const span = Math.max(props.at[columns - 1] ?? 1, 0.001);
   const x = (column: number): number =>
-    PAD.left + (props.at[column] / span()) * plotWidth;
+    PAD.left + (props.at[column] / span) * plotWidth;
 
   /** Each series' running total beneath it, so a stacked band starts on the one below. */
-  const beneath = (): number[][] => {
-    const floors: number[][] = [];
-    const running = new Array(columns()).fill(0);
-    for (const series of props.series) {
-      floors.push([...running]);
-      if (props.stacked === true) {
-        series.values.forEach((value, column) => {
-          running[column] += value;
-        });
-      }
-    }
-    return floors;
-  };
-
-  const most = (): number => {
-    const floors = beneath();
-    let top = props.rule?.at ?? 0;
-    props.series.forEach((series, index) => {
+  const beneath: number[][] = [];
+  const running = new Array(columns).fill(0);
+  for (const series of props.series) {
+    beneath.push([...running]);
+    if (props.stacked === true) {
       series.values.forEach((value, column) => {
-        top = Math.max(top, value + floors[index][column]);
+        running[column] += value;
       });
-    });
-    return top;
-  };
+    }
+  }
 
-  const scale = () => scaleFor(most());
+  /** The tallest a band or line reaches, counting the floor it stands on. */
+  let most = props.rule?.at ?? 0;
+  props.series.forEach((series, index) => {
+    series.values.forEach((value, column) => {
+      most = Math.max(most, value + beneath[index][column]);
+    });
+  });
+
+  const scale = scaleFor(most);
   const y = (value: number): number =>
-    PAD.top + plotHeight - (value / scale().top) * plotHeight;
+    PAD.top + plotHeight - (value / scale.top) * plotHeight;
 
   const bandPath = (series: Series, index: number): string => {
-    const floor = beneath()[index];
+    const floor = beneath[index];
     const up = series.values
       .map((value, column) => `${x(column)},${y(value + floor[column])}`)
       .join(" L");
     const down = series.values
-      .map((_, column) => columns() - 1 - column)
+      .map((_, column) => columns - 1 - column)
       .map((column) => `${x(column)},${y(floor[column])}`)
       .join(" L");
     return `M${up} L${down} Z`;
@@ -134,7 +128,7 @@ export function Chart(props: ChartProps): JSX.Element {
         role="img"
         preserveAspectRatio="none"
       >
-        <For each={scale().ticks}>
+        <For each={scale.ticks}>
           {(tick) => (
             <>
               <line
@@ -206,7 +200,7 @@ export function Chart(props: ChartProps): JSX.Element {
           y={HEIGHT - 6}
           text-anchor="end"
         >
-          {`${span().toFixed(1)}s`}
+          {`${span.toFixed(1)}s`}
         </text>
       </svg>
     </figure>
@@ -227,11 +221,11 @@ interface BarsProps {
  * would draw a slope that never happened.
  */
 export function Bars(props: BarsProps): JSX.Element {
-  const most = () => Math.max(props.rule?.at ?? 0, ...props.values, 1);
-  const scale = () => scaleFor(most());
+  const values = props.values;
+  const scale = scaleFor(Math.max(props.rule?.at ?? 0, ...values, 1));
   const y = (value: number): number =>
-    PAD.top + plotHeight - (value / scale().top) * plotHeight;
-  const width = () => plotWidth / Math.max(1, props.values.length);
+    PAD.top + plotHeight - (value / scale.top) * plotHeight;
+  const width = plotWidth / Math.max(1, values.length);
 
   return (
     <figure class="chart">
@@ -244,7 +238,7 @@ export function Bars(props: BarsProps): JSX.Element {
         role="img"
         preserveAspectRatio="none"
       >
-        <For each={scale().ticks}>
+        <For each={scale.ticks}>
           {(tick) => (
             <>
               <line
@@ -280,15 +274,15 @@ export function Bars(props: BarsProps): JSX.Element {
             </>
           )}
         </Show>
-        <For each={props.values}>
+        <For each={values}>
           {(value, column) => (
             <Show when={value > 0}>
               <rect
                 class="bar"
                 data-slot={1}
-                x={PAD.left + column() * width()}
+                x={PAD.left + column() * width}
                 y={y(value)}
-                width={Math.max(1.5, width() - 1)}
+                width={Math.max(1.5, width - 1)}
                 height={PAD.top + plotHeight - y(value)}
                 rx={1}
               >
