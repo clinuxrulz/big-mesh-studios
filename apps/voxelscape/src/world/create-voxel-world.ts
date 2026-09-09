@@ -143,6 +143,13 @@ export interface VoxelWorld {
   blockIndexAtVoxel(w: WorldVoxel): number | undefined;
   /** Writes the edit overlay to IndexedDB, batched. */
   scheduleSave(): void;
+  /**
+   * Bytes the window's blocks hold in main memory: each block's voxels and the
+   * two light volumes shadowing them. Fixed by the window's size and the level
+   * of detail each block is at, so it moves only when a block is refilled at a
+   * different resolution.
+   */
+  readonly voxelBytes: number;
   /** Slots waiting for terrain data, on a worker batch or on the main thread. */
   readonly fillPendingCount: number;
   /** Slots a worker is generating terrain data for right now. */
@@ -397,6 +404,16 @@ export const createVoxelWorld = ({
   return {
     blocks: blockGrid.blocks,
     renderer,
+    get voxelBytes() {
+      let bytes = 0;
+      for (const block of blockGrid.blocks) {
+        bytes +=
+          block.store.data.byteLength +
+          block.light.skylight.byteLength +
+          block.light.blocklight.byteLength;
+      }
+      return bytes;
+    },
     get fillPendingCount() {
       return sphere.fillPendingCount;
     },

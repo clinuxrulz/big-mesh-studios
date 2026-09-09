@@ -21,6 +21,15 @@ export interface RunContext {
   pinnedScale: number;
   /** How the world's worker pool was sized. */
   workers: string;
+  /** The machine the run stood in for, and how far its processor was slowed. */
+  profile: string;
+  cpuThrottle: number;
+  /**
+   * Whether the display's refresh rate was holding frames back. Paced answers
+   * "does it keep up"; unlocked answers "what does a frame actually cost",
+   * because nothing is waiting for the display.
+   */
+  pacing: "paced" | "unlocked";
 }
 
 /** One scenario's measurements, one entry per repeat. */
@@ -69,18 +78,36 @@ const busyPhases = (run: RunSummary): [string, number, number][] =>
     .filter(([, mean, max]) => mean > 0.005 || max > 0.05)
     .sort((a, b) => b[1] - a[1]);
 
+/** A sixtieth of a second: the frame a run is asked to fit inside. */
+const FRAME_BUDGET_MS = 1000 / 60;
+
 /** Writes one scenario's numbers as the lines a reader scans down. */
-export const formatScenario = (scenario: ScenarioReport): string => {
+export const formatScenario = (
+  scenario: ScenarioReport,
+  pacing: RunContext["pacing"] = "paced",
+): string => {
   const run = representative(scenario.repeats);
   const lines: string[] = [];
   lines.push(`${scenario.name} — ${scenario.description}`);
+  lines.push("  measured on this machine, under this profile:");
   lines.push(
     `  frames   ${run.frames} in ${(run.durationMs / 1000).toFixed(1)}s · ` +
       `gap p50 ${ms(run.gap.median)} p95 ${ms(run.gap.p95)} p99 ${ms(run.gap.p99)} max ${ms(run.gap.max)}`,
   );
   lines.push(
-    `  dropped  ${run.drops.count} frames (${(run.drops.share * 100).toFixed(1)}%), ` +
-      `longest run ${run.drops.longestRun}, over ${ms(run.drops.thresholdMs)}`,
+    `  budget   main thread ${ms(run.mainThread.median)} a frame, ` +
+      `worst ${ms(run.mainThread.max)} — ` +
+      `${((run.mainThread.median / FRAME_BUDGET_MS) * 100).toFixed(0)}% of a sixtieth of a second, ` +
+      `worst frame ${((run.mainThread.max / FRAME_BUDGET_MS) * 100).toFixed(0)}%`,
+  );
+  // With the display pacing the frames, a drop is a frame that missed a
+  // refresh; without it, every frame arrives as soon as it is drawn and the
+  // question is instead how many cost more than a sixtieth of a second.
+  const late = pacing === "paced" ? run.drops : run.overBudget;
+  lines.push(
+    `  ${pacing === "paced" ? "dropped " : "overspent"} ${late.count} frames ` +
+      `(${(late.share * 100).toFixed(1)}%), ` +
+      `longest run ${late.longestRun}, over ${ms(late.thresholdMs)}`,
   );
   const gpu =
     run.gpu.count === 0
@@ -97,6 +124,7 @@ export const formatScenario = (scenario: ScenarioReport): string => {
   lines.push(
     `  phases   ${phases === "" ? "none measurable" : phases}  (mean/worst)`,
   );
+  lines.push("  the same on any machine:");
   lines.push(
     `  world    fills ${run.counters.fillsRequested}→${run.counters.fillsLanded} · ` +
       `meshes ${run.counters.meshesRequested}→${run.counters.meshesLanded} ` +
@@ -117,8 +145,14 @@ export const formatScenario = (scenario: ScenarioReport): string => {
       `${run.upload.maxFrameMerges} is the most in any frame)`,
   );
   lines.push(
-    `  memory   heap ${megabytes(run.heap.startBytes)} → ${megabytes(run.heap.endBytes)} ` +
-      `(peak ${megabytes(run.heap.maxBytes)})`,
+    `  resident ${megabytes(run.resident.startBytes)} → ${megabytes(run.resident.endBytes)} ` +
+      `(peak ${megabytes(run.resident.maxBytes)}: ` +
+      `${megabytes(run.resident.voxelBytes)} voxels and light, ` +
+      `${megabytes(run.resident.geometryBytes)} geometry)`,
+  );
+  lines.push(
+    `  heap     ${megabytes(run.heap.startBytes)} → ${megabytes(run.heap.endBytes)} ` +
+      `(peak ${megabytes(run.heap.maxBytes)}) — excludes the buffers above, so read it beside them`,
   );
   lines.push(
     run.outrun.frames === 0
@@ -149,10 +183,21 @@ export const formatReport = (report: BenchReport): string => {
   const { context } = report;
   const head = [
     `commit ${context.commit}${context.dirty ? " (working tree dirty)" : ""} · ${context.finishedAt}`,
+    `profile ${context.profile}` +
+      (context.cpuThrottle > 1
+        ? `, processor slowed ${context.cpuThrottle} times`
+        : "") +
+      ` · frames ${context.pacing}`,
     `${context.graphicsCard} · ${context.cores} threads · ` +
       `${context.viewport.width}x${context.viewport.height} · ` +
       `radius ${context.chunkRadius} (${context.blockCount} blocks) · ` +
       `scale pinned at ${context.pinnedScale} · ${context.workers}`,
   ].join("\n");
-  return [head, "", ...report.scenarios.map(formatScenario)].join("\n\n");
+  return [
+    head,
+    "",
+    ...report.scenarios.map((scenario) =>
+      formatScenario(scenario, context.pacing),
+    ),
+  ].join("\n\n");
 };

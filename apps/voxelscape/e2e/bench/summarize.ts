@@ -9,6 +9,9 @@ import type { PerfDrain } from "../../src/render/perf-probe.ts";
  */
 const DROP_FACTOR = 1.5;
 
+/** A sixtieth of a second: the frame every profile is asked to fit inside. */
+const FRAME_BUDGET_MS = 1000 / 60;
+
 /** A set of measurements reduced to the shape of its distribution. */
 export interface Spread {
   count: number;
@@ -41,6 +44,13 @@ export interface RunSummary {
   gap: Spread;
   /** Milliseconds the graphics card spent drawing. */
   gpu: Spread;
+  /**
+   * Milliseconds of main-thread work a frame: the world's tick, the occlusion
+   * pass and the draw call together. Unlike the gap, this is not held down by
+   * the display's refresh rate, so it shows what the frame costs even when
+   * every frame arrives on time.
+   */
+  mainThread: Spread;
   drops: Drops;
   /** The render scale the frames were drawn at, where 1 is the display resolution. */
   scale: { min: number; median: number };
@@ -67,6 +77,22 @@ export interface RunSummary {
   };
   triangles: { median: number; max: number };
   heap: { startBytes: number; endBytes: number; maxBytes: number };
+  /** Bytes of voxels, light and geometry the world holds, counted rather than sampled. */
+  resident: {
+    startBytes: number;
+    endBytes: number;
+    maxBytes: number;
+    /** The voxels and their light, at the moment the run held most. */
+    voxelBytes: number;
+    /** The built and merged geometry, at the same moment. */
+    geometryBytes: number;
+  };
+  /**
+   * Frames that cost more than a sixtieth of a second, against a fixed
+   * threshold rather than the run's own median. This is the count that means
+   * the same thing whether or not the display was pacing the frames.
+   */
+  overBudget: Drops;
   /** How far the player actually went, along their path and end to end. */
   travel: { pathUnits: number; straightUnits: number };
   /** How much of the run the player spent on terrain that had not streamed in. */
@@ -96,12 +122,12 @@ export const spreadOf = (values: number[]): Spread => {
 };
 
 /**
- * Counts the frames that arrived a refresh late or worse, taking the run's own
- * median gap as the refresh period.
+ * Counts the frames whose gap exceeded `threshold`, and the longest unbroken
+ * stretch of them. Given no threshold it takes the run's own median gap as the
+ * refresh period and asks which frames missed one.
  */
-export const dropsIn = (gaps: number[]): Drops => {
-  const median = spreadOf(gaps).median;
-  const thresholdMs = median * DROP_FACTOR;
+export const dropsIn = (gaps: number[], threshold?: number): Drops => {
+  const thresholdMs = threshold ?? spreadOf(gaps).median * DROP_FACTOR;
   let count = 0;
   let run = 0;
   let longestRun = 0;
@@ -203,11 +229,23 @@ export const summarize = (drain: PerfDrain): RunSummary => {
   });
 
   const scale = columnFor(drain, "scale");
+  const resident = columnFor(drain, "residentBytes").filter(
+    (bytes) => bytes > 0,
+  );
+  // The three stretches that are all main-thread work; every other phase is
+  // inside one of them, and adding those in would count the same time twice.
+  const advance = columnFor(drain, "advance");
+  const occlusion = columnFor(drain, "occlusion");
+  const draw = columnFor(drain, "draw");
+  const mainThread = advance.map(
+    (value, at) => value + occlusion[at] + draw[at],
+  );
   return {
     frames: drain.framesSeen,
     durationMs: drain.durationMs,
     wrapped: drain.wrapped,
     gap: spreadOf(realGaps),
+    mainThread: spreadOf(mainThread),
     // A browser without the timer-query extension reports every frame as -1,
     // which leaves the spread empty rather than claiming the card took no time.
     gpu: spreadOf(columnFor(drain, "gpuMs").filter((ms) => ms >= 0)),
@@ -241,6 +279,14 @@ export const summarize = (drain: PerfDrain): RunSummary => {
       endBytes: heap[heap.length - 1] ?? 0,
       maxBytes: maxOf(heap),
     },
+    resident: {
+      startBytes: resident[0] ?? 0,
+      endBytes: resident[resident.length - 1] ?? 0,
+      maxBytes: maxOf(resident),
+      voxelBytes: maxOf(columnFor(drain, "voxelBytes")),
+      geometryBytes: maxOf(columnFor(drain, "geometryBytes")),
+    },
+    overBudget: dropsIn(realGaps, FRAME_BUDGET_MS),
     travel: { pathUnits, straightUnits },
     outrun: outrunIn(columnFor(drain, "cellReady")),
   };

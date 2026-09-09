@@ -498,6 +498,11 @@ class Growable<T extends Float32Array | Uint32Array> {
     return this.length;
   }
 
+  /** Bytes the backing buffer occupies, written or not, since growth doubles it. */
+  get capacityBytes(): number {
+    return this.buf.byteLength;
+  }
+
   /** The written elements, as a same-typed view the uploader passes straight through. */
   array(): T {
     return this.buf.subarray(0, this.length) as T;
@@ -555,6 +560,32 @@ const mergedTailBytes = (
 const meshArraysBytes = (arrays: MeshArrays): number =>
   (arrays.positions.length / 3) * VERTEX_UPLOAD_BYTES +
   arrays.indices.length * INDEX_UPLOAD_BYTES;
+
+/** Bytes a superchunk's six merged attribute buffers occupy. */
+const mergedArraysBytes = (arrays: MergedArrays): number =>
+  arrays.positions.capacityBytes +
+  arrays.normals.capacityBytes +
+  arrays.uvs.capacityBytes +
+  arrays.indices.capacityBytes +
+  arrays.colors.capacityBytes +
+  arrays.brightness.capacityBytes;
+
+/**
+ * Bytes one block's built mesh occupies before it is merged. The arrays are
+ * either typed or plain, and a plain array of doubles costs eight bytes an
+ * entry against a typed array's four.
+ */
+const meshArraysResidentBytes = (arrays: MeshArrays): number => {
+  const bytes = (values: number[] | Float32Array | Uint32Array): number =>
+    ArrayBuffer.isView(values) ? values.byteLength : values.length * 8;
+  return (
+    bytes(arrays.positions) +
+    bytes(arrays.normals) +
+    bytes(arrays.uvs) +
+    bytes(arrays.indices) +
+    bytes(arrays.brightness)
+  );
+};
 
 /** One view-frustum plane as the `[a, b, c, d]` of `a*x + b*y + c*z + d`. */
 type FrustumPlane = [number, number, number, number];
@@ -1466,6 +1497,26 @@ export class TriangleRenderer {
   /** Bytes of merged geometry the last tick marked for GPU upload, for the debug line. */
   get lastTickUploadBytes(): number {
     return this.uploadBytesThisFrame;
+  }
+
+  /**
+   * Bytes of geometry the renderer is holding in main memory: every
+   * superchunk's merged attribute buffers, and every block's built mesh
+   * waiting to be merged into one. The graphics card holds a copy of what has
+   * been uploaded on top of this.
+   */
+  get geometryBytes(): number {
+    let bytes = 0;
+    for (const state of this.scMerged.values()) {
+      bytes +=
+        mergedArraysBytes(state.terrain) + mergedArraysBytes(state.water);
+    }
+    for (const built of this.chunkMeshes.values()) {
+      bytes +=
+        meshArraysResidentBytes(built.terrain) +
+        meshArraysResidentBytes(built.water);
+    }
+    return bytes;
   }
 
   /** Superchunks the last tick merged and marked for upload. */

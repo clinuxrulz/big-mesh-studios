@@ -5,6 +5,9 @@
 //   pnpm bench                       # stand and walk at radius 3, about 20s
 //   pnpm bench --all --repeat 3      # every scenario, three times each
 //   pnpm bench walk sprint --radius 4
+//   pnpm bench --profile phone       # as if on a mid-range phone
+//   pnpm bench --unlocked            # draw without waiting for the display,
+//                                    # so the gap measures what a frame costs
 //
 // A headed browser is not optional: headless Chromium draws through a software
 // rasterizer, where every frame is slow enough to drown the numbers being
@@ -18,6 +21,8 @@ import { fileURLToPath } from "node:url";
 import { outPath } from "../out-dir.ts";
 import { QUICK_SCENARIOS, SCENARIOS, routeDistance } from "./scenarios.ts";
 import type { Scenario } from "./scenarios.ts";
+import { profileNamed } from "./profiles.ts";
+import type { MachineProfile } from "./profiles.ts";
 import { summarize } from "./summarize.ts";
 import { formatReport } from "./report.ts";
 import type { BenchReport, ScenarioReport } from "./report.ts";
@@ -33,8 +38,6 @@ const SETTLE_MS = 1500;
 const DRAIN_SLACK_MS = 400;
 /** The second of the 20-minute day the clock is pinned to: full daylight. */
 const PINNED_TIME_SECONDS = 300;
-/** The render scale every run is pinned to, so the adaptive scaler cannot move it. */
-const PINNED_SCALE = 1;
 
 /** The bench surface `create-voxelscape.ts` puts on the page under `#bench`. */
 interface BenchWindow {
@@ -64,6 +67,13 @@ interface Options {
   radius: number;
   port: number;
   headless: boolean;
+  profile: MachineProfile;
+  /**
+   * Whether to let the browser draw as fast as it can rather than waiting for
+   * the display. Waiting hides the cost of a frame behind the refresh rate;
+   * not waiting turns the gap back into a measurement of what a frame costs.
+   */
+  unlocked: boolean;
 }
 
 const parseOptions = (argv: string[]): Options => {
@@ -73,12 +83,18 @@ const parseOptions = (argv: string[]): Options => {
   let port = DEFAULT_PORT;
   let headless = false;
   let all = false;
+  let unlocked = false;
+  let profile = profileNamed("native");
   for (let i = 0; i < argv.length; i++) {
     const argument = argv[i];
     if (argument === "--all") {
       all = true;
     } else if (argument === "--headless") {
       headless = true;
+    } else if (argument === "--unlocked") {
+      unlocked = true;
+    } else if (argument === "--profile") {
+      profile = profileNamed(argv[++i]);
     } else if (argument === "--repeat") {
       repeat = Number(argv[++i]);
     } else if (argument === "--radius") {
@@ -105,7 +121,7 @@ const parseOptions = (argv: string[]): Options => {
     }
     return scenario;
   });
-  return { scenarios, repeat, radius, port, headless };
+  return { scenarios, repeat, radius, port, headless, profile, unlocked };
 };
 
 const git = (...args: string[]): string =>
@@ -200,7 +216,7 @@ const waitForWindow = async (page: Page): Promise<void> => {
  */
 const pinConditions = async (
   page: Page,
-  pins: { scale: number; timeSeconds: number },
+  pins: { scale: number; timeSeconds: number; workers?: number },
 ): Promise<string> =>
   page.evaluate(async (pins) => {
     const bench = (window as unknown as { __voxelscape: BenchWindow })
@@ -209,6 +225,9 @@ const pinConditions = async (
     await bench.run("/clock:speed 0");
     await bench.run(`/clock:time ${pins.timeSeconds}`);
     await bench.run("/weather clear");
+    if (pins.workers !== undefined) {
+      await bench.run(`/world:workers ${pins.workers}`);
+    }
     return String(await bench.run("/world:workers"));
   }, pins);
 
@@ -279,9 +298,22 @@ const main = async (): Promise<void> => {
   const stopServer = await serve(options.port);
   let browser: Browser | undefined;
   try {
-    browser = await chromium.launch({ headless: options.headless });
-    const viewport = { width: 1024, height: 576 };
-    const page = await browser.newPage({ viewport });
+    browser = await chromium.launch({
+      headless: options.headless,
+      // Left to itself the browser waits for the display, so every frame
+      // reads as the refresh period however little work it did. Told not to
+      // wait, the gap between frames becomes the frame's actual cost —
+      // including the graphics card's part of it, which is the only way to
+      // see that cost where the card refuses to time itself.
+      args: options.unlocked
+        ? ["--disable-gpu-vsync", "--disable-frame-rate-limit"]
+        : [],
+    });
+    const viewport = options.profile.viewport;
+    const page = await browser.newPage({
+      viewport,
+      deviceScaleFactor: options.profile.devicePixelRatio,
+    });
     const url = `http://127.0.0.1:${options.port}/?radius=${options.radius}#bench`;
     console.log(`loading ${url}`);
     await page.goto(url, { waitUntil: "load", timeout: 60000 });
@@ -289,10 +321,23 @@ const main = async (): Promise<void> => {
     console.log("window loaded; settling");
     await page.waitForTimeout(SETTLE_MS);
     const workers = await pinConditions(page, {
-      scale: PINNED_SCALE,
+      scale: options.profile.scale,
       timeSeconds: PINNED_TIME_SECONDS,
+      workers: options.profile.workers,
     });
     const machine = await describeMachine(page);
+    // The processor is slowed only once the window has loaded. Boot would
+    // otherwise take the slowdown too, and what is being measured is a world
+    // already standing, not the wait to reach it.
+    if (options.profile.cpuThrottle > 1) {
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send("Emulation.setCPUThrottlingRate", {
+        rate: options.profile.cpuThrottle,
+      });
+      console.log(
+        `processor slowed ${options.profile.cpuThrottle} times for the ${options.profile.name} profile`,
+      );
+    }
 
     const scenarios: ScenarioReport[] = [];
     for (const scenario of options.scenarios) {
@@ -321,8 +366,11 @@ const main = async (): Promise<void> => {
         viewport,
         chunkRadius: machine.chunkRadius,
         blockCount: machine.blockCount,
-        pinnedScale: PINNED_SCALE,
+        pinnedScale: options.profile.scale,
         workers,
+        profile: options.profile.name,
+        cpuThrottle: options.profile.cpuThrottle,
+        pacing: options.unlocked ? "unlocked" : "paced",
       },
       scenarios,
     };

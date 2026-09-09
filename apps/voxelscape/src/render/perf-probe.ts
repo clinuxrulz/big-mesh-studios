@@ -81,14 +81,24 @@ export const Field = {
   /** The JavaScript heap in bytes, sampled about once a second. */
   heapBytes: 13,
   /**
+   * Bytes the world holds in main memory — voxels, light and geometry —
+   * counted rather than sampled, so it is the same number on every machine
+   * and the one a memory ceiling is measured against.
+   */
+  residentBytes: 14,
+  /** Of those, the bytes held as voxels and the light shadowing them. */
+  voxelBytes: 15,
+  /** Of those, the bytes held as built and merged geometry. */
+  geometryBytes: 16,
+  /**
    * Whether the block the player stands in has its terrain, as 1 or 0. The
    * world holds the player still while it is 0, so a run of zeroes is the
    * player having outrun what the workers could stream.
    */
-  cellReady: 14,
-  playerX: 15,
-  playerY: 16,
-  playerZ: 17,
+  cellReady: 17,
+  playerX: 18,
+  playerY: 19,
+  playerZ: 20,
 } as const;
 
 /** Each per-frame value's name, at the column it is recorded in. */
