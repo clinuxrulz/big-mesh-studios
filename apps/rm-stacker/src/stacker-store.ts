@@ -212,7 +212,7 @@ export function createStacker() {
     }),
   );
 
-  const [mode, setMode] = createSignal<ModeKind>("Idle");
+  const [mode, setModeSignal] = createSignal<ModeKind>("Idle");
   /**
    * The cut a knife standing over a panel would make, or undefined while no
    * knife is in hand or the one in hand stands where no cut can be made.
@@ -239,6 +239,17 @@ export function createStacker() {
    * back does not have to go and find the colour they were drawing in.
    */
   const [erasing, setErasing] = createSignal(false);
+  const [isEyeDropping, setIsEyeDropping] = createSignal(false);
+
+  /**
+   * Puts the editor in a tool, and puts the eyedropper down if it was raised.
+   * The eyedropper is held for a single pick rather than being a tool of its
+   * own, so a tool chosen while it is up is what the next press should do.
+   */
+  const setMode = (kind: ModeKind): void => {
+    setIsEyeDropping(false);
+    setModeSignal(kind);
+  };
   const [palette, setPalette] = createSignal<RGBA[]>(
     () => saved()?.palette ?? DAWNBRINGER_32_PALETTE,
   );
@@ -742,6 +753,8 @@ export function createStacker() {
     parts,
     setParts,
     loadParts,
+    isEyeDropping,
+    setIsEyeDropping,
     /** How many whole figures have been put in front of the editor. */
     figureLoads,
     selectedPart,

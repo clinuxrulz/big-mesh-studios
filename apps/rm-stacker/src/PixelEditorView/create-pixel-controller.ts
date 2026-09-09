@@ -1,3 +1,6 @@
+import { Bitmap, RGBA, Vector2D } from "@big-mesh-studios/maths";
+import { type PanelKind } from "@big-mesh-studios/stacker/renderer";
+import { pointer } from "@big-mesh-studios/utils/pointer";
 import {
   Accessor,
   createEffect,
@@ -9,10 +12,6 @@ import {
 } from "solid-js";
 import { Command } from "../command/Command";
 import { StackerContext } from "../context";
-import { Bitmap, RGBA, Vector2D } from "@big-mesh-studios/maths";
-import { type PanelKind } from "@big-mesh-studios/stacker/renderer";
-import { pointer } from "@big-mesh-studios/utils/pointer";
-import type { Cut, ModeKind } from "../types";
 import { mirrorBlocks, mirrorMarks, type Block, type Mark } from "../mirror";
 import {
   axisColour,
@@ -22,6 +21,7 @@ import {
   panelTable,
   writePanel,
 } from "../panels";
+import type { Cut, ModeKind } from "../types";
 import { screenToWorld } from "../utils/utils";
 import { createEdgeController } from "./create-edge-controller";
 import { createPanScaleControl } from "./pan-scale";
@@ -40,7 +40,12 @@ import {
   type SliceMarker,
 } from "./side-layout";
 
-const PannableModes = new Set(["Idle", "Eyedrop"]);
+/**
+ * The tools that leave a press free to pan the view. Typed by the tool it
+ * names, so a tool that is renamed or dropped is caught here rather than
+ * leaving a string nothing will ever match again.
+ */
+const PannableModes = new Set<ModeKind>(["Idle"]);
 
 /** How much of the view is left around what it is brought to look at. */
 const FOCUS_MARGIN = 0.9;
@@ -86,6 +91,8 @@ export const createPixelEditorController = ({
     dimensions,
     mode,
     mirror,
+    isEyeDropping,
+    setIsEyeDropping,
   } = useContext(StackerContext);
 
   // Read at the moment a command is built, so a stroke lands on the part that
@@ -114,7 +121,11 @@ export const createPixelEditorController = ({
     // Only ever asked at the moment a gesture starts, so it reads the mode and
     // the pointers that are down as they are right then. A memo here would
     // never see the set change, since a plain set is nothing to track.
-    disable: () => !PannableModes.has(mode()) && pointerIds.size !== 0,
+    // A raised eyedropper leaves the view pannable whatever tool is underneath
+    // it: the press that picks a colour is a tap, and the two-finger drag that
+    // pans is not one.
+    disable: () =>
+      !PannableModes.has(mode()) && !isEyeDropping() && pointerIds.size !== 0,
   });
 
   const edgeController = createEdgeController({
@@ -451,24 +462,26 @@ export const createPixelEditorController = ({
 
     const _roundedWorldPosition = eventToRoundedWorldPosition(event);
 
-    switch (untrack(mode)) {
-      case "Eyedrop": {
-        const intersection = intersectPanels({
-          positions: panelPositions(),
-          table: table(),
-          worldPosition: _roundedWorldPosition,
-        });
+    if (isEyeDropping()) {
+      const intersection = intersectPanels({
+        positions: panelPositions(),
+        table: table(),
+        worldPosition: _roundedWorldPosition,
+      });
 
-        if (!intersection) {
-          return;
-        }
-
-        // An empty cell is picked up as the empty colour, so the eyedropper
-        // hands back whatever is under it, drawn or not.
-        selectPaletteIndex(intersection.index);
-
-        break;
+      if (!intersection) {
+        return;
       }
+
+      // An empty cell is picked up as the empty colour, so the eyedropper
+      // hands back whatever is under it, drawn or not.
+      selectPaletteIndex(intersection.index);
+      setIsEyeDropping(false);
+
+      return;
+    }
+
+    switch (untrack(mode)) {
       case "Idle": {
         // A resize is the work of the one finger that started it. There is
         // nothing for a later finger to join, and letting it through would

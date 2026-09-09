@@ -64,6 +64,8 @@ export function Hud() {
     setMirror,
     preview,
     requestAutoSave,
+    isEyeDropping,
+    setIsEyeDropping,
   } = useContext(StackerContext);
 
   const PalettePopover = createPopover();
@@ -175,8 +177,8 @@ export function Hud() {
         <Bar>
           <IconTab
             kind="eye-dropper"
-            onClick={() => setMode("Eyedrop")}
-            selected={isModeSelected("Eyedrop")}
+            onClick={() => setIsEyeDropping((eyedrop) => !eyedrop)}
+            selected={isEyeDropping()}
           />
           <IconTab
             kind="eraser"

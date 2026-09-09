@@ -27,7 +27,7 @@ export interface Cut {
 /**********************************************************************************/
 
 export type ModeKind =
-  "Draw" | "Fill" | "Idle" | "Eyedrop" | "Rectangle" | "CutDown" | "CutAcross";
+  "Draw" | "Fill" | "Idle" | "Rectangle" | "CutDown" | "CutAcross";
 
 /**********************************************************************************/
 /*                                      Mirror                                    */
