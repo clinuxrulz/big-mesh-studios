@@ -14,8 +14,10 @@ export interface RunContext {
   graphicsCard: string;
   /** Processor threads the machine reports. */
   cores: number;
-  /** The page size the run was measured at. */
+  /** The page size the run was measured at, in layout pixels. */
   viewport: { width: number; height: number };
+  /** Layout pixels to the pixels actually drawn, which is what the card pays for. */
+  devicePixelRatio: number;
   /** The chunk window's horizontal radius, and how many blocks that is. */
   chunkRadius: number;
   blockCount: number;
@@ -242,7 +244,7 @@ export const formatReport = (report: BenchReport): string => {
       (context.monsters ? "" : " · no monsters") +
       ` · ${describePower(context.power)}`,
     `${context.graphicsCard} · ${context.cores} threads · ` +
-      `${context.viewport.width}x${context.viewport.height} · ` +
+      `${context.viewport.width}x${context.viewport.height} at ${context.devicePixelRatio}x · ` +
       `radius ${context.chunkRadius} (${context.blockCount} blocks) · ` +
       (context.adaptiveResolution
         ? "resolution adapting"

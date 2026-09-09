@@ -15,6 +15,8 @@
 //                                    # beside this one, with this harness
 //   pnpm bench --monsters            # leave the monsters in the world, to
 //                                    # measure what they cost
+//   pnpm bench --android             # measure on the phone plugged in here,
+//                                    # in the Chrome it already has
 //
 // A commit is measured through the harness in this checkout, so the scenarios,
 // the report and its page are whatever they are here; only the application
@@ -26,12 +28,25 @@
 // rasterizer, where every frame is slow enough to drown the numbers being
 // measured.
 import { chromium } from "playwright";
-import type { Browser, CDPSession, Page } from "playwright";
+import type {
+  AndroidDevice,
+  Browser,
+  BrowserContext,
+  CDPSession,
+  Page,
+} from "playwright";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { outPath } from "../out-dir.ts";
+import {
+  attachedPhone,
+  describePhone,
+  devicePower,
+  forwardPort,
+  rotateLandscape,
+} from "./android.ts";
 import { describePower, systemPower } from "./power.ts";
 import type { PowerState } from "./power.ts";
 import { QUICK_SCENARIOS, SCENARIOS, routeDistance } from "./scenarios.ts";
@@ -123,6 +138,13 @@ interface Options {
    * world of them unless this asks for them.
    */
   monsters: boolean;
+  /**
+   * Whether to measure on the phone plugged into this machine rather than in a
+   * window here. A phone brings its own screen and its own power, so a run on
+   * one takes those instead of this command's, and refuses the flags that stand
+   * in for a machine it already is.
+   */
+  android: boolean;
 }
 
 const parseOptions = (argv: string[]): Options => {
@@ -138,6 +160,7 @@ const parseOptions = (argv: string[]): Options => {
   let scale: number | undefined;
   let at: string | undefined;
   let monsters = false;
+  let android = false;
   let profile = profileNamed("native");
   for (let i = 0; i < argv.length; i++) {
     const argument = argv[i];
@@ -165,6 +188,8 @@ const parseOptions = (argv: string[]): Options => {
       at = argv[++i];
     } else if (argument === "--monsters") {
       monsters = true;
+    } else if (argument === "--android") {
+      android = true;
     } else if (argument.startsWith("--")) {
       throw new Error(`unknown option ${argument}`);
     } else {
@@ -198,6 +223,7 @@ const parseOptions = (argv: string[]): Options => {
     scale,
     at,
     monsters,
+    android,
   };
 };
 
@@ -493,6 +519,10 @@ const describeMachine = (page: Page) =>
           ? "unknown graphics card"
           : String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)),
       cores: navigator.hardwareConcurrency ?? 0,
+      // Read from the page rather than from what was asked for: a phone gives
+      // the page the screen it has, whatever a profile would have chosen.
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      devicePixelRatio: window.devicePixelRatio,
       blockCount: bench.blockCount,
       chunkRadius: bench.chunkRadius,
     };
@@ -500,27 +530,64 @@ const describeMachine = (page: Page) =>
 
 const main = async (): Promise<void> => {
   const options = parseOptions(process.argv.slice(2));
+  if (options.android) {
+    // Each of these stands in for a machine, and the phone is the machine.
+    if (options.unlocked) {
+      throw new Error(
+        "a phone's Chrome cannot be told to stop waiting for its display, so a run on one is always paced; measure it without --unlocked",
+      );
+    }
+    if (options.headless) {
+      throw new Error(
+        "--headless says nothing about a phone: its Chrome draws on the screen either way",
+      );
+    }
+    if (options.profile.cpuThrottle > 1) {
+      throw new Error(
+        `the ${options.profile.name} profile slows this machine's processor to stand in for a phone, and this is a phone; measure it with --profile native`,
+      );
+    }
+  }
   const subject =
     options.at === undefined ? thisCheckout() : checkOut(options.at);
   const stopServer = await serve(options.port, subject);
   let browser: Browser | undefined;
+  let phone: AndroidDevice | undefined;
+  let phoneBrowser: BrowserContext | undefined;
+  let stopForwarding: (() => void) | undefined;
+  let stopRotation: (() => Promise<void>) | undefined;
   try {
-    browser = await chromium.launch({
-      headless: options.headless,
-      // Left to itself the browser waits for the display, so every frame
-      // reads as the refresh period however little work it did. Told not to
-      // wait, the gap between frames becomes the frame's actual cost —
-      // including the graphics card's part of it, which is the only way to
-      // see that cost where the card refuses to time itself.
-      args: options.unlocked
-        ? ["--disable-gpu-vsync", "--disable-frame-rate-limit"]
-        : [],
-    });
-    const viewport = options.profile.viewport;
-    const page = await browser.newPage({
-      viewport,
-      deviceScaleFactor: options.profile.devicePixelRatio,
-    });
+    let page: Page;
+    if (options.android) {
+      phone = await attachedPhone();
+      console.log(`measuring on ${describePhone(phone)}`);
+      // The phone's Chrome loads `localhost` on the phone, so the preview
+      // server here has to answer there.
+      stopForwarding = forwardPort(phone.serial(), options.port);
+      // On its side before Chrome starts, so the page is laid out once at the
+      // size it will be measured at.
+      stopRotation = await rotateLandscape(phone);
+      // No page size and no pixel ratio are asked for: the point of a run on a
+      // phone is the screen the phone has.
+      phoneBrowser = await phone.launchBrowser();
+      page = await phoneBrowser.newPage();
+    } else {
+      browser = await chromium.launch({
+        headless: options.headless,
+        // Left to itself the browser waits for the display, so every frame
+        // reads as the refresh period however little work it did. Told not to
+        // wait, the gap between frames becomes the frame's actual cost —
+        // including the graphics card's part of it, which is the only way to
+        // see that cost where the card refuses to time itself.
+        args: options.unlocked
+          ? ["--disable-gpu-vsync", "--disable-frame-rate-limit"]
+          : [],
+      });
+      page = await browser.newPage({
+        viewport: options.profile.viewport,
+        deviceScaleFactor: options.profile.devicePixelRatio,
+      });
+    }
     const url = `http://127.0.0.1:${options.port}/?radius=${options.radius}#bench`;
     console.log(`loading ${url}`);
     await page.goto(url, { waitUntil: "load", timeout: 60000 });
@@ -545,12 +612,13 @@ const main = async (): Promise<void> => {
     }
     console.log(pinned.monsters);
     const machine = await describeMachine(page);
-    const power = await powerNow(page);
+    const power =
+      phone === undefined ? await powerNow(page) : await devicePower(phone);
     console.log(`measuring ${describePower(power)}`);
     // The processor is slowed only once the window has loaded. Boot would
     // otherwise take the slowdown too, and what is being measured is a world
     // already standing, not the wait to reach it.
-    if (options.profile.cpuThrottle > 1) {
+    if (options.profile.cpuThrottle > 1 && phone === undefined) {
       const cdp = await page.context().newCDPSession(page);
       await cdp.send("Emulation.setCPUThrottlingRate", {
         rate: options.profile.cpuThrottle,
@@ -608,8 +676,16 @@ const main = async (): Promise<void> => {
     // Nothing past this point measures anything, and writing the report takes
     // long enough to notice, so the window goes away as soon as the last
     // scenario has been drained rather than at the end of the run.
-    await browser.close();
+    await browser?.close();
     browser = undefined;
+    await phoneBrowser?.close();
+    phoneBrowser = undefined;
+    // The rotation is put back by asking the phone to, so it goes back before
+    // the phone is let go of rather than after.
+    await stopRotation?.();
+    stopRotation = undefined;
+    await phone?.close();
+    phone = undefined;
 
     const report: BenchReport = {
       context: {
@@ -618,7 +694,8 @@ const main = async (): Promise<void> => {
         finishedAt: new Date().toISOString(),
         graphicsCard: machine.graphicsCard,
         cores: machine.cores,
-        viewport,
+        viewport: machine.viewport,
+        devicePixelRatio: machine.devicePixelRatio,
         chunkRadius: machine.chunkRadius,
         blockCount: machine.blockCount,
         pinnedScale: scale,
@@ -647,6 +724,10 @@ const main = async (): Promise<void> => {
     );
   } finally {
     await browser?.close();
+    await phoneBrowser?.close();
+    await stopRotation?.();
+    await phone?.close();
+    stopForwarding?.();
     stopServer();
   }
 };

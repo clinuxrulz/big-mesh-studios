@@ -404,7 +404,7 @@ export function App(props: {
         </p>
         <p class="meta">
           {`${context().graphicsCard} · ${context().cores} threads · `}
-          {`${context().viewport.width}×${context().viewport.height} · `}
+          {`${context().viewport.width}×${context().viewport.height} at ${context().devicePixelRatio}× · `}
           {`radius ${context().chunkRadius} (${context().blockCount} blocks) · `}
           {context().workers}
         </p>
