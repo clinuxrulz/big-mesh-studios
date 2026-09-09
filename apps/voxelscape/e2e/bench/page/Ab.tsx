@@ -21,6 +21,20 @@ const percent = (change: number): string =>
   `${change >= 0 ? "+" : ""}${(change * 100).toFixed(1)}%`;
 
 /**
+ * A commit, in the colour its marks are drawn in. The comparison names both
+ * commits in a dozen places and every one of them is a question of which side
+ * is being talked about, so the colour answers it wherever it is asked rather
+ * than only in the plots.
+ */
+function Commit(props: { sha: string; slot: 1 | 2 }): JSX.Element {
+  return (
+    <span class="commit" data-slot={props.slot}>
+      {props.sha}
+    </span>
+  );
+}
+
+/**
  * One metric's repeats from both commits on one scale: every run that was
  * measured, as a mark, with the middle of each side raised.
  *
@@ -42,16 +56,24 @@ function Spread(props: { metric: MetricComparison }): JSX.Element {
   const centre = (low + high) / 2;
   const x = (value: number): number =>
     PAD + ((value - (centre - half)) / (half * 2)) * (WIDTH - PAD * 2);
-  const marks = (side: number[], middle: number, slot: number): JSX.Element => (
+  // Each commit keeps its own lane. Sharing one would hide a side entirely
+  // wherever the two measured the same thing, which is the most common
+  // outcome of all and the one a reader most needs to see.
+  const marks = (
+    side: number[],
+    middle: number,
+    slot: number,
+    lane: number,
+  ): JSX.Element => (
     <For each={side}>
       {(value) => (
         <rect
           class="run"
           data-slot={slot}
           x={x(value) - 1.5}
-          y={value === middle ? 4 : 7}
+          y={value === middle ? lane : lane + 2}
           width="3"
-          height={value === middle ? 14 : 8}
+          height={value === middle ? 9 : 5}
         >
           <title>{show(value, props.metric.unit)}</title>
         </rect>
@@ -66,9 +88,9 @@ function Spread(props: { metric: MetricComparison }): JSX.Element {
       preserveAspectRatio="none"
       aria-label={`${props.metric.name}: ${show(props.metric.beforeMiddle, props.metric.unit)} against ${show(props.metric.afterMiddle, props.metric.unit)}`}
     >
-      <line class="axis" x1="0" y1={HEIGHT - 3} x2={WIDTH} y2={HEIGHT - 3} />
-      {marks(props.metric.before, props.metric.beforeMiddle, 1)}
-      {marks(props.metric.after, props.metric.afterMiddle, 2)}
+      <line class="axis" x1="0" y1={HEIGHT - 1} x2={WIDTH} y2={HEIGHT - 1} />
+      {marks(props.metric.before, props.metric.beforeMiddle, 1, 1)}
+      {marks(props.metric.after, props.metric.afterMiddle, 2, 11)}
     </svg>
   );
 }
@@ -84,14 +106,24 @@ function Scenario(props: {
       <h2>{props.scenario.name}</h2>
       <p class="lede">{props.scenario.description}</p>
       <p class="meta">
-        {`${props.scenario.beforeRepeats} repeats of ${props.before} against ${props.scenario.afterRepeats} of ${props.after}`}
+        {`${props.scenario.beforeRepeats} repeats of `}
+        <Commit sha={props.before} slot={1} />
+        {` against ${props.scenario.afterRepeats} of `}
+        <Commit sha={props.after} slot={2} />
+        {
+          ". Each mark is one repeat, and the taller mark is the middle of them."
+        }
       </p>
       <table class="metrics">
         <thead>
           <tr>
             <th scope="col">metric</th>
-            <th scope="col">{props.before}</th>
-            <th scope="col">{props.after}</th>
+            <th scope="col">
+              <Commit sha={props.before} slot={1} />
+            </th>
+            <th scope="col">
+              <Commit sha={props.after} slot={2} />
+            </th>
             <th scope="col">change</th>
             <th scope="col">every repeat, on one scale</th>
           </tr>
@@ -122,14 +154,31 @@ export function Ab(props: { report: AbReport }): JSX.Element {
   return (
     <main class="viz-root">
       <header>
-        <h1>{`${props.report.before.commit} against ${props.report.after.commit}`}</h1>
+        <h1>
+          <Commit sha={props.report.before.commit} slot={1} />
+          {" against "}
+          <Commit sha={props.report.after.commit} slot={2} />
+        </h1>
         <p class="lede">
-          {`frames ${props.report.pacing} · ${props.report.before.commit} ${props.report.before.power.join(", then ")} · ${props.report.after.commit} ${props.report.after.power.join(", then ")}`}
+          {`frames ${props.report.pacing} · `}
+          <Commit sha={props.report.before.commit} slot={1} />
+          {` ${props.report.before.power.join(", then ")} · `}
+          <Commit sha={props.report.after.commit} slot={2} />
+          {` ${props.report.after.power.join(", then ")}`}
         </p>
         <p class="meta">{props.report.finishedAt}</p>
       </header>
-      <Show when={props.report.powerMismatch}>
-        {(mismatch) => <pre class="mismatch">{mismatch()}</pre>}
+      <Show when={props.report.powerMismatch !== null}>
+        <p class="mismatch">
+          The two were not powered alike, and a machine draws slower on its
+          battery than on the wall:{" "}
+          <Commit sha={props.report.before.commit} slot={1} />
+          {` ${props.report.before.power.join(", then ")}, `}
+          <Commit sha={props.report.after.commit} slot={2} />
+          {` ${props.report.after.power.join(", then ")}. `}
+          The numbers below stand as they were measured; a difference between
+          them may be the power rather than the commit.
+        </p>
       </Show>
       <section class="verdict">
         <h2>Clear of the run-to-run spread</h2>

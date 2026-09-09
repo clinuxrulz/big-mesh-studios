@@ -398,7 +398,6 @@ header {
   background: var(--surface-2);
   color: var(--text-secondary);
   font-size: 0.8125rem;
-  white-space: pre-wrap;
 }
 
 .verdict {
@@ -497,4 +496,13 @@ header {
 
 .spread .run[data-slot="2"] {
   fill: var(--series-2);
+}
+
+/* A commit wears the colour of its own marks, wherever it is named. */
+.commit[data-slot="1"] {
+  color: var(--series-1);
+}
+
+.commit[data-slot="2"] {
+  color: var(--series-2);
 }
