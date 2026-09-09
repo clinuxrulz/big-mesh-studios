@@ -14,6 +14,7 @@
 // store built at a coarser level of detail places an edit at the coarse voxel
 // containing the edited world voxel, or drops it when the range is out of
 // bounds.
+import { CoordinateMap } from "./coordinate-map";
 import {
   BLOCK_WORLD,
   VOXEL_SIZE,
@@ -36,14 +37,6 @@ export interface VoxelEdit {
 }
 
 export type WorldVoxel = [number, number, number];
-
-const keyOf = ([x, y, z]: WorldVoxel): string => `${x},${y},${z}`;
-
-/** Parses the packed string key back into a world voxel coordinate. */
-const fromKey = (key: string): WorldVoxel => {
-  const [x, y, z] = key.split(",");
-  return [Number(x), Number(y), Number(z)];
-};
 
 /**
  * The LOD-0 voxel coordinate of a block's local interior voxel: a bijection
@@ -108,24 +101,16 @@ export const blockWorldVoxelRange = (
   return { min, max };
 };
 
-const inRange = (w: WorldVoxel, min: WorldVoxel, max: WorldVoxel): boolean =>
-  w[0] >= min[0] &&
-  w[0] <= max[0] &&
-  w[1] >= min[1] &&
-  w[1] <= max[1] &&
-  w[2] >= min[2] &&
-  w[2] <= max[2];
-
 /**
- * The sparse world-coordinate edit overlay. Immutable snapshots are fed in
- * from persistence (or a remote sync) at construction; the instance mutates
- * as the player edits.
+ * The sparse world-coordinate edit overlay: the voxel id and its timestamp
+ * for every edited world voxel, indexed by the integer coordinate so an edit
+ * survives the ring re-filling its slots.
  */
 export class EditLayer {
-  private readonly edits: Map<string, VoxelEdit>;
+  private readonly edits: CoordinateMap<VoxelEdit>;
 
-  constructor(initial?: Map<string, VoxelEdit>) {
-    this.edits = new Map(initial ?? []);
+  constructor() {
+    this.edits = new CoordinateMap();
   }
 
   /** Number of recorded edits. */
@@ -139,19 +124,18 @@ export class EditLayer {
    * `updatedAt` for reconcile.
    */
   set(w: WorldVoxel, id: number, updatedAt: number): boolean {
-    const key = keyOf(w);
-    const prev = this.edits.get(key);
+    const prev = this.edits.get(w[0], w[1], w[2]);
     if (prev !== undefined && prev.id === id) {
       prev.updatedAt = Math.max(prev.updatedAt, updatedAt);
       return false;
     }
-    this.edits.set(key, { id, updatedAt });
+    this.edits.set(w[0], w[1], w[2], { id, updatedAt });
     return true;
   }
 
   /** The recorded edit at a world voxel, or undefined when it has none. */
   get(w: WorldVoxel): VoxelEdit | undefined {
-    return this.edits.get(keyOf(w));
+    return this.edits.get(w[0], w[1], w[2]);
   }
 
   /** All edits whose voxel lies within the inclusive bounding box. */
@@ -160,12 +144,18 @@ export class EditLayer {
     max: WorldVoxel,
   ): Array<{ w: WorldVoxel; edit: VoxelEdit }> {
     const out: Array<{ w: WorldVoxel; edit: VoxelEdit }> = [];
-    for (const [key, edit] of this.edits) {
-      const w = fromKey(key);
-      if (inRange(w, min, max)) {
-        out.push({ w, edit });
+    this.edits.forEach((x, y, z, edit) => {
+      if (
+        x >= min[0] &&
+        x <= max[0] &&
+        y >= min[1] &&
+        y <= max[1] &&
+        z >= min[2] &&
+        z <= max[2]
+      ) {
+        out.push({ w: [x, y, z], edit });
       }
-    }
+    });
     return out;
   }
 
@@ -215,9 +205,9 @@ export class EditLayer {
    */
   snapshot(): Array<{ w: WorldVoxel; edit: VoxelEdit }> {
     const out: Array<{ w: WorldVoxel; edit: VoxelEdit }> = [];
-    for (const [key, edit] of this.edits) {
-      out.push({ w: fromKey(key), edit });
-    }
+    this.edits.forEach((x, y, z, edit) => {
+      out.push({ w: [x, y, z], edit });
+    });
     return out;
   }
 }
@@ -230,11 +220,11 @@ export class EditLayer {
 export const editLayerFromSnapshot = (
   entries: Array<{ w: WorldVoxel; edit: VoxelEdit }>,
 ): EditLayer => {
-  const map = new Map<string, VoxelEdit>();
+  const layer = new EditLayer();
   for (const { w, edit } of entries) {
-    map.set(keyOf(w), edit);
+    layer.set(w, edit.id, edit.updatedAt);
   }
-  return new EditLayer(map);
+  return layer;
 };
 
 /**

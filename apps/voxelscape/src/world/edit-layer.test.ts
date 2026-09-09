@@ -44,12 +44,11 @@ describe("EditLayer", () => {
     layer.set([0, 0, 0], 2, 2);
     layer.set([1, 0, 0], 3, 3);
     layer.set([10, 0, 0], 4, 4);
-    const found = layer.queryRange([-1, -1, -1], [1, 1, 1]);
-    expect(found.map((f) => f.w)).toEqual([
-      [-1, 0, 0],
-      [0, 0, 0],
-      [1, 0, 0],
-    ]);
+    const found = layer
+      .queryRange([-1, -1, -1], [1, 1, 1])
+      .map((f) => f.w.join(","))
+      .sort();
+    expect(found).toEqual(["-1,0,0", "0,0,0", "1,0,0"]);
   });
 
   it("applies intersecting edits to a block's store", () => {
