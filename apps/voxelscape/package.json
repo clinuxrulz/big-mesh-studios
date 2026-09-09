@@ -34,7 +34,9 @@
     "bench:compare": "node --experimental-transform-types e2e/bench/compare.ts",
     "bench:ab": "node --experimental-transform-types e2e/bench/ab.ts",
     "bench:html": "node --experimental-transform-types e2e/bench/html.ts",
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "architecture": "node --experimental-transform-types tools/architecture.ts",
+    "architecture:check": "node --experimental-transform-types tools/architecture.ts --check"
   },
   "keywords": [],
   "author": "",

@@ -3,6 +3,7 @@
 - These standards apply to both applications under [`apps/`](./apps).
 - Domain language (what to call things, and what to avoid calling them) is defined per application, in [`apps/voxelscape/CONTEXT.md`](./apps/voxelscape/CONTEXT.md).
 - Non-obvious architectural decisions are recorded in [`apps/voxelscape/docs/adr/`](./apps/voxelscape/docs/adr), one file per decision.
+- What voxelscape is made of is drawn from its own imports in [`apps/voxelscape/docs/architecture.md`](./apps/voxelscape/docs/architecture.md) by `pnpm architecture`, run from that application. A change that adds a dependency between two of its areas has to say so in `tools/architecture.ts` and redraw, which `pnpm architecture:check` and the tool's own tests hold it to.
 - `pnpm check-types`, `pnpm test`, and `pnpm format:check` should all pass before a change is done. Run from the repository root, each covers both applications.
 
 ## To LLM
