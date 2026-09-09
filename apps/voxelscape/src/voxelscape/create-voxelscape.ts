@@ -69,10 +69,11 @@ export interface BenchRoute {
 
 export interface VoxelscapeConfig {
   /**
-   * Whether the canvas is drawn multisampled. Defaults to on, as WebGL does.
-   * Turning it off gives back the several samples a pixel is held at, which is
-   * the largest thing this world keeps on a phone's graphics card, and leaves
-   * the edges between surfaces as the aliased steps the pixels fall on.
+   * Whether the canvas starts drawn multisampled, which `/render:msaa` then
+   * flips. Defaults to off: the several samples a pixel is held at are the
+   * largest thing this world keeps on a phone's graphics card — 54MiB of a
+   * Galaxy A15's — and cost the card no measurable time either way, so what
+   * they buy is smoother edges between surfaces and nothing else.
    */
   antialias?: boolean;
   /** Radius of the block window in X and Z, in chunks. Also sets the fog and camera far distances. */
@@ -162,6 +163,12 @@ export interface Voxelscape {
   /** How much of the world is on screen, for a loading screen to show and dismiss on. */
   loading: Accessor<InitialDrawProgress>;
   /**
+   * Whether the canvas is drawn multisampled. A host renders the canvas keyed
+   * on this, because a context's sample count cannot change: turning it on or
+   * off has to throw the canvas away and mount onto a new one.
+   */
+  multisampling: Accessor<boolean>;
+  /**
    * Attaches a renderer to `canvas` and starts the frame loop. Returns a
    * function that stops the loop and releases the renderer, leaving the world
    * itself intact so it can be mounted onto another canvas.
@@ -177,7 +184,7 @@ export interface Voxelscape {
  * canvas passed to `mount`.
  */
 export const createVoxelscape = ({
-  antialias,
+  antialias = false,
   chunkRadius = 4,
   chunkRadiusY = 2,
   terrain = DEFAULT_TERRAIN,
@@ -199,6 +206,12 @@ export const createVoxelscape = ({
     {},
   );
   const [debugPerf, setDebugPerf] = createSignal(initialDebugPerf);
+  /**
+   * Whether the canvas is drawn multisampled. How many samples a pixel is held
+   * at is settled when the drawing context is made and fixed for its life, so
+   * what reads this is the mount, and changing it remakes the canvas.
+   */
+  const [multisampling, setMultisamplingSignal] = createSignal(antialias);
   /** Whether the `/place:editor` panel is showing. */
   const [placeEditorOpen, setPlaceEditorOpen] = createSignal(false);
   /** The id of the NPC last aimed at, so the aim signal only moves when it does. */
@@ -730,6 +743,19 @@ export const createVoxelscape = ({
       setDebugPerf(next);
       return next ? "performance readout shown" : "performance readout hidden";
     },
+    setMultisampling: (on) => {
+      const next = on ?? !multisampling();
+      if (next === multisampling()) {
+        return `multisampling is already ${next ? "on" : "off"}`;
+      }
+      setMultisamplingSignal(next);
+      // The canvas the world is mounted on goes with the old context, and the
+      // geometry and textures are uploaded again into the new one, so the world
+      // stops for as long as that takes.
+      return next
+        ? "multisampling on — remaking the canvas"
+        : "multisampling off — remaking the canvas";
+    },
   });
 
   /** Reusable color object, updated in place each frame so sky updates don't allocate. */
@@ -1019,7 +1045,7 @@ export const createVoxelscape = ({
       canvas,
       scene,
       camera,
-      antialias,
+      antialias: multisampling(),
       debugPerf,
       resolution,
       onDebugStats,
@@ -1058,6 +1084,7 @@ export const createVoxelscape = ({
     leaveDialog: npcLeave,
     icons,
     loading,
+    multisampling,
     mount,
 
     dispose() {

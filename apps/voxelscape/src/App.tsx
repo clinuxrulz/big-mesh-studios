@@ -1,6 +1,7 @@
 import {
   Component,
   createSignal,
+  For,
   lazy,
   onCleanup,
   onSettled,
@@ -24,7 +25,10 @@ import { LoadingScreen, LoadingToast } from "./ui/LoadingScreen";
 import { createToasts, Toast } from "./ui/Toasts";
 import { createMediaQuery } from "@big-mesh-studios/utils/create-media-query";
 import { createVoxelscape } from "./voxelscape/create-voxelscape";
-import { VoxelscapeContext } from "./voxelscape/voxelscape-context";
+import {
+  useVoxelscape,
+  VoxelscapeContext,
+} from "./voxelscape/voxelscape-context";
 
 /** How long a line the world reports on its own is left on screen. */
 const NOTICE_SECONDS = 6;
@@ -80,11 +84,12 @@ const World: Component<{ launch: LaunchConfig }> = (props) => {
   return (
     <VoxelscapeContext value={voxelscape}>
       <div class={styles.container}>
-        <canvas
-          ref={voxelscape.mount}
-          class={styles.canvas}
-          {...voxelscape.input.canvasHandlers}
-        />
+        {/* A canvas holds the sample count its drawing context was made with
+            for the whole life of that context, so the only way to turn
+            multisampling on or off is to throw the canvas away and mount the
+            world onto a new one. Keying the list on the setting is what does
+            that: the same value keeps the canvas, a changed one replaces it. */}
+        <For each={[voxelscape.multisampling()]}>{() => <WorldCanvas />}</For>
         <Show when={coarsePointer()}>
           <CoarseControls />
         </Show>
@@ -116,6 +121,26 @@ const World: Component<{ launch: LaunchConfig }> = (props) => {
         </toasts.Stack>
       </div>
     </VoxelscapeContext>
+  );
+};
+
+/**
+ * The world's drawing surface, mounted when it appears and unmounted when it
+ * goes. Kept apart from the rest of the world's markup because it is replaced
+ * whenever multisampling changes, and everything else on screen stays.
+ */
+const WorldCanvas: Component = () => {
+  const voxelscape = useVoxelscape();
+  let canvas!: HTMLCanvasElement;
+  onSettled(() => voxelscape.mount(canvas));
+  return (
+    <canvas
+      ref={(element) => {
+        canvas = element;
+      }}
+      class={styles.canvas}
+      {...voxelscape.input.canvasHandlers}
+    />
   );
 };
 

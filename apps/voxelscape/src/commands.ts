@@ -138,6 +138,12 @@ export interface CommandsParams {
    * omitted.
    */
   setDebugPerf: (on?: boolean) => string;
+  /**
+   * Turns multisampling on or off, flipping it if `on` is omitted. The canvas
+   * is remade either way, since a context holds the sample count it was made
+   * with for its whole life.
+   */
+  setMultisampling: (on?: boolean) => string;
 }
 
 /**
@@ -211,6 +217,7 @@ export const createCommands = ({
   setFlying,
   setNoClip,
   setDebugPerf,
+  setMultisampling,
 }: CommandsParams): Commander => {
   return new Commander({
     "/clock:day": {
@@ -330,6 +337,24 @@ export const createCommands = ({
           return setDebugPerf(false);
         }
         return "usage: /render:perf [on|off]  (no argument flips it)";
+      },
+    },
+    "/render:msaa": {
+      description:
+        "turn multisampling on or off, which remakes the canvas and reuploads to it",
+      args: "[on|off]",
+      run: (rest) => {
+        const argument = rest[0];
+        if (argument === undefined) {
+          return setMultisampling();
+        }
+        if (argument === "on") {
+          return setMultisampling(true);
+        }
+        if (argument === "off") {
+          return setMultisampling(false);
+        }
+        return "usage: /render:msaa [on|off]  (no argument flips it)";
       },
     },
     "/render:triangles": {

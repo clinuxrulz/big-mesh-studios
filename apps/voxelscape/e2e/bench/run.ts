@@ -19,8 +19,8 @@
 //                                    # in the Chrome it already has
 //   pnpm bench walk --functions      # sample the main thread and say which
 //                                    # functions spent it
-//   pnpm bench --no-antialias        # draw the canvas without multisampling,
-//                                    # which is what its samples cost
+//   pnpm bench --antialias           # draw the canvas multisampled, which the
+//                                    # world no longer does by default
 //
 // A commit is measured through the harness in this checkout, so the scenarios,
 // the report and its page are whatever they are here; only the application
@@ -150,9 +150,9 @@ interface Options {
    */
   monsters: boolean;
   /**
-   * Whether the canvas is drawn multisampled. On by default, as WebGL is; a run
-   * that turns it off measures what holding several samples of every pixel costs
-   * the graphics card in memory, and what losing them costs the picture.
+   * Whether the canvas is drawn multisampled. Off by default, as the world now
+   * is; a run that asks for it measures what holding several samples of every
+   * pixel costs, which on a phone is 54MiB of the graphics card.
    */
   antialias: boolean;
   /**
@@ -185,7 +185,7 @@ const parseOptions = (argv: string[]): Options => {
   let monsters = false;
   let android = false;
   let functions = false;
-  let antialias = true;
+  let antialias = false;
   let profile = profileNamed("native");
   for (let i = 0; i < argv.length; i++) {
     const argument = argv[i];
@@ -217,8 +217,8 @@ const parseOptions = (argv: string[]): Options => {
       android = true;
     } else if (argument === "--functions") {
       functions = true;
-    } else if (argument === "--no-antialias") {
-      antialias = false;
+    } else if (argument === "--antialias") {
+      antialias = true;
     } else if (argument.startsWith("--")) {
       throw new Error(`unknown option ${argument}`);
     } else {
@@ -646,7 +646,7 @@ const main = async (): Promise<void> => {
     }
     const url =
       `http://127.0.0.1:${options.port}/?radius=${options.radius}` +
-      `${options.antialias ? "" : "&antialias=0"}#bench`;
+      `${options.antialias ? "&antialias=1" : ""}#bench`;
     console.log(`loading ${url}`);
     await page.goto(url, { waitUntil: "load", timeout: 60000 });
     await waitForWindow(page);
