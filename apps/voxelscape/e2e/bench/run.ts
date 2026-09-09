@@ -241,6 +241,7 @@ const waitForWindow = async (page: Page): Promise<void> => {
     () =>
       (window as unknown as { __voxelscape?: object }).__voxelscape !==
       undefined,
+    undefined,
     { timeout: 120000 },
   );
   await page.waitForFunction(
@@ -250,6 +251,7 @@ const waitForWindow = async (page: Page): Promise<void> => {
       const progress = bench.loading();
       return progress.spawnDrawn && progress.drawn >= progress.total;
     },
+    undefined,
     { timeout: 180000 },
   );
 };
@@ -310,6 +312,7 @@ const waitForQuiet = async (page: Page): Promise<void> => {
         queues.meshInFlight === 0
       );
     },
+    undefined,
     { timeout: 120000 },
   );
 };
