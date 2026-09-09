@@ -122,6 +122,7 @@ const VoxelPreviewView: Component = () => {
   let timeOffset = 0;
   let spinOffset = 0;
   let spin = 0;
+  let lastTap: number;
 
   let isDraggingWidget = false;
 
@@ -579,6 +580,13 @@ const VoxelPreviewView: Component = () => {
       const _picked = untrack(picking.picked);
 
       if (_picked === undefined) {
+        const now = performance.now();
+
+        if (lastTap && now - lastTap < 250) {
+          preview.setHandles("none");
+        }
+        lastTap = performance.now();
+
         return;
       }
 
