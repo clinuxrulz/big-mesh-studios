@@ -68,6 +68,13 @@ export interface BenchRoute {
 }
 
 export interface VoxelscapeConfig {
+  /**
+   * Whether the canvas is drawn multisampled. Defaults to on, as WebGL does.
+   * Turning it off gives back the several samples a pixel is held at, which is
+   * the largest thing this world keeps on a phone's graphics card, and leaves
+   * the edges between surfaces as the aliased steps the pixels fall on.
+   */
+  antialias?: boolean;
   /** Radius of the block window in X and Z, in chunks. Also sets the fog and camera far distances. */
   chunkRadius?: number;
   /** Radius of the block window in Y, in chunks; defaults to 2, flattening the window toward the ground. */
@@ -170,6 +177,7 @@ export interface Voxelscape {
  * canvas passed to `mount`.
  */
 export const createVoxelscape = ({
+  antialias,
   chunkRadius = 4,
   chunkRadiusY = 2,
   terrain = DEFAULT_TERRAIN,
@@ -1011,6 +1019,7 @@ export const createVoxelscape = ({
       canvas,
       scene,
       camera,
+      antialias,
       debugPerf,
       resolution,
       onDebugStats,

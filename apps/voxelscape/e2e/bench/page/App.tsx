@@ -406,6 +406,7 @@ export function App(props: {
           {`${context().graphicsCard} · ${context().cores} threads · `}
           {`${context().viewport.width}×${context().viewport.height} at ${context().devicePixelRatio}× · `}
           {`radius ${context().chunkRadius} (${context().blockCount} blocks) · `}
+          {context().antialias ? "multisampled · " : "no multisampling · "}
           {context().workers}
         </p>
         <p class="meta">

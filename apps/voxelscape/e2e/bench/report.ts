@@ -23,6 +23,12 @@ export interface RunContext {
   blockCount: number;
   /** The render scale the run pinned, so the adaptive scaler could not absorb a regression. */
   pinnedScale: number;
+  /**
+   * Whether the canvas was drawn multisampled. A multisampled canvas holds
+   * several samples of every pixel, which is memory on the graphics card and
+   * bandwidth to resolve, so two runs either side of it are two machines.
+   */
+  antialias: boolean;
   /** Whether the scaler was left free to move it instead. */
   adaptiveResolution: boolean;
   /** How the world's worker pool was sized. */
@@ -249,6 +255,7 @@ export const formatReport = (report: BenchReport): string => {
       (context.adaptiveResolution
         ? "resolution adapting"
         : `scale pinned at ${context.pinnedScale}`) +
+      (context.antialias ? " · multisampled" : " · no multisampling") +
       ` · ${context.workers}`,
   ].join("\n");
   return [

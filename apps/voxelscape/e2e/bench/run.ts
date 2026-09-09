@@ -19,6 +19,8 @@
 //                                    # in the Chrome it already has
 //   pnpm bench walk --functions      # sample the main thread and say which
 //                                    # functions spent it
+//   pnpm bench --no-antialias        # draw the canvas without multisampling,
+//                                    # which is what its samples cost
 //
 // A commit is measured through the harness in this checkout, so the scenarios,
 // the report and its page are whatever they are here; only the application
@@ -148,6 +150,12 @@ interface Options {
    */
   monsters: boolean;
   /**
+   * Whether the canvas is drawn multisampled. On by default, as WebGL is; a run
+   * that turns it off measures what holding several samples of every pixel costs
+   * the graphics card in memory, and what losing them costs the picture.
+   */
+  antialias: boolean;
+  /**
    * Whether to sample the main thread while each scenario runs and report which
    * functions spent its time. Sampling costs the thread a few percent, so a run
    * that asks for it is for reading rather than for comparing.
@@ -177,6 +185,7 @@ const parseOptions = (argv: string[]): Options => {
   let monsters = false;
   let android = false;
   let functions = false;
+  let antialias = true;
   let profile = profileNamed("native");
   for (let i = 0; i < argv.length; i++) {
     const argument = argv[i];
@@ -208,6 +217,8 @@ const parseOptions = (argv: string[]): Options => {
       android = true;
     } else if (argument === "--functions") {
       functions = true;
+    } else if (argument === "--no-antialias") {
+      antialias = false;
     } else if (argument.startsWith("--")) {
       throw new Error(`unknown option ${argument}`);
     } else {
@@ -243,6 +254,7 @@ const parseOptions = (argv: string[]): Options => {
     monsters,
     android,
     functions,
+    antialias,
   };
 };
 
@@ -632,7 +644,9 @@ const main = async (): Promise<void> => {
         deviceScaleFactor: options.profile.devicePixelRatio,
       });
     }
-    const url = `http://127.0.0.1:${options.port}/?radius=${options.radius}#bench`;
+    const url =
+      `http://127.0.0.1:${options.port}/?radius=${options.radius}` +
+      `${options.antialias ? "" : "&antialias=0"}#bench`;
     console.log(`loading ${url}`);
     await page.goto(url, { waitUntil: "load", timeout: 60000 });
     await waitForWindow(page);
@@ -766,6 +780,7 @@ const main = async (): Promise<void> => {
         chunkRadius: machine.chunkRadius,
         blockCount: machine.blockCount,
         pinnedScale: scale,
+        antialias: options.antialias,
         adaptiveResolution: options.adaptive,
         workers: pinned.workers,
         profile: options.profile.name,

@@ -53,6 +53,16 @@ export interface RenderLoopConfig {
   ) => string;
   /** Receives the assembled debug line once per frame while `debugPerf` is on. */
   onDebugStats?: (line: string) => void;
+  /**
+   * Whether the canvas is drawn multisampled, smoothing the edges where one
+   * surface ends and the next begins. Defaults to on, as WebGL itself does.
+   *
+   * It is a context attribute, decided when the context is made and fixed for
+   * its life, and what it costs is memory rather than time: a multisampled
+   * canvas holds several samples of every pixel, which on a phone's screen is
+   * the largest thing the page keeps on the graphics card.
+   */
+  antialias?: boolean;
 }
 
 export interface RenderLoop {
@@ -76,8 +86,9 @@ export const createRenderLoop = ({
   clearColor,
   describeStats,
   onDebugStats,
+  antialias,
 }: RenderLoopConfig): RenderLoop => {
-  const renderer = new WebGLRenderer(canvas);
+  const renderer = new WebGLRenderer(canvas, { antialias });
   renderer.setClearColor(clearColor(), 1);
   /** Built the first frame the statistics are asked for, and kept from then on. */
   let timer: GpuTimer | undefined;

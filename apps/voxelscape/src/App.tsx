@@ -53,6 +53,7 @@ const World: Component<{ launch: LaunchConfig }> = (props) => {
     terrain: props.launch.terrain,
     spawn: props.launch.spawn,
     chunkRadius: radiusInUrl(),
+    antialias: antialiasInUrl(),
     onDebugStats: (line) => {
       if (hud !== undefined) {
         hud.textContent = line;
@@ -128,6 +129,19 @@ const Joining: Component<{ line: string }> = (props) => (
 /** The place the address bar names, or null when it names none. */
 const placeInUrl = (): string | null =>
   new URLSearchParams(window.location.search).get("place");
+
+/**
+ * Whether the address bar turns multisampling off, or undefined when it says
+ * nothing. A benchmark measures the world both ways: the multisampled canvas is
+ * the largest thing the page holds on a phone's graphics card.
+ */
+const antialiasInUrl = (): boolean | undefined => {
+  const asked = new URLSearchParams(window.location.search).get("antialias");
+  if (asked === null) {
+    return undefined;
+  }
+  return asked !== "0" && asked !== "false";
+};
 
 /**
  * The chunk window's horizontal radius the address bar asks for, or undefined
