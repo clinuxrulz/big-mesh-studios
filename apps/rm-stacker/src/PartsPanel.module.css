@@ -39,7 +39,7 @@
 
 .part {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto auto auto;
 
   @media (pointer: coarse) {
     &:not([data-selected]) .action {

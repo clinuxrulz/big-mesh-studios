@@ -117,6 +117,12 @@ export function PartsPanel() {
                     </Tab>
                     <IconButton
                       class={styles.action}
+                      kind="pen"
+                      onClick={() => askForName()}
+                      title="Call this motion something else"
+                    />
+                    <IconButton
+                      class={styles.action}
                       kind="clone"
                       onClick={() => duplicatePart(selectedPart().name)}
                       title="Duplicate this part"
