@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { median, standsApart } from "./ab.ts";
+import { median, powerMismatch, standsApart } from "./ab.ts";
 
 describe("median", () => {
   it("takes the middle of an odd number of values", () => {
@@ -30,5 +30,47 @@ describe("standsApart", () => {
 
   it("says nothing on one repeat a side, whatever the values", () => {
     expect(standsApart([1], [100])).toBe(false);
+  });
+});
+
+const wall = { source: "wall" as const, charge: 1, lowPower: false };
+const battery = { source: "battery" as const, charge: 1, lowPower: false };
+
+describe("powerMismatch", () => {
+  it("says nothing when both were measured on the wall", () => {
+    expect(
+      powerMismatch(
+        { commit: "abc1234", power: [wall, wall] },
+        { commit: "def5678", power: [wall, wall] },
+      ),
+    ).toBeNull();
+  });
+
+  it("names both sides when one was on the battery", () => {
+    const said = powerMismatch(
+      { commit: "abc1234", power: [battery] },
+      { commit: "def5678", power: [wall] },
+    );
+    expect(said).toContain("abc1234 on the battery at 100%");
+    expect(said).toContain("def5678 on the wall");
+    expect(said).toContain("stand as they were measured");
+  });
+
+  it("catches the power changing between rounds of one side", () => {
+    expect(
+      powerMismatch(
+        { commit: "abc1234", power: [wall, battery] },
+        { commit: "def5678", power: [wall, wall] },
+      ),
+    ).not.toBeNull();
+  });
+
+  it("says nothing about a run nothing was recorded for", () => {
+    expect(
+      powerMismatch(
+        { commit: "abc1234", power: [] },
+        { commit: "def5678", power: [] },
+      ),
+    ).toBeNull();
   });
 });

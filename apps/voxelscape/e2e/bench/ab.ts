@@ -27,6 +27,8 @@ import { fileURLToPath } from "node:url";
 import { outPath } from "../out-dir.ts";
 import { reportsByAge } from "./html.ts";
 import { metricsFor, phaseMetrics, show } from "./metrics.ts";
+import { describePower, samePower } from "./power.ts";
+import type { PowerState } from "./power.ts";
 import type { Metric } from "./metrics.ts";
 import type { BenchReport, RunContext } from "./report.ts";
 import type { RunSummary } from "./summarize.ts";
@@ -42,6 +44,8 @@ interface Side {
   commit: string;
   /** Whether the runs' frames waited for the display, which both sides share. */
   pacing: RunContext["pacing"];
+  /** How the machine was powered for each round this side was measured over. */
+  power: PowerState[];
   /** Every repeat of every round, keyed by the scenario it belongs to. */
   repeats: Map<string, RunSummary[]>;
   /** What each scenario is, for the report to say. */
@@ -106,9 +110,11 @@ const pool = (side: Side | undefined, report: BenchReport): Side => {
   const into = side ?? {
     commit: `${report.context.commit}${report.context.dirty ? "+" : ""}`,
     pacing: report.context.pacing,
+    power: [],
     repeats: new Map<string, RunSummary[]>(),
     descriptions: new Map<string, string>(),
   };
+  into.power.push(report.context.power);
   for (const scenario of report.scenarios) {
     into.repeats.set(scenario.name, [
       ...(into.repeats.get(scenario.name) ?? []),
@@ -138,6 +144,35 @@ const line = (
   };
 };
 
+/**
+ * What to say about two sides that were not powered alike, or null when they
+ * were. A machine on its battery, or holding itself back to save power, draws
+ * slower than the same machine on the wall, so a difference measured across
+ * such a change is partly the wall socket. The runs are still reported: they
+ * measured what they measured, and this says what to hold against them.
+ *
+ * @param before Every power state the earlier commit was measured under.
+ * @param after The same for this checkout.
+ * @returns The line to print above the numbers, or null.
+ */
+export const powerMismatch = (
+  before: { commit: string; power: PowerState[] },
+  after: { commit: string; power: PowerState[] },
+): string | null => {
+  const every = [...before.power, ...after.power];
+  if (every.length === 0 || every.every((one) => samePower(one, every[0]))) {
+    return null;
+  }
+  const side = (one: { commit: string; power: PowerState[] }): string =>
+    `${one.commit} ${[...new Set(one.power.map(describePower))].join(", then ")}`;
+  return [
+    "the two were not powered alike, and a machine draws slower on its battery than on the wall:",
+    `  ${side(before)}`,
+    `  ${side(after)}`,
+    "the numbers below stand as they were measured; a difference between them may be the power rather than the commit.",
+  ].join("\n");
+};
+
 /** Everything that moved further than the repeats of one commit disagree. */
 interface Clear {
   scenario: string;
@@ -151,6 +186,10 @@ interface Clear {
 const report = (before: Side, after: Side): string => {
   const lines: string[] = [];
   const clear: Clear[] = [];
+  const mismatch = powerMismatch(before, after);
+  if (mismatch !== null) {
+    lines.push(mismatch);
+  }
   for (const [scenario, afterRepeats] of after.repeats) {
     const beforeRepeats = before.repeats.get(scenario);
     if (beforeRepeats === undefined) {

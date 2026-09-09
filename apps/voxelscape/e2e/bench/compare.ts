@@ -107,7 +107,9 @@ const main = (): void => {
     before.context.chunkRadius !== after.context.chunkRadius ||
     before.context.pinnedScale !== after.context.pinnedScale ||
     before.context.pacing !== after.context.pacing ||
-    before.context.monsters !== after.context.monsters
+    before.context.monsters !== after.context.monsters ||
+    before.context.power?.source !== after.context.power?.source ||
+    before.context.power?.lowPower !== after.context.power?.lowPower
   ) {
     console.log(
       "\nthese two runs were measured under different conditions; the numbers below are not comparable",

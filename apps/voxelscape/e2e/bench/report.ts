@@ -1,3 +1,5 @@
+import { describePower } from "./power.ts";
+import type { PowerState } from "./power.ts";
 import type { RunSummary } from "./summarize.ts";
 
 /** Everything about a run that decides whether its numbers can be compared with another's. */
@@ -39,6 +41,12 @@ export interface RunContext {
    * different fight every time.
    */
   monsters: boolean;
+  /**
+   * How the machine was powered. A laptop on its battery draws slower than the
+   * same laptop on the wall, and slower again in a low-power mode, so this
+   * decides whether two runs are of the same machine at all.
+   */
+  power: PowerState;
 }
 
 /**
@@ -229,7 +237,8 @@ export const formatReport = (report: BenchReport): string => {
         ? `, processor slowed ${context.cpuThrottle} times`
         : "") +
       ` · frames ${context.pacing}` +
-      (context.monsters ? "" : " · no monsters"),
+      (context.monsters ? "" : " · no monsters") +
+      ` · ${describePower(context.power)}`,
     `${context.graphicsCard} · ${context.cores} threads · ` +
       `${context.viewport.width}x${context.viewport.height} · ` +
       `radius ${context.chunkRadius} (${context.blockCount} blocks) · ` +

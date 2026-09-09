@@ -32,6 +32,8 @@ import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { outPath } from "../out-dir.ts";
+import { describePower, systemPower } from "./power.ts";
+import type { PowerState } from "./power.ts";
 import { QUICK_SCENARIOS, SCENARIOS, routeDistance } from "./scenarios.ts";
 import type { Scenario } from "./scenarios.ts";
 import { profileNamed } from "./profiles.ts";
@@ -439,6 +441,45 @@ const measure = async (
   return { drain, trace: summarizeTrace(events, tracing.file) };
 };
 
+/**
+ * What the browser says about the machine's power. Chromium answers this on
+ * every system it runs on, which is what makes it the fallback where the
+ * system itself was not asked; it says nothing about a low-power mode.
+ */
+const browserPower = (page: Page): Promise<Partial<PowerState>> =>
+  page.evaluate(async () => {
+    const battery = (
+      navigator as Navigator & {
+        getBattery?: () => Promise<{ charging: boolean; level: number }>;
+      }
+    ).getBattery;
+    if (battery === undefined) {
+      return {};
+    }
+    const state = await battery.call(navigator);
+    return {
+      source: state.charging ? ("wall" as const) : ("battery" as const),
+      charge: state.level,
+    };
+  });
+
+/** What the system and the browser between them know about the machine's power. */
+const powerNow = async (page: Page): Promise<PowerState> => {
+  const system = systemPower();
+  if (system.source !== "unknown" && system.charge !== null) {
+    return system;
+  }
+  const browser = await browserPower(page);
+  return {
+    source:
+      system.source === "unknown"
+        ? (browser.source ?? "unknown")
+        : system.source,
+    charge: system.charge ?? browser.charge ?? null,
+    lowPower: system.lowPower,
+  };
+};
+
 const describeMachine = (page: Page) =>
   page.evaluate(() => {
     const canvas = document.createElement("canvas");
@@ -504,6 +545,8 @@ const main = async (): Promise<void> => {
     }
     console.log(pinned.monsters);
     const machine = await describeMachine(page);
+    const power = await powerNow(page);
+    console.log(`measuring ${describePower(power)}`);
     // The processor is slowed only once the window has loaded. Boot would
     // otherwise take the slowdown too, and what is being measured is a world
     // already standing, not the wait to reach it.
@@ -585,6 +628,7 @@ const main = async (): Promise<void> => {
         cpuThrottle: options.profile.cpuThrottle,
         pacing: options.unlocked ? "unlocked" : "paced",
         monsters: options.monsters,
+        power,
       },
       scenarios,
     };

@@ -5,6 +5,7 @@ import type { BenchReport, ScenarioReport } from "../report.ts";
 import type { RunSummary } from "../summarize.ts";
 import type { TraceSummary } from "../trace.ts";
 import { Bars, Chart } from "./Charts.tsx";
+import { describePower } from "../power.ts";
 import {
   framesOf,
   memoryBands,
@@ -327,6 +328,9 @@ export function App(props: {
             : ""}
           {` · frames ${context().pacing}`}
           {context().monsters === false ? " · no monsters" : ""}
+          {context().power === undefined
+            ? ""
+            : ` · ${describePower(context().power)}`}
           {context().adaptiveResolution
             ? " · resolution adapting"
             : ` · scale pinned at ${context().pinnedScale}`}
