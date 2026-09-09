@@ -13,7 +13,7 @@
 import { readFileSync } from "node:fs";
 import { outDir } from "../out-dir.ts";
 import { reportsByAge } from "./html.ts";
-import { METRICS, show } from "./metrics.ts";
+import { metricsFor, show } from "./metrics.ts";
 import type { Metric } from "./metrics.ts";
 import { representative } from "./report.ts";
 import type { BenchReport, ScenarioReport } from "./report.ts";
@@ -74,12 +74,13 @@ const phaseMovers = (before: RunSummary, after: RunSummary): string[] =>
 const compareScenario = (
   before: ScenarioReport,
   after: ScenarioReport,
+  metrics: Metric[],
 ): string => {
   const one = representative(before.repeats);
   const two = representative(after.repeats);
   return [
     `${after.name} — ${after.description}`,
-    ...METRICS.map((metric) =>
+    ...metrics.map((metric) =>
       line(metric.name, metric.of(one), metric.of(two), metric.unit),
     ),
     "  phases that moved most:",
@@ -104,7 +105,8 @@ const main = (): void => {
   if (
     before.context.graphicsCard !== after.context.graphicsCard ||
     before.context.chunkRadius !== after.context.chunkRadius ||
-    before.context.pinnedScale !== after.context.pinnedScale
+    before.context.pinnedScale !== after.context.pinnedScale ||
+    before.context.pacing !== after.context.pacing
   ) {
     console.log(
       "\nthese two runs were measured under different conditions; the numbers below are not comparable",
@@ -119,7 +121,9 @@ const main = (): void => {
       console.log(`\n${afterScenario.name} — only in the later run`);
       continue;
     }
-    console.log(`\n${compareScenario(beforeScenario, afterScenario)}`);
+    console.log(
+      `\n${compareScenario(beforeScenario, afterScenario, metricsFor(after.context.pacing))}`,
+    );
   }
 };
 

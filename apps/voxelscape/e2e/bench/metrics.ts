@@ -1,6 +1,7 @@
 // The numbers one run is read against another on, and how each is written
 // out. They live apart from the tools that do the comparing so that a metric
 // added here reaches all of them.
+import type { RunContext } from "./report.ts";
 import type { RunSummary } from "./summarize.ts";
 
 /** How a value is written out. */
@@ -16,7 +17,19 @@ export interface Metric {
 /** How much longer a phase has to take than nothing at all to be worth comparing. */
 const PHASE_FLOOR_MS = 0.005;
 
-export const METRICS: Metric[] = [
+/**
+ * The numbers a run paced this way is read on.
+ *
+ * A run the display paced counts a frame late when it took half again as long
+ * as that run's own middle frame, which is the refresh period it was held to.
+ * Nothing holds an unlocked run to anything — its middle frame is however long
+ * the work took, and a bar set from it would call an ordinary frame late — so
+ * a frame there is counted against a sixtieth of a second instead.
+ *
+ * @param pacing Whether the run's frames waited for the display.
+ * @returns The metrics to read the run on, in the order they are printed.
+ */
+export const metricsFor = (pacing: RunContext["pacing"]): Metric[] => [
   { name: "gap p50", of: (run) => run.gap.median, unit: "ms" },
   { name: "gap p95", of: (run) => run.gap.p95, unit: "ms" },
   { name: "gap p99", of: (run) => run.gap.p99, unit: "ms" },
@@ -24,7 +37,13 @@ export const METRICS: Metric[] = [
   { name: "main thread", of: (run) => run.mainThread.mean, unit: "ms" },
   { name: "worst main", of: (run) => run.mainThread.max, unit: "ms" },
   { name: "gpu draw p50", of: (run) => run.gpu.median, unit: "ms" },
-  { name: "dropped frames", of: (run) => run.drops.count, unit: "count" },
+  pacing === "paced"
+    ? { name: "dropped frames", of: (run) => run.drops.count, unit: "count" }
+    : {
+        name: "over budget",
+        of: (run) => run.overBudget.count,
+        unit: "count",
+      },
   { name: "render scale", of: (run) => run.scale.median, unit: "count" },
   { name: "triangles", of: (run) => run.triangles.median, unit: "count" },
   {

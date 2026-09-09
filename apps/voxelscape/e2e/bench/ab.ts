@@ -26,9 +26,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { outPath } from "../out-dir.ts";
 import { reportsByAge } from "./html.ts";
-import { METRICS, phaseMetrics, show } from "./metrics.ts";
+import { metricsFor, phaseMetrics, show } from "./metrics.ts";
 import type { Metric } from "./metrics.ts";
-import type { BenchReport } from "./report.ts";
+import type { BenchReport, RunContext } from "./report.ts";
 import type { RunSummary } from "./summarize.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -40,6 +40,8 @@ const RUNNER = join(HERE, "run.ts");
 interface Side {
   /** The commit measured, as its reports name it. */
   commit: string;
+  /** Whether the runs' frames waited for the display, which both sides share. */
+  pacing: RunContext["pacing"];
   /** Every repeat of every round, keyed by the scenario it belongs to. */
   repeats: Map<string, RunSummary[]>;
   /** What each scenario is, for the report to say. */
@@ -103,6 +105,7 @@ const measure = (args: string[]): BenchReport => {
 const pool = (side: Side | undefined, report: BenchReport): Side => {
   const into = side ?? {
     commit: `${report.context.commit}${report.context.dirty ? "+" : ""}`,
+    pacing: report.context.pacing,
     repeats: new Map<string, RunSummary[]>(),
     descriptions: new Map<string, string>(),
   };
@@ -159,7 +162,7 @@ const report = (before: Side, after: Side): string => {
       `  ${beforeRepeats.length} repeats of ${before.commit} against ${afterRepeats.length} of ${after.commit}, middle [lowest–highest]`,
     );
     const metrics = [
-      ...METRICS,
+      ...metricsFor(after.pacing),
       ...phaseMetrics([...beforeRepeats, ...afterRepeats]),
     ];
     for (const metric of metrics) {
