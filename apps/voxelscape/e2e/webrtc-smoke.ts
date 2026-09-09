@@ -2,6 +2,7 @@
 // between two Playwright Chromium contexts at all, using the same STUN servers
 // and mDNS flag the harness uses? Independent of the app's signal-m mailbox.
 import { chromium } from "playwright";
+import { outPath } from "./out-dir.ts";
 
 const server = "http://127.0.0.1:5173";
 const ICE_SERVERS = [
@@ -62,22 +63,16 @@ const responderScript = () => `
 `;
 
 async function main() {
-  const ctxA = await chromium.launchPersistentContext(
-    "/tmp/opencode/wrtc-smoke-a",
-    {
-      headless: false,
-      viewport: { width: 480, height: 360 },
-      args: launchArgs,
-    },
-  );
-  const ctxB = await chromium.launchPersistentContext(
-    "/tmp/opencode/wrtc-smoke-b",
-    {
-      headless: false,
-      viewport: { width: 480, height: 360 },
-      args: launchArgs,
-    },
-  );
+  const ctxA = await chromium.launchPersistentContext(outPath("wrtc-smoke-a"), {
+    headless: false,
+    viewport: { width: 480, height: 360 },
+    args: launchArgs,
+  });
+  const ctxB = await chromium.launchPersistentContext(outPath("wrtc-smoke-b"), {
+    headless: false,
+    viewport: { width: 480, height: 360 },
+    args: launchArgs,
+  });
   const a = ctxA.pages()[0] ?? (await ctxA.newPage());
   const b = ctxB.pages()[0] ?? (await ctxB.newPage());
   await a.goto(server, { waitUntil: "domcontentloaded" });

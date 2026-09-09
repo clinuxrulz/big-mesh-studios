@@ -3,6 +3,7 @@
     "jsx": "preserve",
     "jsxImportSource": "@solidjs/web",
     "target": "ESNext",
+    "allowImportingTsExtensions": true,
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "isolatedModules": true,

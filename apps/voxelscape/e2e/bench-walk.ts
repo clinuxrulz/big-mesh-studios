@@ -9,6 +9,7 @@
 // headless SwiftShader is so slow that every frame is a long task. A viewport
 // of 1024x576 matches a realistic window.
 import { chromium } from "playwright";
+import { outPath } from "./out-dir.ts";
 
 const URL = process.env.BENCH_URL ?? "http://127.0.0.1:4173/";
 const STAND_MS = 15000;
@@ -102,11 +103,9 @@ const main = async () => {
       profile: unknown;
     };
     const fs = await import("node:fs");
-    fs.writeFileSync(
-      "/tmp/opencode/voxel-cpu-profile.json",
-      JSON.stringify(profile),
-    );
-    console.log("CPU profile written to /tmp/opencode/voxel-cpu-profile.json");
+    const outFile = outPath("voxel-cpu-profile.json");
+    fs.writeFileSync(outFile, JSON.stringify(profile));
+    console.log(`CPU profile written to ${outFile}`);
   }
 
   const standing = await page.evaluate(() => (window as any).__standing);

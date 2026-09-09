@@ -2,3 +2,4 @@ node_modules
 .DS_Store
 .worktrees
 .claude
+apps/voxelscape/e2e/.out

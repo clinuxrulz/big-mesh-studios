@@ -14,6 +14,7 @@
 // counts down to nothing), so what is profiled is steady-state forward travel
 // plus the chunk streaming it triggers — not the startup fill.
 import { chromium } from "playwright";
+import { outPath } from "./out-dir.ts";
 
 const URL = process.env.BENCH_URL ?? "http://127.0.0.1:4173/";
 const STAND_MS = 12000;
@@ -133,9 +134,9 @@ const main = async () => {
     profile: unknown;
   };
   const fs = await import("node:fs");
-  const outFile = STAND_PROFILE
-    ? "/tmp/opencode/voxel-stand-profile.json"
-    : "/tmp/opencode/voxel-walk-profile.json";
+  const outFile = outPath(
+    STAND_PROFILE ? "voxel-stand-profile.json" : "voxel-walk-profile.json",
+  );
   fs.writeFileSync(outFile, JSON.stringify(profile));
   console.log(`CPU profile written to ${outFile}`);
 
