@@ -461,6 +461,12 @@ const main = async (): Promise<void> => {
       });
     }
 
+    // Nothing past this point measures anything, and writing the report takes
+    // long enough to notice, so the window goes away as soon as the last
+    // scenario has been drained rather than at the end of the run.
+    await browser.close();
+    browser = undefined;
+
     const report: BenchReport = {
       context: {
         commit: git("rev-parse", "--short", "HEAD"),
