@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { PerspectiveCamera } from "@random-mesh/rmsl/scene";
+import type { BufferGeometry } from "@random-mesh/rmsl/scene";
 import { scBounds, TriangleRenderer } from "./triangle-renderer";
 import { probeColor } from "./occlusion";
 import { buildBlockShell, type WorldBlock } from "../world/level-data";
@@ -297,6 +298,99 @@ describe("the occlusion probe's slot id", () => {
     const geometry = (probe as unknown as { geometry: BufferGeometryLike })
       .geometry;
     expect(geometry.getAttribute("occlusionColor")).toBeUndefined();
+  });
+});
+
+describe("the recycled geometry pool", () => {
+  /** The pairs waiting in the pool, which no public surface exposes. */
+  const pool = (
+    renderer: TriangleRenderer,
+  ): { terrain: BufferGeometry; water: BufferGeometry; bytes: number }[] =>
+    (
+      renderer as unknown as {
+        geometryPool: {
+          terrain: BufferGeometry;
+          water: BufferGeometry;
+          bytes: number;
+        }[];
+      }
+    ).geometryPool;
+
+  /** The pair the renderer's one superchunk is holding. */
+  const held = (
+    renderer: TriangleRenderer,
+  ): { terrain: BufferGeometry; water: BufferGeometry } => {
+    const inside = renderer as unknown as {
+      scMerged: Map<
+        string,
+        { terrainGeometry: BufferGeometry; waterGeometry: BufferGeometry }
+      >;
+    };
+    const [state] = [...inside.scMerged.values()];
+    return { terrain: state.terrainGeometry, water: state.waterGeometry };
+  };
+
+  /** A renderer whose one block is meshed and merged into a superchunk at the origin. */
+  const merged = (budget?: number): TriangleRenderer => {
+    const renderer = rendererForBudget(budget, blockWithFloor());
+    renderer.repositionBlock(0, [0, 0, 0]);
+    renderer.onBlockChanged(0);
+    renderer.meshNow(0);
+    settle(renderer);
+    return renderer;
+  };
+
+  it("hands back the arrays of the superchunk that left", () => {
+    // A pooled pair is filled from the arrays of whichever superchunk takes it
+    // next, so holding the departed superchunk's arrays until then keeps a
+    // superchunk's worth of geometry in memory for nothing.
+    const renderer = merged();
+    const pair = held(renderer);
+    expect(pair.terrain.getAttribute("position")!.count).toBeGreaterThan(0);
+    expect(pair.terrain.index!.count).toBeGreaterThan(0);
+
+    // The block moves to a far cell, which empties its old superchunk.
+    renderer.repositionBlock(0, [1024, 0, 0]);
+
+    expect(pool(renderer)).toHaveLength(1);
+    expect(pair.terrain.getAttribute("position")!.count).toBe(0);
+    expect(pair.terrain.index!.count).toBe(0);
+  });
+
+  it("gives a pair back to the card once the pool is full", () => {
+    // The renderer keys its GPU buffers by geometry object and holds them for
+    // as long as it holds the geometry, so a pair the pool has no room for has
+    // to be disposed rather than dropped. A one-byte frame budget leaves the
+    // pool eight bytes, which the first pair recycled already exceeds.
+    const renderer = merged(1);
+    const pair = held(renderer);
+    let disposed = 0;
+    pair.terrain.addEventListener("dispose", () => {
+      disposed++;
+    });
+    pair.water.addEventListener("dispose", () => {
+      disposed++;
+    });
+
+    renderer.repositionBlock(0, [1024, 0, 0]);
+
+    expect(pool(renderer)).toHaveLength(0);
+    expect(disposed).toBe(2);
+  });
+
+  it("gives every pair back when the renderer is torn down", () => {
+    const renderer = merged();
+    const pair = held(renderer);
+    let disposed = 0;
+    for (const geometry of [pair.terrain, pair.water]) {
+      geometry.addEventListener("dispose", () => {
+        disposed++;
+      });
+    }
+
+    renderer.dispose();
+
+    expect(disposed).toBe(2);
   });
 });
 

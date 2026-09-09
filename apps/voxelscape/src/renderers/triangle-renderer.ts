@@ -22,6 +22,7 @@ import { float, mat3, pow, vec2, vec3, vec4 } from "@random-mesh/rmsl";
 import {
   BoxGeometry,
   Builder,
+  BufferAttribute,
   BufferGeometry,
   Color,
   Group,
@@ -402,6 +403,14 @@ const MAX_UPLOAD_STALL_FRAMES = 6;
 const MAX_UPLOAD_BYTES_PER_FRAME = 2 * 1024 * 1024;
 
 /**
+ * Frames' worth of upload the recycled geometry pool holds. A scroll's burst
+ * takes a handful of frames to settle, and a pair recycled during one is taken
+ * again by an entering superchunk inside them; past that the pool would only be
+ * holding buffers on the card against a reuse that never comes.
+ */
+const GEOMETRY_POOL_FRAMES = 8;
+
+/**
  * The bytes one vertex of merged geometry adds to the GPU upload: position 12
  * + normal 12 + uv 8 + the tile it repeats 4 + brightness 4. A pass without
  * UVs is over-counted by their 12 bytes, which only tightens the frame's
@@ -694,6 +703,25 @@ const appendArrays = (
   into.indices.pushShifted(a.indices, base);
 };
 
+/**
+ * Points a recycled pair's attributes at empty arrays, handing back the merged
+ * arrays the superchunk that just left had grown. The attribute set itself is
+ * kept, and each attribute is replaced when the pair is filled again: a mesh
+ * still holding a live range over the pair draws from the card's copy, which
+ * that fill overwrites, so what it shows does not change here.
+ */
+const releaseGeometryArrays = (geometry: BufferGeometry): void => {
+  for (const [name, attribute] of Object.entries(geometry.attributes)) {
+    geometry.setAttribute(
+      name,
+      new BufferAttribute(new Float32Array(0), attribute.itemSize),
+    );
+  }
+  if (geometry.index !== null) {
+    geometry.setIndex(new BufferAttribute(new Uint32Array(0), 1));
+  }
+};
+
 /** A superchunk's merged arrays plus the member slots already joined into them. */
 interface SuperchunkState {
   slots: Set<number>;
@@ -719,16 +747,20 @@ interface SuperchunkState {
 }
 
 /**
- * A superchunk's pair of upload geometries. Kept stable once handed to the
- * renderer and recycled between superchunks: the renderer holds a GPU-buffer
- * cache keyed by geometry object and frees nobody's individually, so a fresh
- * geometry per visited superchunk would accumulate VRAM for as long as the
- * player travelled. A pooled pair is re-uploaded in place by `setGeometryData`
- * on reuse, which keeps the cache's entry count bounded by the pool size.
+ * A superchunk's pair of upload geometries. Kept stable for the life of the
+ * superchunk holding it and recycled between superchunks: the renderer keys its
+ * GPU buffers by geometry object, so filling a pooled pair again refills the
+ * buffers it already has instead of allocating another set, and a pair nothing
+ * is going to take is disposed so the renderer lets those buffers go.
  */
 interface SuperchunkGeometry {
   terrain: BufferGeometry;
   water: BufferGeometry;
+}
+
+/** A recycled pair, with the bytes of card memory the arrays that filled it measured. */
+interface PooledGeometry extends SuperchunkGeometry {
+  bytes: number;
 }
 
 /** A chunk slice that holds nothing: whatever slice a slot actually has overwrites this. */
@@ -794,13 +826,15 @@ export class TriangleRenderer {
   private readonly scMerged = new Map<string, SuperchunkState>();
   /**
    * Geometry pairs returned by superchunks that left the window, handed to the
-   * next superchunk to refresh in place. Bounding a superchunk's `BufferGeometry`
-   * allocations stops the renderer's geometry-keyed cache from ratcheting up one
-   * never-freed VRAM entry per superchunk cell visited.
+   * next superchunk to fill in place. Filling a pair the card already has
+   * buffers for spares the driver an allocation per superchunk cell visited,
+   * which a scroll does several of a second.
    */
-  private readonly geometryPool: SuperchunkGeometry[] = [];
-  /** The most pooled geometry pairs kept: a scroll's burst is drawn from before it is discarded. */
-  private static readonly GEOMETRY_POOL_CAP = 24;
+  private readonly geometryPool: PooledGeometry[] = [];
+  /** Bytes of card memory the pooled pairs hold, as the merged arrays that filled them measured. */
+  private geometryPoolBytes = 0;
+  /** The most the pool holds before a recycled pair is handed back to the card instead. */
+  private readonly geometryPoolBudgetBytes: number;
   /** Superchunks whose merged geometry must be fully re-joined (membership or data replaced). */
   private readonly scNeedsFull = new Set<string>();
   /** Superchunks whose merged geometry is stale and awaiting an upload this frame. */
@@ -880,6 +914,8 @@ export class TriangleRenderer {
     this.onBlockMeshed = onBlockMeshed;
     this.uploadBudgetBytes =
       params.uploadBytesPerFrame ?? MAX_UPLOAD_BYTES_PER_FRAME;
+    this.geometryPoolBudgetBytes =
+      this.uploadBudgetBytes * GEOMETRY_POOL_FRAMES;
     // Water probes shade over terrain but never hide it the way the real water
     // pass blends over the scene: the probe's depth stays the terrain's, so the
     // culler cannot mistake translucent water for an opaque occluder.
@@ -960,7 +996,8 @@ export class TriangleRenderer {
   private takeGeometryPair(): SuperchunkGeometry {
     const pooled = this.geometryPool.pop();
     if (pooled !== undefined) {
-      return pooled;
+      this.geometryPoolBytes -= pooled.bytes;
+      return { terrain: pooled.terrain, water: pooled.water };
     }
     return {
       terrain: new BufferGeometry(),
@@ -969,20 +1006,28 @@ export class TriangleRenderer {
   }
 
   /**
-   * Returns a superchunk's geometry pair to the pool for the next superchunk,
-   * keeping the pair's count (and the renderer's GPU-buffer cache keyed by it)
-   * bounded instead of ratcheting up one entry per superchunk cell visited.
-   * Pairs beyond `GEOMETRY_POOL_CAP` are dropped once no superchunk holds them,
-   * bounding the pool against a fast scroll anyway.
+   * Hands a superchunk's geometry pair on now that the superchunk is gone: to
+   * the pool for the next superchunk to fill, or, once the pool holds a burst's
+   * worth of card memory, back to the card. The arrays the pair was left with go
+   * either way, since a pooled pair is filled from the arrays of whichever
+   * superchunk takes it.
    */
   private recycleGeometryPair(state: SuperchunkState): void {
-    if (this.geometryPool.length >= TriangleRenderer.GEOMETRY_POOL_CAP) {
+    const bytes =
+      mergedArraysBytes(state.terrain) + mergedArraysBytes(state.water);
+    releaseGeometryArrays(state.terrainGeometry);
+    releaseGeometryArrays(state.waterGeometry);
+    if (this.geometryPoolBytes + bytes > this.geometryPoolBudgetBytes) {
+      state.terrainGeometry.dispose();
+      state.waterGeometry.dispose();
       return;
     }
     this.geometryPool.push({
       terrain: state.terrainGeometry,
       water: state.waterGeometry,
+      bytes,
     });
+    this.geometryPoolBytes += bytes;
   }
 
   /** Unlinks one slot's world meshes and probes; the slot stays registered in `blockSc`. */
@@ -2026,10 +2071,22 @@ export class TriangleRenderer {
   }
 
   /**
-   * Terminates the mesh worker. Geometries and materials are not disposed —
-   * rmsl does not expose a disposal API for them.
+   * Terminates the mesh worker and gives every superchunk's geometry back, the
+   * pairs in use and the pooled ones alike, so a renderer torn down leaves none
+   * of the world's geometry on the card. Materials are not disposed — rmsl does
+   * not expose a disposal API for those.
    */
   dispose(): void {
     this.meshes.dispose();
+    for (const state of this.scMerged.values()) {
+      state.terrainGeometry.dispose();
+      state.waterGeometry.dispose();
+    }
+    for (const pooled of this.geometryPool) {
+      pooled.terrain.dispose();
+      pooled.water.dispose();
+    }
+    this.geometryPool.length = 0;
+    this.geometryPoolBytes = 0;
   }
 }
