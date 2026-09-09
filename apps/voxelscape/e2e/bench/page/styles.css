@@ -1,10 +1,14 @@
 /*
- * The report's own colours. The six series slots are the validated categorical
- * order; three of the light steps sit below the contrast a small mark needs, so
- * every chart carries a legend and the figures behind it are written out in the
- * table under each scenario.
+ * The report's own colours, declared on the document so the page and the
+ * ground behind it are painted from one set: the report fills the middle of
+ * the window and the body fills the rest, and in the dark they have to agree.
+ *
+ * The six series slots are the validated categorical order; three of the light
+ * steps sit below the contrast a small mark needs, so every chart carries a
+ * legend and the figures behind it are written out in the table under each
+ * scenario.
  */
-.viz-root {
+:root {
   color-scheme: light;
   --surface-1: #fcfcfb;
   --surface-2: #f2f1ee;
@@ -23,7 +27,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:where(:not([data-theme="light"])) .viz-root {
+  :root:where(:not([data-theme="light"])) {
     color-scheme: dark;
     --surface-1: #1a1a19;
     --surface-2: #242422;
@@ -40,7 +44,7 @@
   }
 }
 
-:root[data-theme="dark"] .viz-root {
+:root[data-theme="dark"] {
   color-scheme: dark;
   --surface-1: #1a1a19;
   --surface-2: #242422;
@@ -58,7 +62,8 @@
 
 body {
   margin: 0;
-  background: var(--surface-1, #fcfcfb);
+  background: var(--surface-1);
+  color: var(--text-primary);
   font:
     14px/1.5 ui-sans-serif,
     system-ui,
