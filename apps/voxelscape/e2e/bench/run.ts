@@ -16,7 +16,7 @@
 // rasterizer, where every frame is slow enough to drown the numbers being
 // measured.
 import { chromium } from "playwright";
-import type { Browser, Page } from "playwright";
+import type { Browser, CDPSession, Page } from "playwright";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -30,6 +30,14 @@ import { summarize } from "./summarize.ts";
 import { formatReport } from "./report.ts";
 import type { BenchReport, ScenarioReport } from "./report.ts";
 import type { PerfDrain } from "../../src/render/perf-probe.ts";
+import {
+  dumpMemory,
+  formatTrace,
+  startTrace,
+  stopTrace,
+  summarizeTrace,
+} from "./trace.ts";
+import type { TraceSummary } from "./trace.ts";
 
 /** The application directory, whatever directory the script was started from. */
 const APP_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -86,6 +94,13 @@ interface Options {
    * not waiting turns the gap back into a measurement of what a frame costs.
    */
   unlocked: boolean;
+  /**
+   * Whether to record a browser trace around each scenario. The trace carries
+   * what the graphics process does with the commands the page sends it, and
+   * what every part of the browser is holding — including the driver's own
+   * buffers and textures, which the page has no way to count.
+   */
+  trace: boolean;
 }
 
 const parseOptions = (argv: string[]): Options => {
@@ -97,6 +112,7 @@ const parseOptions = (argv: string[]): Options => {
   let all = false;
   let unlocked = false;
   let adaptive = false;
+  let trace = false;
   let scale: number | undefined;
   let profile = profileNamed("native");
   for (let i = 0; i < argv.length; i++) {
@@ -111,6 +127,8 @@ const parseOptions = (argv: string[]): Options => {
       profile = profileNamed(argv[++i]);
     } else if (argument === "--adaptive") {
       adaptive = true;
+    } else if (argument === "--trace") {
+      trace = true;
     } else if (argument === "--scale") {
       scale = Number(argv[++i]);
     } else if (argument === "--repeat") {
@@ -148,6 +166,7 @@ const parseOptions = (argv: string[]): Options => {
     profile,
     unlocked,
     adaptive,
+    trace,
     scale,
   };
 };
@@ -295,9 +314,17 @@ const waitForQuiet = async (page: Page): Promise<void> => {
 };
 
 /** Runs one scenario once and carries away what the probe recorded. */
-const measure = async (page: Page, scenario: Scenario): Promise<PerfDrain> => {
+const measure = async (
+  page: Page,
+  scenario: Scenario,
+  tracing: { cdp: CDPSession; file: string } | undefined,
+): Promise<{ drain: PerfDrain; trace?: TraceSummary }> => {
   await waitForQuiet(page);
   await page.waitForTimeout((scenario.settleSeconds ?? 0.5) * 1000);
+  const events = tracing === undefined ? [] : await startTrace(tracing.cdp);
+  if (tracing !== undefined) {
+    await dumpMemory(tracing.cdp);
+  }
   await page.evaluate((route) => {
     const bench = (window as unknown as { __voxelscape: BenchWindow })
       .__voxelscape;
@@ -305,11 +332,18 @@ const measure = async (page: Page, scenario: Scenario): Promise<PerfDrain> => {
     bench.drive(route);
   }, scenario.route);
   await page.waitForTimeout(scenario.route.seconds * 1000 + DRAIN_SLACK_MS);
-  return page.evaluate(() => {
+  const drain = await page.evaluate(() => {
     const bench = (window as unknown as { __voxelscape: BenchWindow })
       .__voxelscape;
     return bench.probe.drain();
   });
+  if (tracing === undefined) {
+    return { drain };
+  }
+  await dumpMemory(tracing.cdp);
+  await stopTrace(tracing.cdp);
+  writeFileSync(tracing.file, JSON.stringify(events));
+  return { drain, trace: summarizeTrace(events, tracing.file) };
 };
 
 const describeMachine = (page: Page) =>
@@ -378,14 +412,33 @@ const main = async (): Promise<void> => {
       );
     }
 
+    // One session for the whole run: a trace is recorded through it, and the
+    // processor throttle above was set through another on the same page.
+    const traceCdp = options.trace
+      ? await page.context().newCDPSession(page)
+      : undefined;
     const scenarios: ScenarioReport[] = [];
+    const traces: TraceSummary[] = [];
     for (const scenario of options.scenarios) {
       const repeats = [];
       for (let repeat = 0; repeat < options.repeat; repeat++) {
         process.stdout.write(
           `measuring ${scenario.name} (${repeat + 1}/${options.repeat})…\n`,
         );
-        repeats.push(summarize(await measure(page, scenario)));
+        // Only the first repeat is traced: recording costs time of its own,
+        // and one trace answers what a trace is asked.
+        const tracing =
+          traceCdp !== undefined && repeat === 0
+            ? {
+                cdp: traceCdp,
+                file: outPath(`trace-${scenario.name}-${Date.now()}.json`),
+              }
+            : undefined;
+        const measured = await measure(page, scenario, tracing);
+        repeats.push(summarize(measured.drain));
+        if (measured.trace !== undefined) {
+          traces.push(measured.trace);
+        }
       }
       scenarios.push({
         name: scenario.name,
@@ -417,7 +470,9 @@ const main = async (): Promise<void> => {
 
     const file = outPath(`bench-${report.context.commit}-${Date.now()}.json`);
     writeFileSync(file, JSON.stringify(report, null, 2));
-    console.log(`\n${formatReport(report)}\n\nwritten to ${file}`);
+    const traceLines =
+      traces.length === 0 ? "" : `\n\n${traces.map(formatTrace).join("\n\n")}`;
+    console.log(`\n${formatReport(report)}${traceLines}\n\nwritten to ${file}`);
   } finally {
     await browser?.close();
     stopServer();
