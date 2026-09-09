@@ -36,7 +36,9 @@
     "bench:html": "node --experimental-transform-types e2e/bench/html.ts",
     "check-types": "tsc --noEmit",
     "architecture": "node --experimental-transform-types tools/architecture.ts",
-    "architecture:check": "node --experimental-transform-types tools/architecture.ts --check"
+    "architecture:check": "node --experimental-transform-types tools/architecture.ts --check",
+    "rendering": "node --experimental-transform-types tools/voxel-rendering.ts",
+    "rendering:check": "node --experimental-transform-types tools/voxel-rendering.ts --check"
   },
   "keywords": [],
   "author": "",

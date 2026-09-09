@@ -4,6 +4,7 @@
 - Domain language (what to call things, and what to avoid calling them) is defined per application, in [`apps/voxelscape/CONTEXT.md`](./apps/voxelscape/CONTEXT.md).
 - Non-obvious architectural decisions are recorded in [`apps/voxelscape/docs/adr/`](./apps/voxelscape/docs/adr), one file per decision.
 - What voxelscape is made of is drawn from its own imports in [`apps/voxelscape/docs/architecture.md`](./apps/voxelscape/docs/architecture.md) by `pnpm architecture`, run from that application. A change that adds a dependency between two of its areas has to say so in `tools/architecture.ts` and redraw, which `pnpm architecture:check` and the tool's own tests hold it to.
+- How a voxel reaches the screen is drawn the same way in [`apps/voxelscape/docs/voxel-rendering.md`](./apps/voxelscape/docs/voxel-rendering.md) by `pnpm rendering`: the modules of that path, what a block and a vertex are made of, the frame's stages in the order they are timed, and the constants that govern them, each read from the module that declares it. `pnpm rendering:check` redraws and compares, and fails when the vertex attributes stop adding up to the bytes the upload budget spends against.
 - `pnpm check-types`, `pnpm test`, and `pnpm format:check` should all pass before a change is done. Run from the repository root, each covers both applications.
 
 ## To LLM
