@@ -218,8 +218,8 @@ export const summarizeTrace = (
   };
 };
 
-const megabytes = (bytes: number): string =>
-  `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+const mebibytes = (bytes: number): string =>
+  `${(bytes / (1024 * 1024)).toFixed(1)}MiB`;
 
 /** Writes a traced scenario's findings as the lines that follow its numbers. */
 export const formatTrace = (summary: TraceSummary): string => {
@@ -254,14 +254,14 @@ export const formatTrace = (summary: TraceSummary): string => {
           before?.roots.find((candidate) => candidate.name === root.name)
             ?.bytes ?? 0;
         lines.push(
-          `        ${root.name.padEnd(24)} ${megabytes(was).padStart(9)} → ${megabytes(root.bytes).padStart(9)}`,
+          `        ${root.name.padEnd(24)} ${mebibytes(was).padStart(9)} → ${mebibytes(root.bytes).padStart(9)}`,
         );
       }
       if (process.webgl.length > 0) {
         lines.push(
           `        of which this page's own graphics objects: ` +
             process.webgl
-              .map((kind) => `${kind.name} ${megabytes(kind.bytes)}`)
+              .map((kind) => `${kind.name} ${mebibytes(kind.bytes)}`)
               .join(", "),
         );
       }

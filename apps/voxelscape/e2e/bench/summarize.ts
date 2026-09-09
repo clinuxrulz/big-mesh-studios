@@ -88,8 +88,10 @@ export interface RunSummary {
     maxBytes: number;
     /** The voxels and their light, at the moment the run held most. */
     voxelBytes: number;
-    /** The built and merged geometry, at the same moment. */
-    geometryBytes: number;
+    /** The superchunks' merged geometry, at the same moment. */
+    mergedGeometryBytes: number;
+    /** The per-block meshes the merge reads from, at the same moment. */
+    blockGeometryBytes: number;
   };
   /**
    * Frames that cost more than a sixtieth of a second, against a fixed
@@ -295,7 +297,8 @@ export const summarize = (drain: PerfDrain): RunSummary => {
       endBytes: resident[resident.length - 1] ?? 0,
       maxBytes: maxOf(resident),
       voxelBytes: maxOf(columnFor(drain, "voxelBytes")),
-      geometryBytes: maxOf(columnFor(drain, "geometryBytes")),
+      mergedGeometryBytes: maxOf(columnFor(drain, "mergedGeometryBytes")),
+      blockGeometryBytes: maxOf(columnFor(drain, "blockGeometryBytes")),
     },
     overBudget: dropsIn(realGaps, FRAME_BUDGET_MS),
     travel: { pathUnits, straightUnits },

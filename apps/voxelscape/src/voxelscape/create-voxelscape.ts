@@ -820,10 +820,15 @@ export const createVoxelscape = ({
     probe.gauge(Field.fillPending, world.fillPendingCount);
     probe.gauge(Field.fillInFlight, world.fillInFlightCount);
     const voxelBytes = world.voxelBytes;
-    const geometryBytes = renderer.geometryBytes;
+    const mergedGeometryBytes = renderer.mergedGeometryBytes;
+    const blockGeometryBytes = renderer.blockGeometryBytes;
     probe.gauge(Field.voxelBytes, voxelBytes);
-    probe.gauge(Field.geometryBytes, geometryBytes);
-    probe.gauge(Field.residentBytes, voxelBytes + geometryBytes);
+    probe.gauge(Field.mergedGeometryBytes, mergedGeometryBytes);
+    probe.gauge(Field.blockGeometryBytes, blockGeometryBytes);
+    probe.gauge(
+      Field.residentBytes,
+      voxelBytes + mergedGeometryBytes + blockGeometryBytes,
+    );
     const position = avatar.player.position;
     probe.gauge(
       Field.cellReady,

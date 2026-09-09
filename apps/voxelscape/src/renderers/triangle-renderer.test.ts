@@ -301,6 +301,28 @@ describe("the occlusion probe's slot id", () => {
   });
 });
 
+describe("what the renderer says it is holding", () => {
+  it("counts a block's own mesh apart from the superchunk it is merged into", () => {
+    const renderer = rendererFor(blockWithFloor());
+    renderer.repositionBlock(0, [0, 0, 0]);
+    renderer.onBlockChanged(0);
+    renderer.meshNow(0);
+
+    // The block's mesh has landed and nothing has merged it yet, so the only
+    // geometry held is the block's own.
+    expect(renderer.blockGeometryBytes).toBeGreaterThan(0);
+    expect(renderer.mergedGeometryBytes).toBe(0);
+
+    settle(renderer);
+
+    // Merged now — and the block's mesh is kept, because a superchunk that has
+    // to be re-joined in full reads every member's mesh again. The same
+    // geometry is held twice, which is what counting them apart shows.
+    expect(renderer.mergedGeometryBytes).toBeGreaterThan(0);
+    expect(renderer.blockGeometryBytes).toBeGreaterThan(0);
+  });
+});
+
 describe("the recycled geometry pool", () => {
   /** The pairs waiting in the pool, which no public surface exposes. */
   const pool = (

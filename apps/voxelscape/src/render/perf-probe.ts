@@ -78,7 +78,12 @@ export const Field = {
   meshInFlight: 11,
   /** Superchunks whose merged geometry is out of date. */
   dirtySuperchunks: 12,
-  /** The JavaScript heap in bytes, sampled about once a second. */
+  /**
+   * The JavaScript heap in bytes, sampled about once a second. What the browser
+   * reports here counts the storage behind typed arrays as well as the objects
+   * around them, so the voxels and geometry below are inside this number rather
+   * than beside it.
+   */
   heapBytes: 13,
   /**
    * Bytes the world holds in main memory — voxels, light and geometry —
@@ -88,19 +93,24 @@ export const Field = {
   residentBytes: 14,
   /** Of those, the bytes held as voxels and the light shadowing them. */
   voxelBytes: 15,
-  /** Of those, the bytes held as built and merged geometry. */
-  geometryBytes: 16,
+  /** Of those, the bytes held as the superchunks' merged geometry. */
+  mergedGeometryBytes: 16,
+  /**
+   * Of those, the bytes held as the per-block meshes the merge reads from,
+   * which is a second copy of every block already merged.
+   */
+  blockGeometryBytes: 17,
   /** Milliseconds the graphics card spent on the occlusion pass, from its own `GpuTimer`. */
-  gpuOcclusionMs: 17,
+  gpuOcclusionMs: 18,
   /**
    * Whether the block the player stands in has its terrain, as 1 or 0. The
    * world holds the player still while it is 0, so a run of zeroes is the
    * player having outrun what the workers could stream.
    */
-  cellReady: 18,
-  playerX: 19,
-  playerY: 20,
-  playerZ: 21,
+  cellReady: 19,
+  playerX: 20,
+  playerY: 21,
+  playerZ: 22,
 } as const;
 
 /** Each per-frame value's name, at the column it is recorded in. */

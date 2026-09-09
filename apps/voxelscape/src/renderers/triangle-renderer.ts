@@ -1592,17 +1592,27 @@ export class TriangleRenderer {
   }
 
   /**
-   * Bytes of geometry the renderer is holding in main memory: every
-   * superchunk's merged attribute buffers, and every block's built mesh
-   * waiting to be merged into one. The graphics card holds a copy of what has
-   * been uploaded on top of this.
+   * Bytes of every superchunk's merged attribute buffers, at the capacity they
+   * have grown to rather than the part written. The graphics card holds a copy
+   * of what has been uploaded of these on top of them.
    */
-  get geometryBytes(): number {
+  get mergedGeometryBytes(): number {
     let bytes = 0;
     for (const state of this.scMerged.values()) {
       bytes +=
         mergedArraysBytes(state.terrain) + mergedArraysBytes(state.water);
     }
+    return bytes;
+  }
+
+  /**
+   * Bytes of the per-block meshes the workers built, which are kept for as long
+   * as the block is in the window: a superchunk that has to be re-joined in full
+   * reads every member's mesh again. They are a second copy of the same
+   * geometry as `mergedGeometryBytes` for every block already joined.
+   */
+  get blockGeometryBytes(): number {
+    let bytes = 0;
     for (const built of this.chunkMeshes.values()) {
       bytes +=
         meshArraysResidentBytes(built.terrain) +

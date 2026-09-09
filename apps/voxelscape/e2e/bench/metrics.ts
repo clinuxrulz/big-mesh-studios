@@ -59,6 +59,16 @@ export const metricsFor = (pacing: RunContext["pacing"]): Metric[] => [
     unit: "bytes",
   },
   { name: "peak heap", of: (run) => run.heap.maxBytes, unit: "bytes" },
+  {
+    name: "merged geometry",
+    of: (run) => run.resident.mergedGeometryBytes,
+    unit: "bytes",
+  },
+  {
+    name: "block meshes",
+    of: (run) => run.resident.blockGeometryBytes,
+    unit: "bytes",
+  },
   { name: "outrun frames", of: (run) => run.outrun.frames, unit: "count" },
 ];
 
@@ -92,7 +102,7 @@ export const show = (value: number, unit: Unit): string => {
     return `${value.toFixed(2)}ms`;
   }
   if (unit === "bytes") {
-    return `${(value / (1024 * 1024)).toFixed(1)}MB`;
+    return `${(value / (1024 * 1024)).toFixed(1)}MiB`;
   }
   return value >= 100 ? value.toFixed(0) : value.toFixed(2);
 };

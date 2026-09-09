@@ -80,8 +80,8 @@ export interface BenchReport {
 
 const ms = (value: number): string => `${value.toFixed(1)}ms`;
 const micro = (value: number): string => `${value.toFixed(2)}ms`;
-const megabytes = (bytes: number): string =>
-  `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+const mebibytes = (bytes: number): string =>
+  `${(bytes / (1024 * 1024)).toFixed(1)}MiB`;
 
 /**
  * Which repeat a scenario reports as its result: the one with the middle
@@ -188,20 +188,22 @@ export const formatScenario = (
       `${run.queues.dirtySuperchunks} dirty superchunks (deepest reached)`,
   );
   lines.push(
-    `  upload   ${megabytes(run.upload.totalBytes)} over ${run.upload.framesWithUpload} frames, ` +
-      `most ${megabytes(run.upload.maxFrameBytes)} in one ` +
+    `  upload   ${mebibytes(run.upload.totalBytes)} over ${run.upload.framesWithUpload} frames, ` +
+      `most ${mebibytes(run.upload.maxFrameBytes)} in one ` +
       `(${run.upload.mergesInBiggestFrame} superchunks merged; ` +
       `${run.upload.maxFrameMerges} is the most in any frame)`,
   );
   lines.push(
-    `  resident ${megabytes(run.resident.startBytes)} → ${megabytes(run.resident.endBytes)} ` +
-      `(peak ${megabytes(run.resident.maxBytes)}: ` +
-      `${megabytes(run.resident.voxelBytes)} voxels and light, ` +
-      `${megabytes(run.resident.geometryBytes)} geometry)`,
+    `  resident ${mebibytes(run.resident.startBytes)} → ${mebibytes(run.resident.endBytes)} ` +
+      `(peak ${mebibytes(run.resident.maxBytes)}: ` +
+      `${mebibytes(run.resident.voxelBytes)} voxels and light, ` +
+      `${mebibytes(run.resident.mergedGeometryBytes)} merged geometry, ` +
+      `${mebibytes(run.resident.blockGeometryBytes)} block meshes the merge reads from)`,
   );
   lines.push(
-    `  heap     ${megabytes(run.heap.startBytes)} → ${megabytes(run.heap.endBytes)} ` +
-      `(peak ${megabytes(run.heap.maxBytes)}) — excludes the buffers above, so read it beside them`,
+    `  heap     ${mebibytes(run.heap.startBytes)} → ${mebibytes(run.heap.endBytes)} ` +
+      `(peak ${mebibytes(run.heap.maxBytes)}) — counts the buffers above as well as ` +
+      `the objects around them, so it is the total rather than something to add to them`,
   );
   lines.push(
     run.outrun.frames === 0

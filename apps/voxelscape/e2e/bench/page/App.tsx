@@ -22,8 +22,8 @@ const FRAME_BUDGET_MS = 1000 / 60;
 const UPLOAD_BUDGET_BYTES = 2 * 1024 * 1024;
 
 const ms = (value: number): string => `${value.toFixed(value < 10 ? 1 : 0)}ms`;
-const megabytes = (bytes: number): string =>
-  `${(bytes / (1024 * 1024)).toFixed(0)}MB`;
+const mebibytes = (bytes: number): string =>
+  `${(bytes / (1024 * 1024)).toFixed(0)}MiB`;
 const count = (value: number): string => value.toFixed(0);
 const percent = (share: number): string => `${(share * 100).toFixed(1)}%`;
 
@@ -93,13 +93,13 @@ function Tiles(props: {
       </Show>
       <Tile
         label="held in memory"
-        value={megabytes(props.run.resident.maxBytes)}
-        note={`${megabytes(props.run.resident.geometryBytes)} of it geometry`}
+        value={mebibytes(props.run.resident.maxBytes)}
+        note={`${mebibytes(props.run.resident.mergedGeometryBytes + props.run.resident.blockGeometryBytes)} of it geometry`}
       />
       <Tile
         label="sent to the card"
-        value={megabytes(props.run.upload.totalBytes)}
-        note={`most ${megabytes(props.run.upload.maxFrameBytes)} in one frame`}
+        value={mebibytes(props.run.upload.totalBytes)}
+        note={`most ${mebibytes(props.run.upload.maxFrameBytes)} in one frame`}
         tone={
           props.run.upload.maxFrameBytes > UPLOAD_BUDGET_BYTES
             ? "warning"
@@ -148,11 +148,11 @@ function Numbers(props: {
     ],
     [
       "held in memory",
-      `${megabytes(props.run.resident.voxelBytes)} voxels and light, ${megabytes(props.run.resident.geometryBytes)} geometry`,
+      `${mebibytes(props.run.resident.voxelBytes)} voxels and light, ${mebibytes(props.run.resident.mergedGeometryBytes)} merged geometry, ${mebibytes(props.run.resident.blockGeometryBytes)} block meshes the merge reads from`,
     ],
     [
       "javascript heap",
-      `${megabytes(props.run.heap.startBytes)} to ${megabytes(props.run.heap.endBytes)}, peak ${megabytes(props.run.heap.maxBytes)}`,
+      `${mebibytes(props.run.heap.startBytes)} to ${mebibytes(props.run.heap.endBytes)}, peak ${mebibytes(props.run.heap.maxBytes)} — the row above is inside this, not beside it`,
     ],
     [
       "travelled",
@@ -222,7 +222,7 @@ function LateFrames(props: { scenario: ScenarioReport }): JSX.Element {
                 <td>{ms(frame.mainMs)}</td>
                 <td>{ms(frame.gapMs)}</td>
                 <td>
-                  {frame.uploadBytes === 0 ? "—" : megabytes(frame.uploadBytes)}
+                  {frame.uploadBytes === 0 ? "—" : mebibytes(frame.uploadBytes)}
                 </td>
                 <td>{frame.merges === 0 ? "—" : count(frame.merges)}</td>
                 <td class="spent">
@@ -253,8 +253,8 @@ function Scenario(props: {
   const overBudget = (samples: RunSamples): string => {
     const over = uploadsOverBudget(samples, UPLOAD_BUDGET_BYTES);
     return over === 0
-      ? `No frame sent more than the ${megabytes(UPLOAD_BUDGET_BYTES)} a frame is paced to.`
-      : `${count(over)} ${over === 1 ? "frame sent" : "frames sent"} more than the ${megabytes(UPLOAD_BUDGET_BYTES)} a frame is paced to, in one go.`;
+      ? `No frame sent more than the ${mebibytes(UPLOAD_BUDGET_BYTES)} a frame is paced to.`
+      : `${count(over)} ${over === 1 ? "frame sent" : "frames sent"} more than the ${mebibytes(UPLOAD_BUDGET_BYTES)} a frame is paced to, in one go.`;
   };
   const phases = phaseBands(frames);
   const memory = memoryBands(frames);
@@ -283,7 +283,7 @@ function Scenario(props: {
           caption="Voxels, the light shadowing them, and the geometry built from both — counted rather than sampled, so this is the same number on any machine."
           at={at}
           series={memory}
-          format={megabytes}
+          format={mebibytes}
           stacked
         />
         <Chart
@@ -299,7 +299,7 @@ function Scenario(props: {
               title="What was sent to the graphics card"
               caption={`Bytes uploaded, frame by frame. A column here is the largest frame in its slice, because an upload lands on a handful of a run's frames and the costliest frame is rarely one of them. ${overBudget(samples())}`}
               values={uploadBars(samples(), at.length)}
-              format={megabytes}
+              format={mebibytes}
               rule={{
                 at: UPLOAD_BUDGET_BYTES,
                 label: "the budget one frame is paced against",
@@ -349,12 +349,12 @@ function Trace(props: { trace: TraceSummary }): JSX.Element {
                     <tr>
                       <th scope="row">{root.name}</th>
                       <td>
-                        {`${megabytes(
+                        {`${mebibytes(
                           first()
                             .find((was) => was.pid === process.pid)
                             ?.roots.find((was) => was.name === root.name)
                             ?.bytes ?? 0,
-                        )} → ${megabytes(root.bytes)}`}
+                        )} → ${mebibytes(root.bytes)}`}
                       </td>
                     </tr>
                   )}
@@ -364,7 +364,7 @@ function Trace(props: { trace: TraceSummary }): JSX.Element {
                     <th scope="row">this page's own graphics objects</th>
                     <td>
                       {process.webgl
-                        .map((kind) => `${kind.name} ${megabytes(kind.bytes)}`)
+                        .map((kind) => `${kind.name} ${mebibytes(kind.bytes)}`)
                         .join(", ")}
                     </td>
                   </tr>
