@@ -24,8 +24,8 @@ const surface = (
     normal?: [number, number, number];
     distance?: number;
     uv?: [number, number];
-    /** The atlas rect the coordinates wrap into; the whole atlas by default. */
-    tileRect?: [number, number, number, number];
+    /** The sheet cell the coordinates wrap into. */
+    tileIndex?: number;
     brightness?: number;
   } = {},
 ): number[] => {
@@ -33,7 +33,7 @@ const surface = (
     normal = [0, 1, 0],
     distance = 0,
     uv = [0, 0],
-    tileRect = [0, 0, 1, 1],
+    tileIndex = 0,
     brightness = 1,
   } = options;
   const value = shadeTerrain(material)({
@@ -41,7 +41,7 @@ const surface = (
       normalWorld: normal,
       positionWorld: [0, 0, distance],
       uv,
-      tileRect,
+      tileIndex,
       brightness,
     },
     uniforms: { cameraPosition: [0, 0, 0] },
@@ -94,11 +94,11 @@ describe("terrain lighting", () => {
     expect(shadowed[2]).toBeCloseTo(0.2, 6);
   });
 
-  it("takes the albedo from the tile atlas at the baked coordinate", () => {
+  /** A material drawing a two-by-two sheet of single-texel tiles. */
+  const fourTiles = (): TriangleMaterial => {
     const material = new TriangleMaterial();
     material.ambientColor = [1, 1, 1];
     material.sunLightColor = [0, 0, 0];
-    // one texel per corner of a two-by-two atlas, sampled at its centre
     material.tilesTexture = new DataTexture(
       // prettier-ignore
       new Uint8Array([
@@ -108,37 +108,34 @@ describe("terrain lighting", () => {
       2,
       2,
     );
+    material.atlasGrid = {
+      columns: 2,
+      tilePixels: [1, 1],
+      sheetPixels: [2, 2],
+    };
+    return material;
+  };
 
-    expect(surface(material, { uv: [0.25, 0.25] }).slice(0, 3)).toEqual([
-      1, 0, 0,
-    ]);
-    expect(surface(material, { uv: [0.75, 0.75] }).slice(0, 3)).toEqual([
-      1, 1, 0,
-    ]);
+  it("takes the albedo from the cell of the sheet the vertex names", () => {
+    const material = fourTiles();
+    // The cells are counted across then down, so 0 is the upper left and 3
+    // the lower right.
+    expect(surface(material, { tileIndex: 0 }).slice(0, 3)).toEqual([1, 0, 0]);
+    expect(surface(material, { tileIndex: 1 }).slice(0, 3)).toEqual([0, 1, 0]);
+    expect(surface(material, { tileIndex: 2 }).slice(0, 3)).toEqual([0, 0, 1]);
+    expect(surface(material, { tileIndex: 3 }).slice(0, 3)).toEqual([1, 1, 0]);
   });
 
   it("repeats its tile once per cell a quad covers", () => {
-    const material = new TriangleMaterial();
-    material.ambientColor = [1, 1, 1];
-    material.sunLightColor = [0, 0, 0];
-    material.tilesTexture = new DataTexture(
-      // prettier-ignore
-      new Uint8Array([
-        255, 0, 0, 255,   0, 255, 0, 255,
-        0, 0, 255, 255,   255, 255, 0, 255,
-      ]),
-      2,
-      2,
-    );
-    // The upper-left texel of the atlas, as its own tile. A quad three cells
-    // wide reaches a coordinate of three, and every whole step of it lands on
-    // that tile again rather than walking off into the atlas.
-    const tile: [number, number, number, number] = [0, 0, 0.5, 0.5];
-    const once = surface(material, { uv: [0.5, 0.5], tileRect: tile });
-    for (const at of [1.5, 2.5]) {
-      expect(surface(material, { uv: [at, at], tileRect: tile })).toEqual(once);
+    const material = fourTiles();
+    // A quad three cells wide reaches a coordinate of three, and every whole
+    // step of it lands on the same tile again rather than walking off into
+    // the cell beside it.
+    const once = surface(material, { uv: [0.5, 0.5], tileIndex: 3 });
+    for (const at of [1.5, 2.5, 3.5]) {
+      expect(surface(material, { uv: [at, at], tileIndex: 3 })).toEqual(once);
     }
-    expect(once.slice(0, 3)).toEqual([1, 0, 0]);
+    expect(once.slice(0, 3)).toEqual([1, 1, 0]);
   });
 });
 

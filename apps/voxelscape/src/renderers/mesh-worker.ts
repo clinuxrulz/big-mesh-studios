@@ -19,7 +19,7 @@ export const toTyped = (m: MeshArrays): MeshArrays => ({
   normals:
     m.normals instanceof Float32Array ? m.normals : new Float32Array(m.normals),
   uvs: m.uvs instanceof Float32Array ? m.uvs : new Float32Array(m.uvs),
-  rects: m.rects instanceof Float32Array ? m.rects : new Float32Array(m.rects),
+  tiles: m.tiles instanceof Float32Array ? m.tiles : new Float32Array(m.tiles),
   brightness:
     m.brightness instanceof Float32Array
       ? m.brightness
@@ -42,11 +42,11 @@ export const meshArraysTransfers = (
   const seen = new Set<Transferable>();
   const transfer: Transferable[] = [];
   for (const mesh of [terrain, water]) {
-    const { positions, normals, uvs, rects, brightness, indices } = mesh as {
+    const { positions, normals, uvs, tiles, brightness, indices } = mesh as {
       positions: Float32Array;
       normals: Float32Array;
       uvs: Float32Array;
-      rects: Float32Array;
+      tiles: Float32Array;
       brightness: Float32Array;
       indices: Uint32Array;
     };
@@ -54,7 +54,7 @@ export const meshArraysTransfers = (
       positions.buffer,
       normals.buffer,
       uvs.buffer,
-      rects.buffer,
+      tiles.buffer,
       brightness.buffer,
       indices.buffer,
     ]) {

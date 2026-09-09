@@ -1,4 +1,5 @@
 import {
+  atlasGridOf,
   buildVoxelTileConfig,
   loadTileTexture,
   parseTileAtlasXml,
@@ -36,13 +37,18 @@ export const loadVoxelTiles = async (
       throw new Error(`failed to load "${xmlUrl}": ${xmlRes.status}`);
     }
     const atlas = parseTileAtlasXml(await xmlRes.text());
+    const grid = atlasGridOf(atlas, loaded.width, loaded.height);
+    if (grid === null) {
+      throw new Error(
+        "[atlas] the sheet's tiles are not one size on a grid, which is the only layout a tile index can name",
+      );
+    }
     const voxelTiles = buildVoxelTileConfig(
       atlas,
-      loaded.width,
-      loaded.height,
+      grid,
       options?.customVoxelTiles,
     );
-    renderer.setTiles(voxelTiles, loaded.texture);
+    renderer.setTiles(voxelTiles, loaded.texture, grid);
   } catch (err) {
     console.warn(
       "[atlas] spritesheet not applied; voxels stay flat blue.",

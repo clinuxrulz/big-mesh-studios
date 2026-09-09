@@ -5,7 +5,6 @@ import { scBounds, TriangleRenderer } from "./triangle-renderer";
 import { probeColor } from "./occlusion";
 import { buildBlockShell, type WorldBlock } from "../world/level-data";
 import { VOXEL_GRASS } from "../world/voxel-store";
-import type { TileRect } from "./atlas";
 
 /** A block with a floor of grass across one corner, so it has faces to mesh. */
 const blockWithFloor = (): WorldBlock => {
@@ -34,11 +33,12 @@ const rendererForBudget = (
     onBlockMeshed: () => {},
     uploadBytesPerFrame: budget,
   });
-  /** The whole atlas as one tile: these tests are about what is drawn, not where from. */
-  const whole: TileRect = [0, 0, 1, 1];
+  /** The sheet's only tile: these tests are about what is drawn, not where from. */
+  const whole = 0;
   renderer.setTiles(
     [{ id: VOXEL_GRASS, top: whole, side: whole, bottom: whole }],
     {} as never,
+    { columns: 1, tilePixels: [1, 1], sheetPixels: [1, 1] },
   );
   return renderer;
 };

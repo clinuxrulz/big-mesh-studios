@@ -15,7 +15,7 @@ const EMPTY_MESHES: BlockMeshes = {
     positions: [],
     normals: [],
     uvs: [],
-    rects: [],
+    tiles: [],
     brightness: [],
     indices: [],
   },
@@ -23,7 +23,7 @@ const EMPTY_MESHES: BlockMeshes = {
     positions: [],
     normals: [],
     uvs: [],
-    rects: [],
+    tiles: [],
     brightness: [],
     indices: [],
   },
@@ -302,9 +302,7 @@ describe("FillClient", () => {
   it("sends a combined fillMesh request carrying the tile rects when a tileRects source is supplied", () => {
     const blocks = [buildBlockShell({ center: [0, 0, 0] })];
     const worker = new FakeFillWorker();
-    const rects: VoxelTileConfig[] = [
-      { id: 1, top: [0, 0, 4, 4], side: [0, 4, 4, 4], bottom: [0, 8, 4, 4] },
-    ];
+    const rects: VoxelTileConfig[] = [{ id: 1, top: 0, side: 1, bottom: 2 }];
     const client = new FillClient({
       terrain: DEFAULT_TERRAIN,
       blocks,
@@ -385,7 +383,7 @@ describe("FillClient", () => {
     // the spritesheet finishes loading into a moment later.
     const earlyRects: VoxelTileConfig[] = [];
     const loadedRects: VoxelTileConfig[] = [
-      { id: 1, top: [0, 0, 4, 4], side: [0, 4, 4, 4], bottom: [0, 8, 4, 4] },
+      { id: 1, top: 0, side: 1, bottom: 2 },
     ];
     let currentRects: VoxelTileConfig[] = earlyRects;
     const client = new FillClient({

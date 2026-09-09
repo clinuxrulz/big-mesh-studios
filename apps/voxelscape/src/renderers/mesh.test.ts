@@ -90,18 +90,13 @@ const windsOutward = (mesh: MeshArrays): boolean => {
 };
 
 /** Collects each vertex's normal, keyed to its uv. */
-/** Each face direction's tile rects, one per vertex drawn facing that way. */
-const rectsByNormal = (mesh: MeshArrays): Map<string, number[][]> => {
-  const out = new Map<string, number[][]>();
+/** Each face direction's tiles, one per vertex drawn facing that way. */
+const tilesByNormal = (mesh: MeshArrays): Map<string, number[]> => {
+  const out = new Map<string, number[]>();
   for (let i = 0; i < vertexCount(mesh); i++) {
     const key = `${mesh.normals[i * 3]},${mesh.normals[i * 3 + 1]},${mesh.normals[i * 3 + 2]}`;
     const list = out.get(key) ?? [];
-    list.push([
-      mesh.rects[i * 4],
-      mesh.rects[i * 4 + 1],
-      mesh.rects[i * 4 + 2],
-      mesh.rects[i * 4 + 3],
-    ]);
+    list.push(mesh.tiles[i]);
     out.set(key, list);
   }
   return out;
@@ -318,21 +313,16 @@ describe("buildBlockMesh", () => {
     expect(hasNormal(mesh, -1, 0, 0)).toBe(false);
   });
 
-  it("gives each face the atlas rect its direction calls for", () => {
+  it("gives each face the tile its direction calls for", () => {
     const store = smallStore();
     store.set(1, 1, 1, VOXEL_GRASS);
     const tiles: VoxelTileConfig[] = [
-      {
-        id: VOXEL_GRASS,
-        top: [0, 0, 0.5, 0.5],
-        side: [0.5, 0, 1, 0.5],
-        bottom: [0.25, 0.25, 0.75, 0.75],
-      },
+      { id: VOXEL_GRASS, top: 3, side: 7, bottom: 11 },
     ];
     const mesh = buildBlockMesh(store, tiles);
-    const byNormal = rectsByNormal(mesh);
-    const all = (rects: number[][], rect: number[]): boolean =>
-      rects.every((one) => one.every((value, at) => value === rect[at]));
+    const byNormal = tilesByNormal(mesh);
+    const all = (drawn: number[], tile: number): boolean =>
+      drawn.every((one) => one === tile);
     expect(all(byNormal.get("0,1,0")!, tiles[0].top)).toBe(true);
     expect(all(byNormal.get("0,-1,0")!, tiles[0].bottom)).toBe(true);
     for (const normal of ["1,0,0", "-1,0,0", "0,0,1", "0,0,-1"]) {
@@ -443,7 +433,7 @@ describe("setGeometryData", () => {
       positions: [],
       normals: [],
       uvs: [],
-      rects: [],
+      tiles: [],
       brightness: [],
       indices: [],
     });

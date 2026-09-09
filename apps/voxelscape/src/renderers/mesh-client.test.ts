@@ -12,7 +12,7 @@ const EMPTY_MESHES: BlockMeshes = {
     positions: [],
     normals: [],
     uvs: [],
-    rects: [],
+    tiles: [],
     brightness: [],
     indices: [],
   },
@@ -20,7 +20,7 @@ const EMPTY_MESHES: BlockMeshes = {
     positions: [],
     normals: [],
     uvs: [],
-    rects: [],
+    tiles: [],
     brightness: [],
     indices: [],
   },
@@ -87,7 +87,7 @@ class FakeMeshWorker {
         positions: [],
         normals: [],
         uvs: [],
-        rects: [],
+        tiles: [],
         brightness: [],
         indices: [],
       },
@@ -95,7 +95,7 @@ class FakeMeshWorker {
         positions: [],
         normals: [],
         uvs: [],
-        rects: [],
+        tiles: [],
         brightness: [],
         indices: [],
       },
@@ -291,16 +291,11 @@ describe("MeshClient", () => {
     expect(built).toEqual([1]);
   });
 
-  it("reports the tile rects it was last given", () => {
+  it("reports the tiles it was last given", () => {
     const { client } = setup(2);
-    const rect: VoxelTileConfig = {
-      id: 1,
-      top: [0, 0, 4, 4],
-      side: [0, 4, 4, 4],
-      bottom: [0, 8, 4, 4],
-    };
-    client.setTiles([rect]);
-    expect(client.tileRects).toEqual([rect]);
+    const tiles: VoxelTileConfig = { id: 1, top: 0, side: 4, bottom: 8 };
+    client.setTiles([tiles]);
+    expect(client.tileRects).toEqual([tiles]);
   });
 
   it("reports an empty mesh for a chunk whose level holds no surface, without touching a worker", () => {

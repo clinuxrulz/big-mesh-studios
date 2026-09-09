@@ -82,17 +82,74 @@ export const tileRect = (
   ];
 };
 
+/**
+ * Where the sheet's tiles sit: they are one size, laid out in a grid, so a
+ * tile is addressed by the cell it occupies rather than by the rectangle it
+ * covers. The material rebuilds the rectangle from this, which is four
+ * numbers a vertex does not have to carry.
+ */
+export interface AtlasGrid {
+  /** Cells across the sheet. */
+  columns: number;
+  /** One cell's size in pixels. */
+  tilePixels: [number, number];
+  /** The whole sheet's size in pixels. */
+  sheetPixels: [number, number];
+}
+
+/**
+ * The grid `atlas` is laid out on, or null when its tiles are not one size —
+ * a sheet like that has to be addressed by rectangle, which nothing here
+ * supports.
+ *
+ * @param atlas Every subtexture the sheet holds.
+ * @param atlasW The sheet's width in pixels.
+ * @param atlasH Its height.
+ * @returns The grid, or null.
+ */
+export const atlasGridOf = (
+  atlas: Map<string, SubTexture>,
+  atlasW: number,
+  atlasH: number,
+): AtlasGrid | null => {
+  const tiles = [...atlas.values()];
+  const first = tiles[0];
+  if (first === undefined) {
+    return null;
+  }
+  const onGrid = tiles.every(
+    (tile) =>
+      tile.w === first.w &&
+      tile.h === first.h &&
+      tile.x % first.w === 0 &&
+      tile.y % first.h === 0,
+  );
+  if (!onGrid) {
+    return null;
+  }
+  return {
+    columns: Math.round(atlasW / first.w),
+    tilePixels: [first.w, first.h],
+    sheetPixels: [atlasW, atlasH],
+  };
+};
+
+/** Which cell of `grid` a subtexture occupies, counting across then down. */
+export const tileIndexOf = (sub: SubTexture, grid: AtlasGrid): number =>
+  Math.round(sub.y / grid.tilePixels[1]) * grid.columns +
+  Math.round(sub.x / grid.tilePixels[0]);
+
+/** Which tile of the sheet each of a voxel's three faces shows. */
 export interface VoxelTileConfig {
   id: number;
-  top: TileRect;
-  side: TileRect;
-  bottom: TileRect;
+  top: number;
+  side: number;
+  bottom: number;
 }
 
 export const buildVoxelTileConfig = (
   atlas: Map<string, SubTexture>,
-  atlasW: number,
-  atlasH: number,
+  grid: AtlasGrid,
   customVoxelTiles?: Record<number, VoxelTiles>,
 ): VoxelTileConfig[] => {
   const config: VoxelTileConfig[] = [];
@@ -108,9 +165,9 @@ export const buildVoxelTileConfig = (
     };
     config.push({
       id: Number(id),
-      top: tileRect(resolve(v.top), atlasW, atlasH),
-      side: tileRect(resolve(v.side), atlasW, atlasH),
-      bottom: tileRect(resolve(v.bottom), atlasW, atlasH),
+      top: tileIndexOf(resolve(v.top), grid),
+      side: tileIndexOf(resolve(v.side), grid),
+      bottom: tileIndexOf(resolve(v.bottom), grid),
     });
   }
   return config;

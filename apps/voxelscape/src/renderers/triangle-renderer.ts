@@ -36,7 +36,7 @@ import {
   WebGLRenderTarget,
 } from "@random-mesh/rmsl/scene";
 import type { PerspectiveCamera } from "@random-mesh/rmsl/scene";
-import type { VoxelTileConfig } from "./atlas";
+import type { AtlasGrid, VoxelTileConfig } from "./atlas";
 import { BLOCK_WORLD, type Dim3, type WorldBlock } from "../world/level-data";
 import { setGeometryData, type BlockMeshes, type MeshArrays } from "./mesh";
 import { MeshClient } from "./mesh-client";
@@ -67,6 +67,16 @@ export class TriangleMaterial extends NodeMaterial {
    * loaded.
    */
   tilesTexture: Texture | null = null;
+  /**
+   * The sheet's layout, so a vertex can name its tile by the cell it sits in
+   * rather than carrying the rectangle it covers. Until a sheet is loaded the
+   * whole texture is one cell, which is what the flat fallback colour draws.
+   */
+  atlasGrid: AtlasGrid = {
+    columns: 1,
+    tilePixels: [1, 1],
+    sheetPixels: [1, 1],
+  };
   maxDistance: number = 480;
   fogStart: number = 200;
   fogColor: [number, number, number] = [0.53, 0.81, 0.92];
@@ -92,6 +102,9 @@ export class TriangleMaterial extends NodeMaterial {
   private moonDirectionUniform: UniformNode<"vec3"> | undefined;
   private moonLightColorUniform: UniformNode<"vec3"> | undefined;
   private ambientColorUniform: UniformNode<"vec3"> | undefined;
+  private atlasColumnsUniform: UniformNode<"float"> | undefined;
+  private atlasTileUniform: UniformNode<"vec2"> | undefined;
+  private atlasInsetUniform: UniformNode<"vec2"> | undefined;
   private tilesSampler: UniformNode<"sampler2D"> | undefined;
 
   constructor() {
@@ -107,8 +120,21 @@ export class TriangleMaterial extends NodeMaterial {
     // A quad covers as many cells as its faces merged into it, and its texture
     // coordinates count those cells, so the fragment wraps them back into the
     // one tile this vertex names.
-    void b.attribute("tileRect", "vec4");
-    void b.varying("tileRect", "vec4");
+    void b.attribute("tileIndex", "float");
+    void b.varying("tileIndex", "float");
+    this.atlasColumnsUniform = b.materialUniform(
+      "atlasColumns",
+      "float",
+      () => this.atlasGrid.columns,
+    );
+    this.atlasTileUniform = b.materialUniform("atlasTile", "vec2", () => [
+      this.atlasGrid.tilePixels[0] / this.atlasGrid.sheetPixels[0],
+      this.atlasGrid.tilePixels[1] / this.atlasGrid.sheetPixels[1],
+    ]);
+    this.atlasInsetUniform = b.materialUniform("atlasInset", "vec2", () => [
+      0.5 / this.atlasGrid.sheetPixels[0],
+      0.5 / this.atlasGrid.sheetPixels[1],
+    ]);
     this.maxDistanceUniform = b.materialUniform(
       "maxDistance",
       "float",
@@ -173,7 +199,7 @@ export class TriangleMaterial extends NodeMaterial {
     }
     b.normalWorld.assign(b.normalMatrix.mul(normal).normalize());
     b.uvVarying.assign(b.uv);
-    b.varying("tileRect", "vec4").assign(b.attribute("tileRect", "vec4"));
+    b.varying("tileIndex", "float").assign(b.attribute("tileIndex", "float"));
     return b.projectionMatrix.mul(b.viewMatrix.mul(worldPosition));
   }
 
@@ -203,14 +229,22 @@ export class TriangleMaterial extends NodeMaterial {
     // flat blue until the spritesheet is applied
     let albedo = vec3(0.0, 0.0, 1.0);
     if (this.tilesSampler !== undefined) {
-      // `fract` tiles the quad; the rect places that tile in the atlas. The
-      // renderer builds no mip chain, so wrapping in the fragment costs no
-      // seam: nothing here picks a level from the coordinate's derivative.
-      const rect = b.varying("tileRect", "vec4").toVar();
+      // `fract` tiles the quad; the cell the vertex names places that tile in
+      // the sheet. The renderer builds no mip chain, so wrapping in the
+      // fragment costs no seam: nothing picks a level from a derivative here.
+      // The half-texel inset is the one `tileRect` bakes in, and keeps a tile
+      // from bleeding into the one beside it.
+      const columns = this.atlasColumnsUniform ?? float(1);
+      const tile = this.atlasTileUniform ?? vec2(1, 1);
+      const inset = this.atlasInsetUniform ?? vec2(0, 0);
+      const index = b.varying("tileIndex", "float").toVar();
+      const row = index.div(columns).floor();
+      const column = index.sub(row.mul(columns));
       const within = vec2(uv.x.fract(), uv.y.fract());
+      const span = vec2(tile.x.sub(inset.x.mul(2)), tile.y.sub(inset.y.mul(2)));
       const inAtlas = vec2(
-        rect.x.add(within.x.mul(rect.z.sub(rect.x))),
-        rect.y.add(within.y.mul(rect.w.sub(rect.y))),
+        column.mul(tile.x).add(inset.x).add(within.x.mul(span.x)),
+        row.mul(tile.y).add(inset.y).add(within.y.mul(span.y)),
       );
       albedo = this.tilesSampler.texture(inAtlas).rgb;
     }
@@ -256,11 +290,6 @@ export class TriangleWaterMaterial extends NodeMaterial {
   protected setup(b: Builder, _scene: Scene): void {
     void b.attribute("brightness", "float");
     void b.varying("brightness", "float");
-    // A quad covers as many cells as its faces merged into it, and its texture
-    // coordinates count those cells, so the fragment wraps them back into the
-    // one tile this vertex names.
-    void b.attribute("tileRect", "vec4");
-    void b.varying("tileRect", "vec4");
     this.fogColorUniform = b.materialUniform(
       "fogColor",
       "vec3",
@@ -374,11 +403,11 @@ const MAX_UPLOAD_BYTES_PER_FRAME = 2 * 1024 * 1024;
 
 /**
  * The bytes one vertex of merged geometry adds to the GPU upload: position 12
- * + normal 12 + uv 8 + the tile rect 16 + brightness 4. A pass without UVs is
- * over-counted by their 24 bytes, which only tightens the frame's budget.
- * Indices are counted at `INDEX_UPLOAD_BYTES`.
+ * + normal 12 + uv 8 + the tile it repeats 4 + brightness 4. A pass without
+ * UVs is over-counted by their 12 bytes, which only tightens the frame's
+ * budget. Indices are counted at `INDEX_UPLOAD_BYTES`.
  */
-const VERTEX_UPLOAD_BYTES = 52;
+const VERTEX_UPLOAD_BYTES = 40;
 
 /** The bytes one index of merged geometry adds to the GPU upload. */
 const INDEX_UPLOAD_BYTES = 4;
@@ -534,8 +563,8 @@ type MergedArrays = {
   positions: Growable<Float32Array>;
   normals: Growable<Float32Array>;
   uvs: Growable<Float32Array>;
-  /** Four numbers a vertex: the atlas rect its repeating texture wraps into. */
-  rects: Growable<Float32Array>;
+  /** One number a vertex: the sheet tile its repeating texture wraps into. */
+  tiles: Growable<Float32Array>;
   indices: Growable<Uint32Array>;
   /** One 0..1 brightness per vertex, carried from the per-chunk bake. */
   brightness: Growable<Float32Array>;
@@ -545,7 +574,7 @@ const emptyArrays = (): MergedArrays => ({
   positions: new Growable(Float32Array),
   normals: new Growable(Float32Array),
   uvs: new Growable(Float32Array),
-  rects: new Growable(Float32Array),
+  tiles: new Growable(Float32Array),
   indices: new Growable(Uint32Array),
   brightness: new Growable(Float32Array),
 });
@@ -580,7 +609,7 @@ const mergedArraysBytes = (arrays: MergedArrays): number =>
   arrays.positions.capacityBytes +
   arrays.normals.capacityBytes +
   arrays.uvs.capacityBytes +
-  arrays.rects.capacityBytes +
+  arrays.tiles.capacityBytes +
   arrays.indices.capacityBytes +
   arrays.brightness.capacityBytes;
 
@@ -660,7 +689,7 @@ const appendArrays = (
   into.positions.pushOffset(a.positions, dx, dy, dz);
   into.normals.pushMany(a.normals);
   into.uvs.pushMany(a.uvs);
-  into.rects.pushMany(a.rects);
+  into.tiles.pushMany(a.tiles);
   into.brightness.pushMany(a.brightness);
   into.indices.pushShifted(a.indices, base);
 };
@@ -1080,7 +1109,7 @@ export class TriangleRenderer {
         positions: state.terrain.positions.array(),
         normals: state.terrain.normals.array(),
         uvs: state.terrain.uvs.array(),
-        rects: state.terrain.rects.array(),
+        tiles: state.terrain.tiles.array(),
         brightness: state.terrain.brightness.array(),
         indices: state.terrain.indices.array(),
       },
@@ -1094,7 +1123,7 @@ export class TriangleRenderer {
         positions: state.water.positions.array(),
         normals: state.water.normals.array(),
         uvs: state.water.uvs.array(),
-        rects: state.water.rects.array(),
+        tiles: state.water.tiles.array(),
         brightness: state.water.brightness.array(),
         indices: state.water.indices.array(),
       },
@@ -1657,8 +1686,13 @@ export class TriangleRenderer {
     this.meshes.requestBuild(index);
   }
 
-  setTiles(voxelTiles: VoxelTileConfig[], texture: Texture): void {
+  setTiles(
+    voxelTiles: VoxelTileConfig[],
+    texture: Texture,
+    grid: AtlasGrid,
+  ): void {
     this.triMaterial.tilesTexture = texture;
+    this.triMaterial.atlasGrid = grid;
     this.triMaterial.needsUpdate = true;
     this.meshes.setTiles(voxelTiles);
   }
