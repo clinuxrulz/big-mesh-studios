@@ -21,6 +21,13 @@
 //                                    # functions spent it
 //   pnpm bench --antialias           # draw the canvas multisampled, which the
 //                                    # world no longer does by default
+//   pnpm bench walk --trace          # record what the graphics process did,
+//                                    # which is where a frame's wait on the
+//                                    # card is written down
+//   pnpm bench walk --trace-memory   # trace what every process is holding as
+//                                    # well, the driver's buffers included;
+//                                    # the dumps stall the page, so read this
+//                                    # one for memory and not for frames
 //
 // A commit is measured through the harness in this checkout, so the scenarios,
 // the report and its page are whatever they are here; only the application
@@ -134,12 +141,19 @@ interface Options {
    */
   unlocked: boolean;
   /**
-   * Whether to record a browser trace around each scenario. The trace carries
-   * what the graphics process does with the commands the page sends it, and
-   * what every part of the browser is holding — including the driver's own
-   * buffers and textures, which the page has no way to count.
+   * Whether to record a browser trace around each scenario, carrying what the
+   * graphics process does with the commands the page sends it — where a
+   * frame's wait on the card is written down, which the page cannot time.
    */
   trace: boolean;
+  /**
+   * Whether that trace also records what every part of the browser is holding,
+   * including the driver's own buffers and textures, which the page has no way
+   * to count. The browser takes dumps of its own while this is on and each one
+   * stops a thread for as long as a tenth of a second on a phone, so a run
+   * asking for it is asking about memory rather than about frames.
+   */
+  traceMemory: boolean;
   /** The commit to measure, if not the one this checkout stands on. */
   at?: string;
   /**
@@ -180,6 +194,7 @@ const parseOptions = (argv: string[]): Options => {
   let unlocked = false;
   let adaptive = false;
   let trace = false;
+  let traceMemory = false;
   let scale: number | undefined;
   let at: string | undefined;
   let monsters = false;
@@ -200,6 +215,9 @@ const parseOptions = (argv: string[]): Options => {
     } else if (argument === "--adaptive") {
       adaptive = true;
     } else if (argument === "--trace") {
+      trace = true;
+    } else if (argument === "--trace-memory") {
+      traceMemory = true;
       trace = true;
     } else if (argument === "--scale") {
       scale = Number(argv[++i]);
@@ -249,6 +267,7 @@ const parseOptions = (argv: string[]): Options => {
     unlocked,
     adaptive,
     trace,
+    traceMemory,
     scale,
     at,
     monsters,
@@ -478,7 +497,7 @@ const waitForQuiet = async (page: Page): Promise<void> => {
 const measure = async (
   page: Page,
   scenario: Scenario,
-  tracing: { cdp: CDPSession; file: string } | undefined,
+  tracing: { cdp: CDPSession; file: string; memory: boolean } | undefined,
   sampling: { cdp: CDPSession; file: string; distDir: string } | undefined,
 ): Promise<{
   drain: PerfDrain;
@@ -487,8 +506,9 @@ const measure = async (
 }> => {
   await waitForQuiet(page);
   await page.waitForTimeout((scenario.settleSeconds ?? 0.5) * 1000);
-  const events = tracing === undefined ? [] : await startTrace(tracing.cdp);
-  if (tracing !== undefined) {
+  const events =
+    tracing === undefined ? [] : await startTrace(tracing.cdp, tracing.memory);
+  if (tracing?.memory === true) {
     await dumpMemory(tracing.cdp);
   }
   if (sampling !== undefined) {
@@ -520,7 +540,9 @@ const measure = async (
   if (tracing === undefined) {
     return { drain, functions };
   }
-  await dumpMemory(tracing.cdp);
+  if (tracing.memory) {
+    await dumpMemory(tracing.cdp);
+  }
   await stopTrace(tracing.cdp);
   writeFileSync(tracing.file, JSON.stringify(events));
   return { drain, functions, trace: summarizeTrace(events, tracing.file) };
@@ -717,6 +739,7 @@ const main = async (): Promise<void> => {
             ? {
                 cdp: traceCdp,
                 file: outPath(`trace-${scenario.name}-${Date.now()}.json`),
+                memory: options.traceMemory,
               }
             : undefined;
         // Only the first repeat is sampled, for the same reason as the trace:

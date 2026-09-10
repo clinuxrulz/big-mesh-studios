@@ -1,21 +1,29 @@
 import type { CDPSession } from "playwright";
 
 /**
- * The trace categories a run records. The graphics categories carry what the
- * browser's own graphics process does with the commands the page sends it,
- * which is the layer below anything the page can time for itself; the memory
- * category carries the dumps every part of the browser writes when one is
- * asked for, including the buffers and textures the graphics driver holds,
- * which the page cannot see at all.
+ * What the browser's own graphics process does with the commands the page
+ * sends it: the layer below anything the page can time for itself, and the
+ * only place a frame's wait on the card is written down.
  */
-const CATEGORIES = [
+const GRAPHICS_CATEGORIES = [
   "disabled-by-default-gpu.service",
   "disabled-by-default-gpu.device",
   "gpu",
   "viz",
   "toplevel",
-  "disabled-by-default-memory-infra",
 ];
+
+/**
+ * The dumps every part of the browser writes of what it is holding, including
+ * the buffers and textures the graphics driver holds, which the page cannot
+ * see at all.
+ *
+ * Recorded only when a run asks for them, because the browser takes dumps of
+ * its own accord while this is on, and each one stops the thread it is taken
+ * on: on a phone they run to a tenth of a second, which lands in the middle of
+ * frames and makes a trace recorded for timing describe the tracing.
+ */
+const MEMORY_CATEGORIES = ["disabled-by-default-memory-infra"];
 
 /** One event out of a browser trace, in the shape the trace file uses. */
 interface TraceEvent {
@@ -74,8 +82,17 @@ const allocatorBytes = (allocator: unknown): number => {
   return Number.parseInt(size.value, 16);
 };
 
-/** Starts recording a trace on this page's browser. */
-export const startTrace = async (cdp: CDPSession): Promise<TraceEvent[]> => {
+/**
+ * Starts recording a trace on this page's browser.
+ *
+ * @param withMemory Whether to record what each process holds as well as what
+ * the graphics process does. It costs the run the stalls described above, so a
+ * trace read for timing leaves it off.
+ */
+export const startTrace = async (
+  cdp: CDPSession,
+  withMemory: boolean,
+): Promise<TraceEvent[]> => {
   const events: TraceEvent[] = [];
   cdp.on("Tracing.dataCollected", (payload) => {
     events.push(
@@ -84,7 +101,9 @@ export const startTrace = async (cdp: CDPSession): Promise<TraceEvent[]> => {
   });
   await cdp.send("Tracing.start", {
     traceConfig: {
-      includedCategories: CATEGORIES,
+      includedCategories: withMemory
+        ? [...GRAPHICS_CATEGORIES, ...MEMORY_CATEGORIES]
+        : GRAPHICS_CATEGORIES,
       excludedCategories: ["*"],
       recordMode: "recordAsMuchAsPossible",
     },
