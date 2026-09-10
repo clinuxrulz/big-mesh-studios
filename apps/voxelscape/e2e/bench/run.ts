@@ -47,7 +47,13 @@ import type {
   Page,
 } from "playwright";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { outPath } from "../out-dir.ts";
@@ -284,6 +290,29 @@ const git = (...args: string[]): string =>
 const WORKTREE_DIR = join(APP_DIR, "..", "..", ".worktrees");
 
 /** The application a run measures, and what the report says it was. */
+/**
+ * How one subject is built and served. A build carrying the frame-timing probe
+ * is a separate one — `build:bench`, into `dist-bench` — but a commit from
+ * before that split compiled the probe into its only build, and there the plain
+ * one is what a run can arm.
+ */
+interface BuildScripts {
+  build: string;
+  serve: string;
+  /** The directory that build writes, relative to the application's. */
+  dist: string;
+}
+
+/** Which of those a checkout has, read from the scripts it declares. */
+const buildScriptsOf = (dir: string): BuildScripts => {
+  const declared = JSON.parse(
+    readFileSync(join(dir, "package.json"), "utf8"),
+  ) as { scripts?: Record<string, string> };
+  return declared.scripts?.["build:bench"] === undefined
+    ? { build: "build", serve: "serve", dist: "dist" }
+    : { build: "build:bench", serve: "serve:bench", dist: "dist-bench" };
+};
+
 interface Subject {
   /** The application directory to build and serve. */
   dir: string;
@@ -349,11 +378,13 @@ const newestChange = (directory: string): number => {
  * last one: the sources, and the files that decide what the build makes of them.
  * A configuration change with untouched sources still makes a different site.
  */
-const buildIfStale = (dir: string): void => {
+const buildIfStale = (dir: string, scripts: BuildScripts): void => {
   // The bench build carries `VITE_PERF=true` so the in-app probe this
   // harness arms and drains actually exists; the plain `pnpm build` a player
-  // gets tree-shakes it out entirely, and would leave nothing to arm.
-  const built = join(dir, "dist-bench", "index.html");
+  // gets tree-shakes it out entirely, and would leave nothing to arm. A commit
+  // from before the two were split has only the one build, with the probe in
+  // it, which is why the scripts are read rather than assumed.
+  const built = join(dir, scripts.dist, "index.html");
   const configured = ["vite.config.ts", "package.json", "index.html"]
     .map((name) => join(dir, name))
     .filter((path) => existsSync(path))
@@ -363,7 +394,7 @@ const buildIfStale = (dir: string): void => {
     return;
   }
   console.log("building the site (sources are newer than the last build)");
-  execFileSync("pnpm", ["build:bench"], { cwd: dir, stdio: "inherit" });
+  execFileSync("pnpm", [scripts.build], { cwd: dir, stdio: "inherit" });
 };
 
 const answers = async (url: string): Promise<boolean> => {
@@ -392,8 +423,9 @@ const serve = async (port: number, subject: Subject): Promise<() => void> => {
     console.log(`using the preview server already on port ${port}`);
     return () => {};
   }
-  buildIfStale(subject.dir);
-  const server = spawn("pnpm", ["serve:bench", "--port", String(port)], {
+  const scripts = buildScriptsOf(subject.dir);
+  buildIfStale(subject.dir, scripts);
+  const server = spawn("pnpm", [scripts.serve, "--port", String(port)], {
     cwd: subject.dir,
     stdio: "ignore",
   });
@@ -756,7 +788,7 @@ const main = async (): Promise<void> => {
                 file: outPath(
                   `profile-${scenario.name}-${Date.now()}.cpuprofile`,
                 ),
-                distDir: join(subject.dir, "dist-bench"),
+                distDir: join(subject.dir, buildScriptsOf(subject.dir).dist),
               }
             : undefined;
         const measured = await measure(page, scenario, tracing, samplingHere);

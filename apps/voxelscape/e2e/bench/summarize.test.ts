@@ -82,6 +82,27 @@ describe("summarize", () => {
     expect(Object.keys(summary.counters)).toEqual(COUNTER_NAMES);
   });
 
+  it("reports nothing for a value the run never recorded, not its neighbour's", () => {
+    // A run measured from a commit that predates a value knows nothing of it.
+    // This drain names three values and one phase, and no draw-call count; a
+    // column worked out by adding two positions lands on the last field here,
+    // so how far the player walked would be read back as that frame's draw
+    // calls.
+    const older = {
+      rows: [REFRESH, 3, 2292, 0.5],
+      rowStride: 4,
+      fieldNames: ["gapMs", "gpuMs", "playerZ"],
+      phaseNames: ["draw"],
+      counterNames: [],
+      counters: [],
+      framesSeen: 1,
+      wrapped: false,
+      durationMs: REFRESH,
+    };
+
+    expect(summarize(older).culling.drawnMeshes).toBe(0);
+  });
+
   it("leaves the graphics-card spread empty when the browser cannot time it", () => {
     const probe = new PerfProbe();
     probe.arm(16);

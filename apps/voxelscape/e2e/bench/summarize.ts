@@ -194,17 +194,26 @@ const column = (drain: PerfDrain, index: number): number[] => {
   return values;
 };
 
-/** The column a named per-frame value or phase is recorded in. */
+/**
+ * The column a named per-frame value or phase is recorded in, or -1 when the
+ * run recorded neither. A run measured from an older commit knows nothing of a
+ * value added since, and a column worked out by adding two positions lands on
+ * the last field, reporting that value's numbers under this one's name.
+ */
 const columnOf = (drain: PerfDrain, name: string): number => {
   const field = drain.fieldNames.indexOf(name);
   if (field >= 0) {
     return field;
   }
-  return drain.fieldNames.length + drain.phaseNames.indexOf(name);
+  const phase = drain.phaseNames.indexOf(name);
+  return phase >= 0 ? drain.fieldNames.length + phase : -1;
 };
 
-const columnFor = (drain: PerfDrain, name: string): number[] =>
-  column(drain, columnOf(drain, name));
+/** Every frame's value for a name, or nothing at all when the run has no such column. */
+const columnFor = (drain: PerfDrain, name: string): number[] => {
+  const at = columnOf(drain, name);
+  return at < 0 ? [] : column(drain, at);
+};
 
 const maxOf = (values: number[]): number =>
   values.reduce((most, value) => Math.max(most, value), 0);
