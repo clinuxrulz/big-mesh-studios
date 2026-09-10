@@ -545,7 +545,11 @@ const measure = async (
   }
   await stopTrace(tracing.cdp);
   writeFileSync(tracing.file, JSON.stringify(events));
-  return { drain, functions, trace: summarizeTrace(events, tracing.file) };
+  return {
+    drain,
+    functions,
+    trace: summarizeTrace(events, scenario.name, tracing.file),
+  };
 };
 
 /**

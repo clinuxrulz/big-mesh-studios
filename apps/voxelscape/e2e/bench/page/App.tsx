@@ -5,6 +5,8 @@ import type { BenchReport, RunSamples, ScenarioReport } from "../report.ts";
 import type { RunSummary } from "../summarize.ts";
 import type { TraceSummary } from "../trace.ts";
 import { Bars, Chart } from "./Charts.tsx";
+import { anchorFor, Contents } from "./Contents.tsx";
+import type { ContentsEntry } from "./Contents.tsx";
 import { describePower } from "../power.ts";
 import { lateFrames, uploadsOverBudget } from "./late.ts";
 import {
@@ -261,7 +263,7 @@ function Scenario(props: {
   const queues = queueLines(frames);
 
   return (
-    <section class="scenario">
+    <section class="scenario" id={anchorFor(props.scenario.name)}>
       <h2>{props.scenario.name}</h2>
       <p class="lede">{props.scenario.description}</p>
       <Tiles run={run} scenario={props.scenario} paced={props.paced} />
@@ -322,8 +324,11 @@ function Trace(props: { trace: TraceSummary }): JSX.Element {
         (process.process === "GPU Process" && process.last.length > 0),
     );
   return (
-    <section class="trace">
-      <h3>What the browser itself was holding and doing</h3>
+    <section
+      class="trace"
+      id={anchorFor(`browser during ${props.trace.scenario}`)}
+    >
+      <h3>{`What the browser itself was holding and doing, during ${props.trace.scenario}`}</h3>
       <div class="traceGrid">
         <table class="numbers">
           <caption>Where the graphics process spent its time</caption>
@@ -385,6 +390,11 @@ export function App(props: {
   traces: TraceSummary[];
 }): JSX.Element {
   const context = () => props.report.context;
+  const contents = (): ContentsEntry[] =>
+    props.report.scenarios.map((scenario) => ({
+      id: anchorFor(scenario.name),
+      label: scenario.name,
+    }));
   return (
     <main class="viz-root">
       <header>
@@ -414,6 +424,7 @@ export function App(props: {
           {`commit ${context().commit}${context().dirty ? ", working tree dirty" : ""} · ${context().finishedAt}`}
         </p>
       </header>
+      <Contents entries={contents()} />
       <For each={props.report.scenarios}>
         {(scenario) => (
           <Scenario scenario={scenario} paced={context().pacing === "paced"} />

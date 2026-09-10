@@ -121,6 +121,30 @@ header {
   border-bottom: 1px solid var(--hairline);
 }
 
+.contents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem 1rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 0.8125rem;
+}
+
+.contents span {
+  color: var(--text-muted);
+}
+
+.contents a {
+  color: var(--text-secondary);
+  text-decoration-color: var(--hairline);
+  text-underline-offset: 0.2em;
+}
+
+.contents a:hover {
+  color: var(--text-primary);
+  text-decoration-color: currentColor;
+}
+
 .scenario,
 .trace {
   padding: 2rem 0;

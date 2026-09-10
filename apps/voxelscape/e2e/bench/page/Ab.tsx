@@ -1,6 +1,8 @@
 import { For, Show } from "solid-js";
 import type { JSX } from "@solidjs/web/jsx-runtime";
 import { clearOfTheSpread } from "../ab-report.ts";
+import { anchorFor, Contents } from "./Contents.tsx";
+import type { ContentsEntry } from "./Contents.tsx";
 import type {
   AbReport,
   MetricComparison,
@@ -102,7 +104,7 @@ function Scenario(props: {
   after: string;
 }): JSX.Element {
   return (
-    <section class="scenario">
+    <section class="scenario" id={anchorFor(props.scenario.name)}>
       <h2>{props.scenario.name}</h2>
       <p class="lede">{props.scenario.description}</p>
       <p class="meta">
@@ -151,6 +153,11 @@ function Scenario(props: {
 /** A comparison of two commits, drawn as a page. */
 export function Ab(props: { report: AbReport }): JSX.Element {
   const clear = clearOfTheSpread(props.report);
+  const contents = (): ContentsEntry[] =>
+    props.report.scenarios.map((scenario) => ({
+      id: anchorFor(scenario.name),
+      label: scenario.name,
+    }));
   return (
     <main class="viz-root">
       <header>
@@ -180,6 +187,7 @@ export function Ab(props: { report: AbReport }): JSX.Element {
           them may be the power rather than the commit.
         </p>
       </Show>
+      <Contents entries={contents()} />
       <section class="verdict">
         <h2>Clear of the run-to-run spread</h2>
         <p class="lede">

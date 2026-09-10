@@ -78,6 +78,8 @@ export interface ProcessMemory {
 
 /** What one traced scenario is reduced to. */
 export interface TraceSummary {
+  /** The scenario this was recorded around; a run traces each one separately. */
+  scenario: string;
   /** Where the whole trace was written, for opening in a trace viewer. */
   file: string;
   events: number;
@@ -172,6 +174,7 @@ const processNames = (events: TraceEvent[]): Map<number, string> => {
  */
 export const summarizeTrace = (
   events: TraceEvent[],
+  scenario: string,
   file: string,
 ): TraceSummary => {
   const names = processNames(events);
@@ -264,6 +267,7 @@ export const summarizeTrace = (
     .sort((a, b) => largest(b.last) - largest(a.last));
 
   return {
+    scenario,
     file,
     events: events.length,
     graphicsSlices,
@@ -277,7 +281,9 @@ const mebibytes = (bytes: number): string =>
 /** Writes a traced scenario's findings as the lines that follow its numbers. */
 export const formatTrace = (summary: TraceSummary): string => {
   const lines: string[] = [];
-  lines.push(`  browser trace (${summary.events.toLocaleString()} events)`);
+  lines.push(
+    `  browser trace of ${summary.scenario} (${summary.events.toLocaleString()} events)`,
+  );
   if (summary.graphicsSlices.length === 0) {
     lines.push("    the graphics process recorded nothing");
   } else {
