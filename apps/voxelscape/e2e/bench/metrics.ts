@@ -28,6 +28,23 @@ export const measured = (metric: Metric, run: RunSummary): boolean =>
 const PHASE_FLOOR_MS = 0.005;
 
 /**
+ * Below this a value is at the floor of what its unit can measure, and the
+ * step from it to anything else is not a share of it that means anything: a
+ * phase that took six ten-thousandths of a millisecond and now takes two
+ * hundredths has not risen by three thousand per cent in any sense a reader
+ * can use, however exactly that is the arithmetic.
+ */
+const FLOOR: Record<Unit, number> = {
+  ms: PHASE_FLOOR_MS,
+  bytes: 1024,
+  count: 1,
+};
+
+/** Whether a value is too near its unit's floor to be divided into. */
+export const tooSmallToDivide = (value: number, unit: Unit): boolean =>
+  value < FLOOR[unit];
+
+/**
  * The numbers a run paced this way is read on.
  *
  * A run the display paced counts a frame late when it took half again as long

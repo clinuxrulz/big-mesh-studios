@@ -9,6 +9,7 @@ import type {
   ScenarioComparison,
 } from "../ab-report.ts";
 import { show } from "../metrics.ts";
+import type { Unit } from "../metrics.ts";
 
 /** The plot's size in its own coordinates; the page scales it to fit. */
 const WIDTH = 320;
@@ -45,6 +46,10 @@ function Commit(props: { sha: string; slot: 1 | 2 }): JSX.Element {
  * move" but "did it move further than the same commit moves on its own" —
  * which is to say, do the two rows of marks overlap.
  */
+/** One side's middle, or that it holds no such measurement. */
+const side = (measured: boolean, middle: number, unit: Unit): string =>
+  measured ? show(middle, unit) : "not measured";
+
 function Spread(props: { metric: MetricComparison }): JSX.Element {
   const values = [...props.metric.before, ...props.metric.after];
   // Neither side carried this column, so there is nothing to place on a scale.
@@ -92,7 +97,7 @@ function Spread(props: { metric: MetricComparison }): JSX.Element {
       viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
       role="img"
       preserveAspectRatio="none"
-      aria-label={`${props.metric.name}: ${show(props.metric.beforeMiddle, props.metric.unit)} against ${show(props.metric.afterMiddle, props.metric.unit)}`}
+      aria-label={`${props.metric.name}: ${side(props.metric.beforeMeasured, props.metric.beforeMiddle, props.metric.unit)} against ${side(props.metric.afterMeasured, props.metric.afterMiddle, props.metric.unit)}`}
     >
       <line class="axis" x1="0" y1={HEIGHT - 1} x2={WIDTH} y2={HEIGHT - 1} />
       {marks(props.metric.before, props.metric.beforeMiddle, 1, 1)}

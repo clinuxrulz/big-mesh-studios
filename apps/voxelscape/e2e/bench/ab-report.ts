@@ -5,7 +5,12 @@
 // Nothing here decides that a change is good or bad. It decides one narrower
 // thing: whether a difference is larger than the disagreement between repeats
 // of the same commit, which is the only ground for reading it at all.
-import { measured, metricsFor, phaseMetrics } from "./metrics.ts";
+import {
+  measured,
+  metricsFor,
+  phaseMetrics,
+  tooSmallToDivide,
+} from "./metrics.ts";
 import type { Metric, Unit } from "./metrics.ts";
 import { describePower, samePower } from "./power.ts";
 import type { PowerState } from "./power.ts";
@@ -44,7 +49,11 @@ export interface MetricComparison {
   /** The middle of each, which is what the change is measured between. */
   beforeMiddle: number;
   afterMiddle: number;
-  /** The change between the middles, or null when a side did not measure it. */
+  /**
+   * The change between the middles, or null when there is none to state: a
+   * side that did not measure this, or a starting value so near the floor of
+   * what its unit can measure that a share of it says nothing.
+   */
   change: number | null;
   /** Whether the two sets of repeats stayed clear of each other. */
   apart: boolean;
@@ -72,6 +81,9 @@ export interface AbReport {
 
 /** The middle value of `values`, which is not moved by one wild run. */
 export const median = (values: number[]): number => {
+  if (values.length === 0) {
+    return 0;
+  }
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.floor(sorted.length / 2)];
 };
@@ -154,7 +166,10 @@ const compareMetric = (
     after: afterValues,
     beforeMiddle,
     afterMiddle,
-    change: both ? changeBetween(beforeMiddle, afterMiddle) : null,
+    change:
+      both && !tooSmallToDivide(beforeMiddle, metric.unit)
+        ? changeBetween(beforeMiddle, afterMiddle)
+        : null,
     apart: both && standsApart(beforeValues, afterValues),
   };
 };
