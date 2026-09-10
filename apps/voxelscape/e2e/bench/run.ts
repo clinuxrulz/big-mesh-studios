@@ -331,7 +331,10 @@ const newestChange = (directory: string): number => {
  * A configuration change with untouched sources still makes a different site.
  */
 const buildIfStale = (dir: string): void => {
-  const built = join(dir, "dist", "index.html");
+  // The bench build carries `VITE_PERF=true` so the in-app probe this
+  // harness arms and drains actually exists; the plain `pnpm build` a player
+  // gets tree-shakes it out entirely, and would leave nothing to arm.
+  const built = join(dir, "dist-bench", "index.html");
   const configured = ["vite.config.ts", "package.json", "index.html"]
     .map((name) => join(dir, name))
     .filter((path) => existsSync(path))
@@ -341,7 +344,7 @@ const buildIfStale = (dir: string): void => {
     return;
   }
   console.log("building the site (sources are newer than the last build)");
-  execFileSync("pnpm", ["build"], { cwd: dir, stdio: "inherit" });
+  execFileSync("pnpm", ["build:bench"], { cwd: dir, stdio: "inherit" });
 };
 
 const answers = async (url: string): Promise<boolean> => {
@@ -371,7 +374,7 @@ const serve = async (port: number, subject: Subject): Promise<() => void> => {
     return () => {};
   }
   buildIfStale(subject.dir);
-  const server = spawn("pnpm", ["serve", "--port", String(port)], {
+  const server = spawn("pnpm", ["serve:bench", "--port", String(port)], {
     cwd: subject.dir,
     stdio: "ignore",
   });
@@ -726,7 +729,7 @@ const main = async (): Promise<void> => {
                 file: outPath(
                   `profile-${scenario.name}-${Date.now()}.cpuprofile`,
                 ),
-                distDir: join(subject.dir, "dist"),
+                distDir: join(subject.dir, "dist-bench"),
               }
             : undefined;
         const measured = await measure(page, scenario, tracing, samplingHere);

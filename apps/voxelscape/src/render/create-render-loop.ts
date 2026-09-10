@@ -5,7 +5,7 @@ import {
   WebGLRenderer,
 } from "@random-mesh/rmsl/scene";
 import { AdaptiveResolution } from "./adaptive";
-import { GpuTimer } from "./perf";
+import { createGpuTimer, type GpuTimerApi } from "./perf";
 import { Field, Phase, probe } from "./perf-probe";
 
 /** How many frames between each debug-perf GPU readback, which stalls the pipeline. */
@@ -91,13 +91,13 @@ export const createRenderLoop = ({
   const renderer = new WebGLRenderer(canvas, { antialias });
   renderer.setClearColor(clearColor(), 1);
   /** Built the first frame the statistics are asked for, and kept from then on. */
-  let timer: GpuTimer | undefined;
+  let timer: GpuTimerApi | undefined;
   /**
    * Times the occlusion pass on the graphics card separately from the draw.
    * The pass exists to save the card work, so what it costs the card is the
    * other half of whether it is worth running.
    */
-  let occlusionTimer: GpuTimer | undefined;
+  let occlusionTimer: GpuTimerApi | undefined;
 
   const adaptive = resolution ?? new AdaptiveResolution();
   /** The canvas's layout size in device pixels; the scale is applied on top of it. */
@@ -121,8 +121,8 @@ export const createRenderLoop = ({
       renderer.render(scene, camera);
       return false;
     }
-    timer ??= new GpuTimer(renderer.gl);
-    occlusionTimer ??= new GpuTimer(renderer.gl);
+    timer ??= createGpuTimer(renderer.gl);
+    occlusionTimer ??= createGpuTimer(renderer.gl);
     occlusionTimer.begin();
     probe.begin(Phase.occlusion);
     beforeRender?.(renderer, camera);

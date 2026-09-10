@@ -190,7 +190,8 @@ export const createVoxelscape = ({
   terrain = DEFAULT_TERRAIN,
   spawn = [0, 0, 0],
   modelAccount = WORLD_MODEL_ACCOUNT,
-  debugPerf: initialDebugPerf = typeof window !== "undefined" &&
+  debugPerf: initialDebugPerf = __PERF__ &&
+    typeof window !== "undefined" &&
     window.location.hash.includes("perf"),
   onDebugStats,
   onNotice,
@@ -739,6 +740,9 @@ export const createVoxelscape = ({
       return next ? "no-clip" : "collisions on";
     },
     setDebugPerf: (on) => {
+      if (!__PERF__) {
+        return "performance readout unavailable in this build";
+      }
       const next = on ?? !debugPerf();
       setDebugPerf(next);
       return next ? "performance readout shown" : "performance readout hidden";
@@ -771,7 +775,7 @@ export const createVoxelscape = ({
   // The page is handed the moving body, what the window has streamed and
   // drawn, the console the world already answers, the probe recording the
   // frame, and the routes the player can be sent along.
-  if (window.location.hash.includes("bench")) {
+  if (__PERF__ && window.location.hash.includes("bench")) {
     (window as unknown as { __voxelscape?: object }).__voxelscape = {
       player: avatar.player.position,
       cellReady: (x: number, y: number, z: number) => world.cellReady(x, y, z),

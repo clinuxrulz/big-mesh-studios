@@ -64,3 +64,27 @@ export class GpuTimer {
     this.frame++;
   }
 }
+
+/** Every member `GpuTimer` exposes, so a build can swap in a timer that does nothing. */
+export type GpuTimerApi = Pick<
+  GpuTimer,
+  "supported" | "ms" | "answered" | "begin" | "end" | "poll"
+>;
+
+/** Stands in for `GpuTimer` in a build without it: every method is empty, `ms` stays 0. */
+class NoopGpuTimer implements GpuTimerApi {
+  readonly supported = false;
+  ms = 0;
+  answered = false;
+  begin(): void {}
+  end(): void {}
+  poll(): void {}
+}
+
+/**
+ * Builds the timer `create-render-loop.ts` uses. `__PERF__` decides which —
+ * substituted with a literal at build time, so the branch not taken folds
+ * away along with `GpuTimer` itself in a build without it.
+ */
+export const createGpuTimer: (gl: WebGL2RenderingContext) => GpuTimerApi =
+  __PERF__ ? (gl) => new GpuTimer(gl) : () => new NoopGpuTimer();

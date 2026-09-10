@@ -1,7 +1,7 @@
 import { defineConfig } from "vitest/config";
 import solid from "vite-plugin-solid";
 
-export default defineConfig({
+export default defineConfig(({ mode, command }) => ({
   base: "./",
   server: {
     // Named rather than left to the default, which listens on the version six
@@ -9,11 +9,26 @@ export default defineConfig({
     // four one, finds nothing listening there, and refuses the connection.
     host: "127.0.0.1",
   },
+  define: {
+    // Whether this build carries the perf-probe instrumentation
+    // (`src/render/perf-probe.ts`, `src/render/perf.ts`). A raw global
+    // rather than an imported value, so esbuild substitutes the literal into
+    // every file it transforms and can fold away the branch that builds a
+    // real probe or timer, before Rollup ever sees it — an imported
+    // binding's value isn't known until bundling, too late for that branch,
+    // and everything it alone references, to be dropped. Dev and tests keep
+    // it on for free; only a plain `vite build` turns it off, and `--mode
+    // bench` (`pnpm build:bench`) turns it back on.
+    __PERF__: JSON.stringify(command !== "build" || mode === "bench"),
+  },
   build: {
     // Written but not pointed at: the built files carry no `sourceMappingURL`,
     // so a browser never fetches a map, while `pnpm bench --functions` reads
     // them off the disk to give a sampled profile the names its source has.
     sourcemap: "hidden",
+    // `--mode bench` carries the perf-probe instrumentation a real build
+    // tree-shakes away, so it lands beside `dist` rather than replacing it.
+    outDir: mode === "bench" ? "dist-bench" : "dist",
   },
   plugins: [solid({ ssr: false })],
   worker: {
@@ -33,4 +48,4 @@ export default defineConfig({
     maxWorkers: "50%",
     retry: 1,
   },
-});
+}));

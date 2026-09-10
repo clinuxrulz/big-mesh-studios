@@ -18,7 +18,9 @@ export const Phase = {
 } as const;
 
 /** Each phase's name, at the index that phase is timed under. */
-export const PHASE_NAMES = Object.keys(Phase) as (keyof typeof Phase)[];
+export const PHASE_NAMES = /* @__PURE__ */ Object.keys(
+  Phase,
+) as (keyof typeof Phase)[];
 
 /**
  * The things the probe counts over a whole run rather than timing: how much
@@ -44,7 +46,9 @@ export const Counter = {
 } as const;
 
 /** Each counter's name, at the index that counter is kept under. */
-export const COUNTER_NAMES = Object.keys(Counter) as (keyof typeof Counter)[];
+export const COUNTER_NAMES = /* @__PURE__ */ Object.keys(
+  Counter,
+) as (keyof typeof Counter)[];
 
 /**
  * The values the probe records once per frame, each one a column of the frame
@@ -114,7 +118,9 @@ export const Field = {
 } as const;
 
 /** Each per-frame value's name, at the column it is recorded in. */
-export const FIELD_NAMES = Object.keys(Field) as (keyof typeof Field)[];
+export const FIELD_NAMES = /* @__PURE__ */ Object.keys(
+  Field,
+) as (keyof typeof Field)[];
 
 /** How many numbers one frame's row holds: the per-frame values, then the phase slices. */
 export const ROW_STRIDE = FIELD_NAMES.length + PHASE_NAMES.length;
@@ -309,10 +315,62 @@ export class PerfProbe {
   }
 }
 
+/** Every method `PerfProbe` exposes, so a build can swap in a probe that does nothing. */
+export type PerfProbeApi = Pick<
+  PerfProbe,
+  | "armed"
+  | "arm"
+  | "disarm"
+  | "reset"
+  | "begin"
+  | "end"
+  | "count"
+  | "gauge"
+  | "frame"
+  | "drain"
+>;
+
+const EMPTY_DRAIN: PerfDrain = {
+  rows: [],
+  rowStride: 0,
+  fieldNames: [],
+  phaseNames: [],
+  counterNames: [],
+  counters: [],
+  framesSeen: 0,
+  wrapped: false,
+  durationMs: 0,
+};
+
+/**
+ * Stands in for `PerfProbe` in a build without the instrumentation: every
+ * method is empty, so the frame path can call into `probe` unconditionally
+ * without carrying the ring buffer, the phase/counter/field bookkeeping, or
+ * any of `PerfProbe` itself.
+ */
+class NoopProbe implements PerfProbeApi {
+  readonly armed = false;
+  arm(): void {}
+  disarm(): void {}
+  reset(): void {}
+  begin(): void {}
+  end(): void {}
+  count(): void {}
+  gauge(): void {}
+  frame(): void {}
+  drain(): PerfDrain {
+    return EMPTY_DRAIN;
+  }
+}
+
 /**
  * The one probe the world reports into. Measurement crosses every layer of the
  * frame — the player, the streaming, the renderer's merge loop — and handing a
  * probe down through each of their constructors would put a benchmark's
  * concern in the signature of objects that otherwise know nothing about one.
+ *
+ * `__PERF__` decides which implementation this is. Substituted with a literal
+ * at build time, the branch not taken folds away along with everything it
+ * alone referenced — `PerfProbe` included, in a build without it.
  */
-export const probe = new PerfProbe();
+export const probe: PerfProbeApi = __PERF__ ? new PerfProbe() : new NoopProbe();

@@ -27,8 +27,10 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
+    "build:bench": "vite build --mode bench",
     "build-lib": "vite build --config vite.config.lib.ts && tsc -p tsconfig.lib.json",
     "serve": "vite preview",
+    "serve:bench": "vite preview --mode bench",
     "test": "vitest run",
     "bench": "node --experimental-transform-types e2e/bench/run.ts",
     "bench:compare": "node --experimental-transform-types e2e/bench/compare.ts",
