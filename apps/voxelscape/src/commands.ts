@@ -33,6 +33,18 @@ export interface CommandEntry {
 }
 
 /**
+ * The widest window the console will ask for. Not a memory limit — a window
+ * this wide holds about eight thousand blocks and still weighs under one
+ * hundred and forty mebibytes of voxels and light — but a block is an object
+ * with a store, a slot in the renderer and a draw range of its own, and asking
+ * for a radius in the hundreds would hang the tab building them before it
+ * drew anything. What actually stops a window getting wider arrives long
+ * before this: the blocks a chunk crossing has to stream, and the triangles
+ * the card is handed.
+ */
+const MAX_CHUNK_RADIUS = 32;
+
+/**
  * What the block window is, in one line: how far it reaches, how many blocks
  * that is, where its levels of detail change, and what its voxels and light
  * weigh. The two commands that reshape it both answer with this, so asking and
@@ -325,7 +337,7 @@ export const createCommands = ({
     },
     "/world:radius": {
       description: "report or resize the block window, in chunks",
-      args: "<1..8> [yRadius]",
+      args: `<1..${MAX_CHUNK_RADIUS}> [yRadius]`,
       run: (rest) => {
         if (rest.length === 0) {
           return describeWindow(world);
@@ -333,9 +345,13 @@ export const createCommands = ({
         const radius = Number(rest[0]);
         const radiusY = rest[1] === undefined ? undefined : Number(rest[1]);
         const whole = (n: number | undefined): boolean =>
-          n === undefined || (Number.isInteger(n) && n >= 1 && n <= 8);
-        if (!whole(radius) || radius === undefined || !whole(radiusY)) {
-          return "usage: /world:radius <1..8> [yRadius]  (the window refills)";
+          n === undefined ||
+          (Number.isInteger(n) && n >= 1 && n <= MAX_CHUNK_RADIUS);
+        if (!whole(radius) || !whole(radiusY)) {
+          return (
+            `usage: /world:radius <1..${MAX_CHUNK_RADIUS}> [yRadius]  ` +
+            "(the window refills)"
+          );
         }
         world.reshape({ chunkRadius: radius, chunkRadiusY: radiusY });
         return describeWindow(world);

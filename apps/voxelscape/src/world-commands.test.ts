@@ -41,6 +41,15 @@ describe("/world:radius", () => {
     expect(said).toContain("512 world units");
   });
 
+  it("takes a radius far wider than the default", () => {
+    const { world, reshape } = worldSpy();
+    windowCommands(world).run("/world:radius 32");
+    expect(reshape).toHaveBeenCalledWith({
+      chunkRadius: 32,
+      chunkRadiusY: undefined,
+    });
+  });
+
   it("resizes to a radius, leaving the vertical one alone", () => {
     const { world, reshape } = worldSpy();
     windowCommands(world).run("/world:radius 5");
@@ -57,7 +66,7 @@ describe("/world:radius", () => {
   });
 
   it("refuses a radius that is not a whole number in range", () => {
-    for (const bad of ["0", "9", "2.5", "lots", "-1"]) {
+    for (const bad of ["0", "33", "2.5", "lots", "-1"]) {
       const { world, reshape } = worldSpy();
       const said = windowCommands(world).run(`/world:radius ${bad}`);
       expect(reshape).not.toHaveBeenCalled();
@@ -101,7 +110,7 @@ describe("what /help lists", () => {
     const listed = windowCommands(world).help();
     const radius = listed.find((c) => c.name === "/world:radius");
     const lod = listed.find((c) => c.name === "/world:lod");
-    expect(radius?.args).toBe("<1..8> [yRadius]");
+    expect(radius?.args).toBe("<1..32> [yRadius]");
     expect(lod?.args).toBe("<full> <coarse>");
   });
 });

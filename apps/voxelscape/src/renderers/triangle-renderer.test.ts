@@ -476,3 +476,45 @@ describe("the recycled geometry pool", () => {
 interface BufferGeometryLike {
   getAttribute(name: string): unknown;
 }
+
+describe("resizing to a smaller window", () => {
+  it("stops drawing a slot the window no longer has", () => {
+    const renderer = rendererFor(blockWithFloor(), blockWithFloor());
+    for (const slot of [0, 1]) {
+      renderer.repositionBlock(slot, [0, 0, 0]);
+      renderer.onBlockChanged(slot);
+      renderer.meshNow(slot);
+    }
+    settle(renderer);
+    const drawnWithBoth = renderer.triangleCount;
+    expect(drawnWithBoth).toBeGreaterThan(0);
+
+    renderer.resizeTo(1);
+    settle(renderer);
+
+    // The departed slot draws nothing, and the one that stayed still does.
+    expect(renderer.triangleCount).toBeGreaterThan(0);
+    expect(renderer.triangleCount).toBeLessThan(drawnWithBoth);
+  });
+
+  it("keeps uploading after a member is taken out from under a superchunk", () => {
+    // A superchunk left counting a slot the window no longer holds waits for
+    // a block that can never mesh, and stops settling — which is the failure
+    // this guards: geometry that never reaches the card again.
+    const renderer = rendererFor(blockWithFloor(), blockWithFloor());
+    for (const slot of [0, 1]) {
+      renderer.repositionBlock(slot, [0, 0, 0]);
+      renderer.onBlockChanged(slot);
+      renderer.meshNow(slot);
+    }
+    settle(renderer);
+
+    renderer.resizeTo(1);
+    settle(renderer);
+
+    // The surviving slot's geometry is on the card: it is merged, and nothing
+    // is left waiting to be.
+    expect(renderer.mergedGeometryBytes).toBeGreaterThan(0);
+    expect(renderer.dirtySuperchunkCount).toBe(0);
+  });
+});

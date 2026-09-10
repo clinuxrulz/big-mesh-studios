@@ -337,7 +337,9 @@ export class ChunkSphere {
    *
    * `blocks` keeps its identity across this, which everything holding it
    * depends on, so the array is truncated or extended in place rather than
-   * replaced.
+   * replaced. What draws the blocks is told the new size separately, before
+   * this runs: a slot it still counted among a superchunk's members would keep
+   * that superchunk waiting for a block the window no longer has.
    *
    * @param radius Chunk radius in X and Z.
    * @param yRadius Chunk radius in Y.
@@ -351,12 +353,6 @@ export class ChunkSphere {
     // gives up the moving fluid it holds before its voxels go.
     for (let slot = 0; slot < before; slot++) {
       this.onBlockRelease?.(slot);
-    }
-    // A slot the smaller window will not have gives up its geometry first:
-    // dropped after the truncation there would be nothing left to drop it by,
-    // and its meshes would be held for a slot that no longer exists.
-    for (let slot = wanted; slot < before; slot++) {
-      this.onBlockReposition(slot, this.blocks[slot].center);
     }
     this.radius = radius;
     this.yRadius = yRadius;

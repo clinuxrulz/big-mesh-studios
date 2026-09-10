@@ -1407,11 +1407,42 @@ export class TriangleRenderer {
   }
 
   /**
-   * Grows the per-slot bookkeeping to a window of `count` slots, for a window
-   * that has just been made larger.
+   * Resizes what this holds to a window of `count` slots. Slots past the end
+   * of a window that has shrunk are forgotten: their meshes leave the scene,
+   * their geometry is let go, and their superchunk stops counting them among
+   * its members.
+   *
+   * A superchunk left holding a member the window no longer has never settles
+   * — the member cannot mesh, so the superchunk waits for it and stops
+   * uploading — which is why this is not simply a matter of dropping meshes.
    */
-  growTo(count: number): void {
-    this.meshes.growTo(count);
+  resizeTo(count: number): void {
+    for (const slot of [...this.blockSc.keys()]) {
+      if (slot < count) {
+        continue;
+      }
+      this.dropSlot(slot);
+      this.chunkMeshes.delete(slot);
+      this.meshed.delete(slot);
+      this.meshes.invalidate(slot);
+      const key = this.blockSc.get(slot);
+      this.blockSc.delete(slot);
+      if (key === undefined) {
+        continue;
+      }
+      const members = this.scMembers.get(key);
+      const at = members?.findIndex((m) => m.index === slot) ?? -1;
+      if (at >= 0) {
+        members!.splice(at, 1);
+      }
+      if (members !== undefined && members.length === 0) {
+        this.removeSuperchunk(key);
+      } else {
+        this.superchunks.get(key)?.retire(slot);
+        this.dirty.add(key);
+      }
+    }
+    this.meshes.resizeTo(count);
   }
 
   repositionBlock(index: number, center: Dim3): void {

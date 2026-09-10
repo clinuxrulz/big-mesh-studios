@@ -447,11 +447,12 @@ export const createVoxelWorld = ({
     reshape({ chunkRadius: radius, chunkRadiusY: radiusY, lodBands: bands }) {
       const wantedRadius = radius ?? sphere.radius;
       const wantedRadiusY = radiusY ?? sphere.yRadius;
-      // The renderer is given room for the new slots first: reshaping fills
-      // the block under the player on this thread, which meshes it before
-      // returning, and a slot the renderer has no room for would land looking
-      // stale and never be drawn.
-      renderer.growTo(cellsInSphere(wantedRadius, wantedRadiusY));
+      // The renderer is resized first, for both directions. Growing: reshaping
+      // fills the block under the player on this thread and meshes it before
+      // returning, so a slot the renderer had no room for would land looking
+      // stale and never draw. Shrinking: a slot it still holds is still a
+      // member of a superchunk, which then waits for a block that is gone.
+      renderer.resizeTo(cellsInSphere(wantedRadius, wantedRadiusY));
       sphere.reshape(wantedRadius, wantedRadiusY, bands ?? sphere.bands);
     },
     workerPool,

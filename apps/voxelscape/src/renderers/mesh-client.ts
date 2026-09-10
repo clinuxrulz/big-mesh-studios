@@ -176,13 +176,21 @@ export class MeshClient {
   }
 
   /**
-   * Grows the per-slot bookkeeping to a window of `count` slots, for a window
-   * that has just been made larger. A slot added without this counts its
-   * generation from nothing, and every build for it lands looking stale.
+   * Resizes the per-slot bookkeeping to a window of `count` slots, and forgets
+   * builds asked for on behalf of a slot past the end of it. A slot added
+   * without this counts its generation from nothing, so every build for it
+   * lands looking stale.
    */
-  growTo(count: number): void {
+  resizeTo(count: number): void {
     while (this.generation.length < count) {
       this.generation.push(0);
+    }
+    this.generation.length = count;
+    for (const slot of [...this.pending]) {
+      if (slot >= count) this.pending.delete(slot);
+    }
+    for (const slot of [...this.inFlight.keys()]) {
+      if (slot >= count) this.inFlight.delete(slot);
     }
   }
 
