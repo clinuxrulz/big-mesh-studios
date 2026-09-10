@@ -161,6 +161,16 @@ export const createRenderLoop = ({
     if (width !== canvas.width || height !== canvas.height) {
       canvas.width = width;
       canvas.height = height;
+      // A buffer smaller than the box it fills is stretched by the browser,
+      // and smoothing that stretch spreads each surface over the dark seam
+      // beside it — the world reads as lit flatter and brighter the further
+      // the scale drops. Enlarging the pixels instead keeps every edge where
+      // the frame put it. Only while it is being stretched: a display with
+      // more device pixels than layout pixels leaves the buffer larger than
+      // the box at full scale, and there the smoothing is what turns those
+      // extra pixels into a finer image rather than a sparser sample of one.
+      canvas.style.imageRendering =
+        width < baseWidth / window.devicePixelRatio ? "pixelated" : "";
       // Resizing the canvas clears its drawing buffer to transparent, which
       // would flash the page background until the next RAF frame. Draw the new
       // resolution immediately so the compositor never shows the cleared buffer.
