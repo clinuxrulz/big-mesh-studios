@@ -197,6 +197,12 @@ export interface CommandsParams {
   setDebugPerf: (on?: boolean) => string;
   /** Shows or hides the statistics toast, and says which it did. */
   setShowStats: (on?: boolean) => string;
+  /** Begins tracing a walk under this name, and says so. */
+  traceStart: (name: string) => string;
+  /** Marks this moment of the walk being traced, with what was seen. */
+  traceMark: (note: string) => string;
+  /** Ends the trace, writes it, and says where it went. */
+  traceStop: () => Promise<string>;
   /**
    * Turns multisampling on or off, flipping it if `on` is omitted. The canvas
    * is remade either way, since a context holds the sample count it was made
@@ -278,6 +284,9 @@ export const createCommands = ({
   setNoClip,
   setDebugPerf,
   setShowStats,
+  traceStart,
+  traceMark,
+  traceStop,
   setMultisampling,
 }: CommandsParams): Commander => {
   return new Commander({
@@ -435,6 +444,20 @@ export const createCommands = ({
         }
         return "usage: /render:resolution auto|<0.1..1>  (1 renders every display pixel)";
       },
+    },
+    "/trace:start": {
+      description: "record a walk, to hand to somebody who was not there",
+      args: "<what you are looking for>",
+      run: (rest) => traceStart(rest.join(" ")),
+    },
+    "/trace:mark": {
+      description: "mark this moment of the walk, and what is wrong with it",
+      args: "<what you see>",
+      run: (rest) => traceMark(rest.join(" ")),
+    },
+    "/trace:stop": {
+      description: "end the walk being recorded and write it down",
+      run: () => traceStop(),
     },
     "/debug:stats": {
       description: "show or hide the statistics toast",

@@ -42,6 +42,13 @@ export interface RenderLoopConfig {
    */
   beforeRender?: (renderer: WebGLRenderer, camera: PerspectiveCamera) => void;
   /**
+   * Called with the canvas straight after the frame is drawn and before
+   * anything can clear it. A WebGL drawing buffer is not readable at any other
+   * moment unless the context is asked to preserve it, which costs every frame
+   * to serve the rare one somebody wants a picture of.
+   */
+  afterRender?: (canvas: HTMLCanvasElement) => void;
+  /**
    * Renderer statistics to append to the debug line. `sample` is true only on
    * the frames where a GPU readback is affordable.
    */
@@ -83,6 +90,7 @@ export const createRenderLoop = ({
   resolution,
   onFrame,
   beforeRender,
+  afterRender,
   clearColor,
   describeStats,
   onDebugStats,
@@ -133,6 +141,7 @@ export const createRenderLoop = ({
     probe.begin(Phase.draw);
     renderer.render(scene, camera);
     probe.end(Phase.draw);
+    afterRender?.(canvas);
     timer.end();
     timer.poll();
     frameCounter++;

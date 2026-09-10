@@ -1,5 +1,12 @@
-import { Color, PerspectiveCamera, Scene } from "@random-mesh/rmsl/scene";
+import {
+  Color,
+  PerspectiveCamera,
+  Scene,
+  Vector3,
+} from "@random-mesh/rmsl/scene";
 import { createSignal, type Accessor } from "solid-js";
+import { WalkTraceRecorder } from "./walk-trace";
+import { isEditableTarget } from "../utils";
 import { AtprotoController } from "../atproto/atproto-controller";
 import {
   createModelLibrary,
@@ -709,6 +716,49 @@ export const createVoxelscape = ({
    */
   const resolution = new AdaptiveResolution();
 
+  /** The canvas the world is mounted on, for a trace's marks to read back. */
+  let mountedCanvas: HTMLCanvasElement | undefined;
+
+  /**
+   * Records a walk, so a bug somebody walked into can be walked into again.
+   * What it snapshots is everything a reader would have to match: the terrain
+   * it was generated from, the window it was streamed into, and the settings
+   * that decide what any of that costs.
+   */
+  const walkTrace = new WalkTraceRecorder(probe, {
+    setup: () => ({
+      href: window.location.href,
+      userAgent: navigator.userAgent,
+      cores: navigator.hardwareConcurrency,
+      devicePixelRatio: window.devicePixelRatio,
+      viewport: mountedCanvas && {
+        width: mountedCanvas.width,
+        height: mountedCanvas.height,
+      },
+      terrain,
+      window: {
+        chunkRadius: world.chunkRadius,
+        chunkRadiusY: world.chunkRadiusY,
+        lodBands: world.lodBands,
+      },
+      render: {
+        multisampling: multisampling(),
+        resolution: resolution.describe(),
+      },
+      workers: world.workerPool.describe(),
+      clock: environment.dayNight.describe(),
+      spawn,
+    }),
+    pose: () => {
+      const at = avatar.player.position;
+      const look = camera.getWorldDirection(new Vector3());
+      return {
+        position: [at.x, at.y, at.z],
+        facing: [look.x, look.y, look.z],
+      };
+    },
+  });
+
   /** The place script editor's door into the world: opening it, running the
    * draft's script, and reading and publishing places. */
   const placeEditor = {
@@ -801,6 +851,45 @@ export const createVoxelscape = ({
       const next = on ?? !debugPerf();
       setDebugPerf(next);
       return next ? "performance readout shown" : "performance readout hidden";
+    },
+    traceStart: (name) => {
+      if (walkTrace.recording) {
+        return "a walk is already being traced; /trace:stop writes it";
+      }
+      walkTrace.start(name);
+      return `tracing "${name}" — /trace:mark what you see, /trace:stop to write it`;
+    },
+    traceMark: (note) => {
+      if (!walkTrace.recording) {
+        return "nothing is being traced; /trace:start first";
+      }
+      walkTrace.mark(note);
+      return `marked ${walkTrace.marked}: ${note || "(no note)"}`;
+    },
+    traceStop: async () => {
+      const trace = walkTrace.stop();
+      if (trace === undefined) {
+        return "nothing is being traced";
+      }
+      const said =
+        `traced ${trace.seconds.toFixed(0)}s, ${trace.marks.length} ` +
+        `mark${trace.marks.length === 1 ? "" : "s"}`;
+      try {
+        const answer = await fetch("/__walktrace", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(trace),
+        });
+        if (!answer.ok) {
+          return `${said}, but the server refused it (${answer.status})`;
+        }
+        const { path } = (await answer.json()) as { path: string };
+        return `${said} — written to ${path}`;
+      } catch {
+        // No development server behind the page, which is every build but the
+        // one being worked on.
+        return `${said}, but there is no development server to write it to`;
+      }
     },
     setShowStats: (on) => {
       const next = on ?? !showStats();
@@ -1112,7 +1201,31 @@ export const createVoxelscape = ({
     reportGauges();
   };
 
+  // Marking a moment has to be possible without opening the console: by the
+  // time the console is open the pointer is unlocked, a second has passed and
+  // whatever was on screen is often no longer there. The console's own command
+  // stays, for a mark worth a sentence.
+  if (__PERF__) {
+    window.addEventListener("keydown", (event) => {
+      if (
+        event.code !== "KeyM" ||
+        !event.shiftKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        isEditableTarget(event) ||
+        !walkTrace.recording
+      ) {
+        return;
+      }
+      event.preventDefault();
+      walkTrace.mark("");
+      onNotice?.(`marked ${walkTrace.marked}`);
+    });
+  }
+
   const mount = (canvas: HTMLCanvasElement): (() => void) => {
+    mountedCanvas = canvas;
     const loop = createRenderLoop({
       canvas,
       scene,
@@ -1125,6 +1238,7 @@ export const createVoxelscape = ({
       clearColor: () => skyColor,
       beforeRender: (renderer, camera) =>
         world.renderer.occlusionFrame(renderer, camera),
+      afterRender: (drawn) => walkTrace.takePicture(drawn),
       describeStats: () =>
         `tris: ${world.renderer.triangleCount.toLocaleString()} | uploaded: ${world.renderer.lastTickUploadBytes.toLocaleString()} B | occluded: ${world.renderer.occlusions}`,
     });

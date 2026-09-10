@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import solid from "vite-plugin-solid";
+import { walkTraceEndpoint } from "./tools/walk-trace-endpoint";
 
 export default defineConfig(({ mode, command }) => ({
   base: "./",
@@ -30,7 +31,7 @@ export default defineConfig(({ mode, command }) => ({
     // tree-shakes away, so it lands beside `dist` rather than replacing it.
     outDir: mode === "bench" ? "dist-bench" : "dist",
   },
-  plugins: [solid({ ssr: false })],
+  plugins: [solid({ ssr: false }), walkTraceEndpoint()],
   worker: {
     // Every worker in the app is a module worker (`new Worker(..., { type:
     // "module" })`), and one of them runs the editor's language service, which
