@@ -9,6 +9,7 @@
 import { createQuickJSSandbox } from "./quickjs-sandbox";
 import { EventLog } from "./event-log";
 import { parseEffect, type ParsedEffect } from "./effects";
+import { ScriptInventory } from "./script-items";
 import { bundlePlaceProject } from "./bundle";
 import type { ScriptSandbox } from "./sandbox";
 import type { ScriptEventPayload } from "./events";
@@ -17,10 +18,36 @@ import type { ScriptEventPayload } from "./events";
 export interface ScriptedNpc {
   id: string;
   name: string;
+  /** The place model file the NPC wears, or "" for the world's own pick. */
+  model: string;
   /** Feet position, in world units; the renderer stands a figure on it. */
   x: number;
   y: number;
   z: number;
+}
+
+/** One scripted prop: where it stands, and which place model it wears. */
+export interface ScriptedProp {
+  id: string;
+  /** The model file the prop wears, as the place's manifest names it. */
+  model: string;
+  name: string;
+  /** Feet position, in world units. */
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  height: number;
+  /** Whether the prop blocks the player rather than being walked through. */
+  solid: boolean;
+}
+
+/** One named box a script watches the players move through. */
+export interface ScriptZone {
+  id: string;
+  name: string;
+  min: [number, number, number];
+  max: [number, number, number];
 }
 
 /** The dialog one player is currently in, as the script last set it. */
@@ -45,6 +72,21 @@ export interface ScriptHostParams {
   onDialog?: (player: string, state: DialogState | null) => void;
   /** Called when a step could not run, or the script logged a line. */
   onNotice?: (message: string) => void;
+  /** Called when `player`'s game reaches an ending, or null to close it. */
+  onEnding?: (
+    player: string,
+    state: { title: string; text: string } | null,
+  ) => void;
+  /** Called when `player`'s game asks to start over. */
+  onRestart?: (player: string) => void;
+  /** Called when the script pins, jumps, or releases the day-night clock. */
+  onTime?: (command: {
+    seconds?: number;
+    speed?: number;
+    clear?: boolean;
+  }) => void;
+  /** Called when a player is shown a line with no figure speaking it. */
+  onNarrate?: (player: string, line: { name: string; text: string }) => void;
 }
 
 /**
@@ -62,10 +104,30 @@ export class ScriptHost {
     state: DialogState | null,
   ) => void;
   private readonly onNotice?: (message: string) => void;
+  private readonly onEnding?: (
+    player: string,
+    state: { title: string; text: string } | null,
+  ) => void;
+  private readonly onRestart?: (player: string) => void;
+  private readonly onTime?: (command: {
+    seconds?: number;
+    speed?: number;
+    clear?: boolean;
+  }) => void;
+  private readonly onNarrate?: (
+    player: string,
+    line: { name: string; text: string },
+  ) => void;
 
+  /** The items this place's script defines and the local player carries. */
+  readonly inventory = new ScriptInventory();
   private readonly log = new EventLog();
   private readonly sent = new Set<string>();
   private readonly npcs = new Map<string, ScriptedNpc>();
+  private readonly props = new Map<string, ScriptedProp>();
+  private readonly zones = new Map<string, ScriptZone>();
+  /** Which zones each player currently stands in, keyed by player. */
+  private readonly playerZones = new Map<string, Set<string>>();
   private readonly dialogs = new Map<string, DialogState>();
   private loaded = false;
   private sequence = 0;
@@ -78,6 +140,10 @@ export class ScriptHost {
     this.onToast = params.onToast;
     this.onDialog = params.onDialog;
     this.onNotice = params.onNotice;
+    this.onEnding = params.onEnding;
+    this.onRestart = params.onRestart;
+    this.onTime = params.onTime;
+    this.onNarrate = params.onNarrate;
     this.ready = createQuickJSSandbox({
       seed: params.seed,
       now: params.now,
@@ -92,6 +158,16 @@ export class ScriptHost {
   /** The NPC with `id`, or null when the script has not placed one. */
   npc(id: string): ScriptedNpc | null {
     return this.npcs.get(id) ?? null;
+  }
+
+  /** Every prop the script has placed in the world. */
+  get propList(): ScriptedProp[] {
+    return [...this.props.values()];
+  }
+
+  /** The prop with `id`, or null when the script has not placed one. */
+  prop(id: string): ScriptedProp | null {
+    return this.props.get(id) ?? null;
   }
 
   /** The dialog `player` is in, or null when they are not talking. */
@@ -150,9 +226,68 @@ export class ScriptHost {
     await this.step();
   }
 
+  /**
+   * The player used the NPC or prop with `entityId`, optionally while holding
+   * `item` — a fact the script's rules answer, such as a vending machine taking
+   * a soda.
+   */
+  async use(entityId: string, player: string, item = ""): Promise<void> {
+    this.assertAlive();
+    this.author({ kind: "entity-used", entityId, item }, player);
+    await this.step();
+  }
+
+  /** The player used the item with `itemId` on its own, away from any object. */
+  async useItem(itemId: string, player: string): Promise<void> {
+    this.assertAlive();
+    this.author({ kind: "item-used", item: itemId }, player);
+    await this.step();
+  }
+
+  /**
+   * Tells the host where a player now stands, so it can author the
+   * `zone-entered` and `zone-left` facts for the zones they crossed. A step
+   * that crosses nothing is not run, so walking around costs nothing.
+   */
+  async movePlayer(
+    player: string,
+    x: number,
+    y: number,
+    z: number,
+  ): Promise<void> {
+    this.assertAlive();
+    const inside = new Set<string>();
+    for (const zone of this.zones.values()) {
+      if (
+        x >= zone.min[0] &&
+        x <= zone.max[0] &&
+        y >= zone.min[1] &&
+        y <= zone.max[1] &&
+        z >= zone.min[2] &&
+        z <= zone.max[2]
+      ) {
+        inside.add(zone.id);
+      }
+    }
+    const was = this.playerZones.get(player) ?? new Set<string>();
+    const entered = [...inside].filter((id) => !was.has(id));
+    const left = [...was].filter((id) => !inside.has(id));
+    if (entered.length === 0 && left.length === 0) {
+      return;
+    }
+    this.playerZones.set(player, inside);
+    for (const id of left) {
+      this.author({ kind: "zone-left", zoneId: id }, player);
+    }
+    for (const id of entered) {
+      this.author({ kind: "zone-entered", zoneId: id }, player);
+    }
+    await this.step();
+  }
+
   /** One line about the script and what it has created, for a debug console. */
   describe(): string {
-    return `script: ${this.loaded ? "loaded" : "not loaded"} · ${this.npcs.size} NPC(s), ${this.dialogs.size} dialog(s)${
+    return `script: ${this.loaded ? "loaded" : "not loaded"} · ${this.npcs.size} NPC(s), ${this.props.size} prop(s), ${this.dialogs.size} dialog(s)${
       this.problem === undefined ? "" : ` — ${this.problem}`
     }`;
   }
@@ -217,18 +352,51 @@ export class ScriptHost {
   private apply(effect: ParsedEffect): void {
     switch (effect.tag) {
       case "npc": {
-        const { id, x, z, name } = effect.payload;
+        const { id, x, y, z, name, model } = effect.payload;
         this.npcs.set(id, {
           id,
           name: name ?? "NPC",
+          model: model ?? "",
           x,
-          y: this.heightAt(x, z),
+          y: y ?? this.heightAt(x, z),
           z,
         });
         break;
       }
       case "npc-remove":
         this.npcs.delete(effect.payload.id);
+        break;
+      case "prop": {
+        const { id, model, x, y, z, name, yaw, height, solid } = effect.payload;
+        this.props.set(id, {
+          id,
+          model,
+          name: name ?? id,
+          x,
+          y: y ?? this.heightAt(x, z),
+          z,
+          yaw: yaw ?? 0,
+          height: height ?? 2,
+          solid: solid ?? false,
+        });
+        break;
+      }
+      case "prop-remove":
+        this.props.delete(effect.payload.id);
+        break;
+      case "item-define":
+        this.inventory.define(effect.payload);
+        break;
+      case "item-give":
+        this.inventory.give(effect.payload.item, effect.payload.count);
+        break;
+      case "item-take":
+        this.inventory.take(effect.payload.item, effect.payload.count);
+        break;
+      case "item-hold":
+        this.inventory.hold(
+          effect.payload.item === "" ? null : effect.payload.item,
+        );
         break;
       case "toast":
         this.onToast?.(effect.payload.player, effect.payload.text);
@@ -248,6 +416,36 @@ export class ScriptHost {
       case "dialog-close":
         this.dialogs.delete(effect.payload.player);
         this.notifyDialog(effect.payload.player, null);
+        break;
+      case "zone": {
+        const { id, name, min, max } = effect.payload;
+        this.zones.set(id, { id, name: name ?? id, min, max });
+        break;
+      }
+      case "zone-remove":
+        this.zones.delete(effect.payload.id);
+        break;
+      case "narrate":
+        this.onNarrate?.(effect.payload.player, {
+          name: effect.payload.name,
+          text: effect.payload.text,
+        });
+        break;
+      case "ending":
+        this.onEnding?.(effect.payload.player, {
+          title: effect.payload.title,
+          text: effect.payload.text,
+        });
+        break;
+      case "restart":
+        this.onRestart?.(effect.payload.player);
+        break;
+      case "time":
+        this.onTime?.({
+          seconds: effect.payload.seconds,
+          speed: effect.payload.speed,
+          clear: effect.payload.clear,
+        });
         break;
     }
   }

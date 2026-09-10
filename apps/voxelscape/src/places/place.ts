@@ -23,6 +23,10 @@ export const MAX_PLACE_SPAWN = 10_000_000;
 export const MAX_PLACE_SCRIPTS = 64;
 /** The longest one script file name may be. */
 export const MAX_SCRIPT_FILE = 256;
+/** The most model files one place may carry. */
+export const MAX_PLACE_MODELS = 64;
+/** The longest one model file name may be. */
+export const MAX_MODEL_FILE = 256;
 
 /** Where a place's player starts, in world units; the ground height is derived. */
 export type PlaceSpawn = [number, number, number];
@@ -41,6 +45,8 @@ export type PlaceManifest = {
   spawn: PlaceSpawn;
   /** The script files in the zip, named relative to its root. */
   scripts?: string[];
+  /** The rm-stacker model files in the zip, named relative to its root. */
+  models?: string[];
 };
 
 /**
@@ -112,19 +118,36 @@ export const isPlaceManifest = (v: unknown): v is PlaceManifest => {
   if (!isSpawn(r.spawn)) {
     return false;
   }
-  if (r.scripts === undefined) {
+  return (
+    isFileList(r.scripts, MAX_PLACE_SCRIPTS, MAX_SCRIPT_FILE) &&
+    isFileList(r.models, MAX_PLACE_MODELS, MAX_MODEL_FILE)
+  );
+};
+
+/**
+ * Whether `v` is a list of project-relative file names this world will read,
+ * or nothing at all. A name may not be absolute or climb out of the zip with a
+ * parent segment, whatever a hand-written manifest says.
+ */
+const isFileList = (
+  v: unknown,
+  maxCount: number,
+  maxLength: number,
+): boolean => {
+  if (v === undefined) {
     return true;
   }
-  if (!Array.isArray(r.scripts) || r.scripts.length > MAX_PLACE_SCRIPTS) {
-    return false;
-  }
-  return r.scripts.every(
-    (file) =>
-      typeof file === "string" &&
-      file.length >= 1 &&
-      file.length <= MAX_SCRIPT_FILE &&
-      !file.startsWith("/") &&
-      !file.includes(".."),
+  return (
+    Array.isArray(v) &&
+    v.length <= maxCount &&
+    v.every(
+      (file) =>
+        typeof file === "string" &&
+        file.length >= 1 &&
+        file.length <= maxLength &&
+        !file.startsWith("/") &&
+        !file.includes(".."),
+    )
   );
 };
 

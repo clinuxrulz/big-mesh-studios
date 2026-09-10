@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { NPC_TALK_REACH, pickNpc } from "./npc-pick";
+import { FIGURE_REACH, pickFigure, pickNpc } from "./figure-pick";
 
 const npc = (
   id: string,
@@ -24,7 +24,7 @@ describe("pickNpc", () => {
 
   it("misses an NPC that is out of reach", () => {
     expect(
-      pickNpc(eye, [-1, 0, 0], [npc("gone", eye[0] - (NPC_TALK_REACH + 1), 0)]),
+      pickNpc(eye, [-1, 0, 0], [npc("gone", eye[0] - (FIGURE_REACH + 1), 0)]),
     ).toBeNull();
   });
 
@@ -42,5 +42,16 @@ describe("pickNpc", () => {
   it("misses a body when the ray passes above its head", () => {
     const short = npc("short", 4, 0);
     expect(pickNpc([4, 2.6, 0], [0, 0, -1], [short])).toBeNull();
+  });
+});
+
+describe("pickFigure", () => {
+  it("uses a wider body when the figure's model is wider", () => {
+    const fridge = { id: "fridge", x: 2.5, y: 0, z: 0, half: 1.2, height: 3 };
+    // A ray down the side of the default body but inside the fridge's box.
+    expect(pickFigure([4, 1.6, 1.1], [-1, 0, 0], [fridge])?.id).toBe("fridge");
+    expect(
+      pickFigure([4, 1.6, 1.1], [-1, 0, 0], [npc("npc", 2.5, 0)]),
+    ).toBeNull();
   });
 });

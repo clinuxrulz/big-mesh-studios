@@ -5,6 +5,57 @@ import { letterAudio } from "./letter-audio";
 
 /** How long between one revealed letter and the next, in milliseconds. */
 const LETTER_MS = 36;
+/** How long a narration line stays on screen before it fades, in milliseconds. */
+const NARRATION_MS = 6_000;
+
+/**
+ * The line a script shows with no figure speaking it — the inner voice that
+ * tells the player what they are thinking. It is not a dialog: no options, and
+ * it clears itself after a moment so play carries on.
+ */
+export const Narration: Component = () => {
+  const voxelscape = useVoxelscape();
+  const [line, setLine] = createSignal<{ name: string; text: string } | null>(
+    null,
+  );
+
+  onSettled(() => {
+    let last: { name: string; text: string } | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let frame = 0;
+    const tick = (): void => {
+      const current = voxelscape.narration();
+      if (current !== last) {
+        last = current;
+        setLine(current);
+        if (timer !== undefined) {
+          clearTimeout(timer);
+          timer = undefined;
+        }
+        if (current !== null) {
+          timer = setTimeout(() => voxelscape.dismissNarration(), NARRATION_MS);
+        }
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(frame);
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+    };
+  });
+
+  return (
+    <Show when={line() !== null}>
+      <div class={styles.narration}>
+        <div class={styles["narration-name"]}>{line()!.name}</div>
+        <div class={styles["narration-text"]}>{line()!.text}</div>
+      </div>
+    </Show>
+  );
+};
 
 /**
  * The dialog overlay: an NPC's words typed out a letter at a time, each letter
@@ -79,8 +130,11 @@ export const DialogOverlay: Component = () => {
 
   return (
     <div class={styles.overlay}>
+      <Narration />
       <Show when={voxelscape.dialog() === null && voxelscape.npcAim() !== null}>
-        <div class={styles.hint}>{voxelscape.npcAim()!.name} — tap to talk</div>
+        <div class={styles.hint}>
+          {voxelscape.npcAim()!.name} — tap to {voxelscape.npcAim()!.action}
+        </div>
       </Show>
       <Show when={voxelscape.dialog() !== null}>
         <div class={styles.bubble}>

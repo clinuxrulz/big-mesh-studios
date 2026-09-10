@@ -16,14 +16,18 @@ export const MAIN_SCRIPT_FILE = "main.ts";
 
 /** The source a new place begins editing from, typed the way a place script expects to be. */
 export const STARTER_SCRIPT = `// Your place's script. Export a bmsTick function and the world will call it
-// each step with the shared clock and the events since the last step. The
-// TypeScript types are stripped when the script loads, so the panel's
-// squiggles are the whole of the type-check; imports may only reach this
-// place's own script files. Run /script:demo for a working sample.
+// each step with the shared clock and the events since the last step. Export an
+// optional bmsPlan too and the world calls it once, before generating terrain,
+// to stamp roads and houses into the ground: it returns JSON shapes, and the
+// block ids it may use are on engine.blocks. The TypeScript types are stripped
+// when the script loads, so the panel's squiggles are the whole of the
+// type-check; imports may only reach this place's own script files. Run
+// /script:demo for a working sample.
 declare const engine: {
   dispatch(tag: string, payload: string): void;
   log(line: string): void;
   now(): number;
+  blocks: Record<string, number>;
 };
 
 let started = false;
@@ -52,12 +56,14 @@ export function bmsTick(clockMs: number, eventsJson: string): void {
 `;
 
 /**
- * One working place: the manifest at the top of its zip and every script file
- * it names, keyed by the manifest-relative path.
+ * One working place: the manifest at the top of its zip, every script file it
+ * names as text, and every rm-stacker model it carries as bytes, each keyed by
+ * the manifest-relative path.
  */
 export interface PlaceProject {
   manifest: PlaceManifest;
   scripts: Record<string, string>;
+  models: Record<string, Uint8Array>;
 }
 
 /** A new place project, seeded and starting from a one-file starter script. */
@@ -69,23 +75,33 @@ export const emptyPlaceProject = (seed: number): PlaceProject => ({
     scripts: [MAIN_SCRIPT_FILE],
   },
   scripts: { [MAIN_SCRIPT_FILE]: STARTER_SCRIPT },
+  models: {},
 });
 
-/** The zip a project is published as: the manifest plus each script file. */
+/** The zip a project is published as: the manifest plus each script and model file. */
 export const writePlaceZip = async (project: PlaceProject): Promise<Blob> => {
   const zip = new JSZip();
+  const scriptNames = Object.keys(project.scripts);
+  const modelNames = Object.keys(project.models);
   const manifest: PlaceManifest = {
     ...project.manifest,
     // The script list is derived from the file map, so the two can never drift
-    // apart in the artifact a reader opens.
-    scripts: Object.keys(project.scripts),
+    // apart in the artifact a reader opens. A place with no models carries no
+    // model list at all, so an older reader sees exactly the manifest it did.
+    scripts: scriptNames,
   };
+  if (modelNames.length > 0) {
+    manifest.models = modelNames;
+  }
   zip.file(PLACE_MANIFEST_FILE, JSON.stringify(manifest));
   for (const [name, source] of Object.entries(project.scripts)) {
     zip.file(name, source);
   }
-  const bytes = await zip.generateAsync({ type: "arraybuffer" });
-  return new Blob([bytes], { type: PLACE_MIME_TYPE });
+  for (const [name, bytes] of Object.entries(project.models)) {
+    zip.file(name, bytes);
+  }
+  const generated = await zip.generateAsync({ type: "arraybuffer" });
+  return new Blob([generated], { type: PLACE_MIME_TYPE });
 };
 
 /**
@@ -98,9 +114,15 @@ export const readPlaceProject = async (zip: Blob): Promise<PlaceProject> => {
   const loaded = await JSZip.loadAsync(await zip.arrayBuffer());
   const scripts: Record<string, string> = {};
   for (const name of manifest.scripts ?? []) {
-    // readPlaceZip has already refused a zip missing a named script, so this
+    // readPlaceZip has already refused a zip missing a named file, so this
     // file is there to read.
     scripts[name] = await loaded.file(name)!.async("text");
   }
-  return { manifest, scripts };
+  const models: Record<string, Uint8Array> = {};
+  for (const name of manifest.models ?? []) {
+    models[name] = new Uint8Array(
+      await loaded.file(name)!.async("arraybuffer"),
+    );
+  }
+  return { manifest, scripts, models };
 };

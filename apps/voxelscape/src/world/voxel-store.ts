@@ -18,6 +18,10 @@ export const VOXEL_CLOUD = 5;
 export const VOXEL_LAVA = 6;
 export const VOXEL_LOG = 7;
 export const VOXEL_LEAVES = 8;
+export const VOXEL_BRICK = 25;
+export const VOXEL_WOOD = 26;
+export const VOXEL_ICE = 27;
+export const VOXEL_GREYSTONE = 28;
 
 // Flowing water and lava. A fluid voxel is its kind's source id at level 0
 // (a full, stationary body cell) or one of the level ids below, level k being

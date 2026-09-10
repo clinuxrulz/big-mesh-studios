@@ -228,6 +228,7 @@ function __require(id) {
 (function () {
   var entry = __require(${entryId});
   globalThis.bmsTick = typeof entry.bmsTick === "function" ? entry.bmsTick : undefined;
+  globalThis.bmsPlan = typeof entry.bmsPlan === "function" ? entry.bmsPlan : undefined;
   if (typeof globalThis.bmsTick !== "function") {
     throw new Error('the entry script "${entry}" must export a bmsTick function');
   }

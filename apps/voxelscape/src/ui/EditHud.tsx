@@ -10,7 +10,7 @@ import { spriteIconStyle } from "./item-icon";
 import { createMediaQuery } from "@big-mesh-studios/utils/create-media-query";
 
 export const EditHud: Component = () => {
-  const { inventory, editStatus, target, icons } = useVoxelscape();
+  const { inventory, editStatus, target, icons, scriptItem } = useVoxelscape();
   const coarsePointer = createMediaQuery("(any-pointer: coarse)");
   const [items, setItems] = createSignal(inventory.items());
   const [selected, setSelected] = createSignal(inventory.selectedId);
@@ -66,9 +66,13 @@ export const EditHud: Component = () => {
         </For>
         <div class={styles.status}>
           {editStatus() ||
-            (coarsePointer()
-              ? "hold world to dig  •  tap a monster to strike"
-              : "click to strike  •  right-click to use")}
+            (scriptItem() !== null
+              ? `holding ${scriptItem()!.name} — ${
+                  coarsePointer() ? "tap" : "press E"
+                } to use`
+              : coarsePointer()
+                ? "hold world to dig  •  tap a monster to strike"
+                : "click to strike  •  right-click to use")}
         </div>
       </div>
     </div>

@@ -42,6 +42,32 @@ describe("a QuickJS sandbox", () => {
     sandbox.dispose();
   });
 
+  it("runs an optional bmsPlan and exposes the block ids", async () => {
+    const sandbox = await make();
+    sandbox.load(`
+      function bmsPlan(contextJson) {
+        var context = JSON.parse(contextJson);
+        return JSON.stringify([
+          { kind: "box", min: [0, 0, 0], max: [1, 1, 1], id: engine.blocks.brick },
+        ]);
+      }
+    `);
+    const text = sandbox.plan(
+      JSON.stringify({ seed: 3, region: { min: [0, 0, 0], max: [8, 8, 8] } }),
+    );
+    expect(JSON.parse(text)).toEqual([
+      { kind: "box", min: [0, 0, 0], max: [1, 1, 1], id: 25 },
+    ]);
+    sandbox.dispose();
+  });
+
+  it("answers an empty plan when the script defines no bmsPlan", async () => {
+    const sandbox = await make();
+    sandbox.load(`function bmsTick() {}`);
+    expect(sandbox.plan("{}")).toBe("");
+    sandbox.dispose();
+  });
+
   it("delivers the events added since the last step", async () => {
     const sandbox = await make();
     sandbox.load(`

@@ -1,6 +1,7 @@
 // The assembled world, and the context its UI components read it from
 export {
   createVoxelscape,
+  type PlaceBoot,
   type Voxelscape,
   type VoxelscapeConfig,
 } from "./voxelscape/create-voxelscape";
@@ -49,14 +50,26 @@ export { DEFAULT_REACH, pickVoxel, type VoxelPick } from "./world/picker";
 export {
   fillStore,
   VOXEL_AIR,
+  VOXEL_BRICK,
   VOXEL_CLOUD,
   VOXEL_DIRT,
   VOXEL_GRASS,
+  VOXEL_GREYSTONE,
+  VOXEL_ICE,
   VOXEL_STONE,
   VOXEL_WATER,
+  VOXEL_WOOD,
   VoxelStore,
   type FillStoreFn,
 } from "./world/voxel-store";
+export {
+  stampStructures,
+  type PlanBox,
+  type PlanHouse,
+  type PlanRoad,
+  type PlanShape,
+  type StructurePlan,
+} from "./world/structure-fill";
 
 // Renderers and Atlas
 export {
@@ -218,6 +231,13 @@ export {
 } from "./places/place";
 export { readPlaceZip } from "./places/package";
 export {
+  compilePlacePlan,
+  isStructurePlan,
+  parseStructurePlan,
+  planRegionAround,
+  type PlanContext,
+} from "./places/plan";
+export {
   createDraftPersistence,
   type DraftPersistence,
 } from "./places/draft-persistence";
@@ -229,6 +249,12 @@ export {
   writePlaceZip,
   type PlaceProject,
 } from "./places/project";
+export {
+  BUILTIN_DEMOS,
+  builtinDemo,
+  loadBuiltinDemo,
+  type BuiltinDemo,
+} from "./places/demos";
 export {
   createPlaceLibrary,
   createPlacePublisher,

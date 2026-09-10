@@ -74,3 +74,31 @@
   font-size: 15px;
   cursor: pointer;
 }
+
+.narration {
+  position: absolute;
+  bottom: 9rem;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 34rem;
+  padding: 0.7rem 1rem;
+  background: rgba(10, 12, 16, 0.7);
+  color: #fff;
+  border-radius: 0.6rem;
+  text-align: center;
+  pointer-events: none;
+}
+
+.narration-name {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
+  margin-bottom: 0.25rem;
+}
+
+.narration-text {
+  font-size: 16px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}

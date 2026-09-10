@@ -1,7 +1,7 @@
 import type { Group } from "@random-mesh/rmsl/scene";
 import { TriangleRenderer } from "../renderers/triangle-renderer";
 import { loadVoxelTiles } from "../renderers/tile-loader";
-import type { VoxelTileConfig } from "../renderers/atlas";
+import type { VoxelTileConfig, VoxelTiles } from "../renderers/atlas";
 import { ChunkSphere } from "./chunk-sphere";
 import { WorldWorkerPool } from "./worker-pool";
 import {
@@ -26,6 +26,7 @@ import {
   type WorldBlock,
 } from "./level-data";
 import { heightAt as terrainHeightAt, type TerrainConfig } from "./noise";
+import type { StructurePlan } from "./structure-fill";
 import { VOXEL_AIR, VOXEL_LAVA, VOXEL_WATER, isFluidId } from "./voxel-store";
 
 /** Water absorption used by the water pass and the underwater tint alike. */
@@ -50,7 +51,17 @@ export interface VoxelWorldConfig {
   /** Radius of the block window in Y, in chunks; defaults to `chunkRadius`. */
   chunkRadiusY?: number;
   terrain: TerrainConfig;
-  /** When true, only surface voxels are written into each block's GPU chunks instead of the full solid volume. */
+  /**
+   * Extra voxel ids and the spritesheet tiles their faces show, merged over the
+   * built-in `VOXEL_TILES` when the tile sheet loads. A place that adds block
+   * ids of its own names their tiles here.
+   */
+  customVoxelTiles?: Record<number, VoxelTiles>;
+  /**
+   * Structures every block is stamped with, over its generated terrain. A
+   * place's script writes its roads and houses into this plan.
+   */
+  structures?: StructurePlan;
   /** Where the player starts, in world units. The window fills outward from here. */
   spawn: Dim3;
   /**
@@ -164,6 +175,8 @@ export const createVoxelWorld = ({
   chunkRadius,
   chunkRadiusY = chunkRadius,
   terrain,
+  customVoxelTiles,
+  structures,
   spawn,
   onInitialDraw,
   createWorker,
@@ -195,6 +208,7 @@ export const createVoxelWorld = ({
     radius: chunkRadius,
     yRadius: chunkRadiusY,
     terrain,
+    structures,
     onBlockChanged: (i, meshes) => {
       // Recorded before the renderer is told, because a block only counts as
       // drawn once its geometry is built and `onBlockMeshed` fires from
@@ -388,7 +402,9 @@ export const createVoxelWorld = ({
   // — and this is the block the player is shown first. The spritesheet is one
   // local asset, and waiting for it costs a fraction of what the block itself
   // cost. If it never arrives, the block is drawn flat blue instead.
-  void loadVoxelTiles(renderer).then(() => renderer.meshNow(spawnIndex));
+  void loadVoxelTiles(renderer, { customVoxelTiles }).then(() =>
+    renderer.meshNow(spawnIndex),
+  );
   // Re-apply any previously persisted edits to the freshly built initial
   // blocks, once the overlay has loaded.
   void editPersistence.load().then(reapplyEdits);

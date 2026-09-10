@@ -15,11 +15,26 @@ const fresh = async (): Promise<{
   toasts: Array<{ player: string; text: string }>;
   dialogs: Array<{ player: string; state: DialogState | null }>;
   notices: string[];
+  endings: Array<{
+    player: string;
+    state: { title: string; text: string } | null;
+  }>;
+  restarts: string[];
+  narrations: Array<{ player: string; line: { name: string; text: string } }>;
 }> => {
   clockMs = 0;
   const toasts: Array<{ player: string; text: string }> = [];
   const dialogs: Array<{ player: string; state: DialogState | null }> = [];
   const notices: string[] = [];
+  const endings: Array<{
+    player: string;
+    state: { title: string; text: string } | null;
+  }> = [];
+  const restarts: string[] = [];
+  const narrations: Array<{
+    player: string;
+    line: { name: string; text: string };
+  }> = [];
   const h = new ScriptHost({
     seed: 5,
     now: clock,
@@ -27,8 +42,11 @@ const fresh = async (): Promise<{
     onToast: (player, text) => toasts.push({ player, text }),
     onDialog: (player, state) => dialogs.push({ player, state }),
     onNotice: (message) => notices.push(message),
+    onEnding: (player, state) => endings.push({ player, state }),
+    onRestart: (player) => restarts.push(player),
+    onNarrate: (player, line) => narrations.push({ player, line }),
   });
-  return { host: h, toasts, dialogs, notices };
+  return { host: h, toasts, dialogs, notices, endings, restarts, narrations };
 };
 
 describe("a script host", () => {
@@ -43,6 +61,228 @@ describe("a script host", () => {
       z: 12,
       y: 10,
     });
+    host.dispose();
+  });
+
+  it("places a prop and answers when the player uses it", async () => {
+    const { host, toasts } = await fresh();
+    await loadProject(
+      host,
+      `
+      var started = false;
+      export function bmsTick(clockMs, eventsJson) {
+        if (!started) {
+          started = true;
+          engine.dispatch("prop", JSON.stringify({
+            id: "fridge", model: "fridge.zip", x: 2, z: 3, name: "Fridge", height: 3,
+          }));
+        }
+        var events = JSON.parse(eventsJson);
+        for (var i = 0; i < events.length; i++) {
+          if (events[i].kind === "entity-used") {
+            engine.dispatch("toast", JSON.stringify({
+              player: "", text: "opened " + events[i].entityId + " with " + events[i].item,
+            }));
+          }
+        }
+      }
+      `,
+    );
+    expect(host.prop("fridge")).toMatchObject({
+      id: "fridge",
+      model: "fridge.zip",
+      name: "Fridge",
+      x: 2,
+      z: 3,
+      y: 10,
+      yaw: 0,
+      height: 3,
+    });
+    await host.use("fridge", "", "cola");
+    expect(toasts.map((t) => t.text)).toEqual(["opened fridge with cola"]);
+    host.dispose();
+  });
+
+  it("gives and holds a script item, and answers when it is used", async () => {
+    const { host, toasts } = await fresh();
+    await loadProject(
+      host,
+      `
+      var started = false;
+      export function bmsTick(clockMs, eventsJson) {
+        if (!started) {
+          started = true;
+          engine.dispatch("item-define", JSON.stringify({
+            id: "chips", name: "Chips", sprite: "apple", stackable: true,
+          }));
+          engine.dispatch("item-give", JSON.stringify({ player: "", item: "chips", count: 1 }));
+          engine.dispatch("item-hold", JSON.stringify({ player: "", item: "chips" }));
+        }
+        var events = JSON.parse(eventsJson);
+        for (var i = 0; i < events.length; i++) {
+          if (events[i].kind === "item-used") {
+            engine.dispatch("item-take", JSON.stringify({ player: "", item: events[i].item, count: 1 }));
+            engine.dispatch("toast", JSON.stringify({ player: "", text: "ate " + events[i].item }));
+          }
+        }
+      }
+      `,
+    );
+    expect(host.inventory.heldItem()).toMatchObject({
+      id: "chips",
+      name: "Chips",
+    });
+    await host.useItem("chips", "");
+    expect(toasts.map((t) => t.text)).toEqual(["ate chips"]);
+    expect(host.inventory.count("chips")).toBe(0);
+    expect(host.inventory.heldId).toBeNull();
+    host.dispose();
+  });
+
+  it("reports an ending and a restart a script asks for", async () => {
+    const { host, endings } = await fresh();
+    await loadProject(
+      host,
+      `
+      export function bmsTick(clockMs, eventsJson) {
+        var events = JSON.parse(eventsJson);
+        for (var i = 0; i < events.length; i++) {
+          if (events[i].kind === "item-used") {
+            engine.dispatch("ending", JSON.stringify({
+              player: "", title: "Chips", text: "You ate the chips.",
+            }));
+          }
+        }
+      }
+      `,
+    );
+    await host.useItem("chips", "");
+    expect(endings).toEqual([
+      { player: "", state: { title: "Chips", text: "You ate the chips." } },
+    ]);
+
+    // A fresh script that restarts on a talk.
+    const again = await fresh();
+    await loadProject(
+      again.host,
+      `
+      export function bmsTick(clockMs, eventsJson) {
+        var events = JSON.parse(eventsJson);
+        for (var i = 0; i < events.length; i++) {
+          if (events[i].kind === "npc-talk") {
+            engine.dispatch("restart", JSON.stringify({ player: "" }));
+          }
+        }
+      }
+      `,
+    );
+    await again.host.talk("sable", "");
+    expect(again.restarts).toEqual([""]);
+    host.dispose();
+    again.host.dispose();
+  });
+
+  it("tells the script which zones the player moves through", async () => {
+    const { host, toasts } = await fresh();
+    await loadProject(
+      host,
+      `
+      var started = false;
+      export function bmsTick(clockMs, eventsJson) {
+        if (!started) {
+          started = true;
+          engine.dispatch("zone", JSON.stringify({
+            id: "kitchen", name: "Kitchen", min: [-5, 0, -5], max: [5, 5, 5],
+          }));
+        }
+        var events = JSON.parse(eventsJson);
+        for (var i = 0; i < events.length; i++) {
+          var e = events[i];
+          if (e.kind === "zone-entered") {
+            engine.dispatch("toast", JSON.stringify({ player: "", text: "in " + e.zoneId }));
+          } else if (e.kind === "zone-left") {
+            engine.dispatch("toast", JSON.stringify({ player: "", text: "out " + e.zoneId }));
+          }
+        }
+      }
+      `,
+    );
+    expect(toasts).toEqual([]);
+    await host.movePlayer("", 0, 0, 0);
+    expect(toasts.map((t) => t.text)).toEqual(["in kitchen"]);
+    // Standing still in the same zone says nothing.
+    await host.movePlayer("", 1, 0, 1);
+    expect(toasts.map((t) => t.text)).toEqual(["in kitchen"]);
+    await host.movePlayer("", 100, 0, 0);
+    expect(toasts.map((t) => t.text)).toEqual(["in kitchen", "out kitchen"]);
+    host.dispose();
+  });
+
+  it("shows a narration line with no figure speaking it", async () => {
+    const { host, narrations } = await fresh();
+    await loadProject(
+      host,
+      `
+      var started = false;
+      export function bmsTick() {
+        if (!started) {
+          started = true;
+          engine.dispatch("narrate", JSON.stringify({
+            player: "", name: "You", text: "I am so hungry.",
+          }));
+        }
+      }
+      `,
+    );
+    expect(narrations).toEqual([
+      { player: "", line: { name: "You", text: "I am so hungry." } },
+    ]);
+    host.dispose();
+  });
+
+  it("passes the held item to a prop the player uses", async () => {
+    const { host, toasts } = await fresh();
+    await loadProject(
+      host,
+      `
+      export function bmsTick(clockMs, eventsJson) {
+        var events = JSON.parse(eventsJson);
+        for (var i = 0; i < events.length; i++) {
+          var e = events[i];
+          if (e.kind === "entity-used") {
+            engine.dispatch("toast", JSON.stringify({ player: "", text: e.entityId + " got " + e.item }));
+          }
+        }
+      }
+      `,
+    );
+    await host.use("vending", "", "cola");
+    expect(toasts.map((t) => t.text)).toEqual(["vending got cola"]);
+    await host.use("vending", "");
+    expect(toasts.map((t) => t.text)).toEqual([
+      "vending got cola",
+      "vending got ",
+    ]);
+    host.dispose();
+  });
+
+  it("places an NPC and a prop at an explicit height over the ground", async () => {
+    const { host } = await fresh();
+    await loadProject(
+      host,
+      `
+      var started = false;
+      export function bmsTick() {
+        if (!started) {
+          started = true;
+          engine.dispatch("npc", JSON.stringify({ id: "dad", x: 0, z: 0, y: 3, name: "Dad" }));
+          engine.dispatch("prop", JSON.stringify({ id: "bed", model: "bed.zip", x: 1, z: 1, y: 4, height: 1 }));
+        }
+      }
+      `,
+    );
+    expect(host.npc("dad")).toMatchObject({ y: 3 });
+    expect(host.prop("bed")).toMatchObject({ y: 4 });
     host.dispose();
   });
 

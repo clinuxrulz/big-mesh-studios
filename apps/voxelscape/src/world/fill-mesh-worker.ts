@@ -99,6 +99,7 @@ export async function* buildFillMeshResults(
       terrain: cfg.terrain,
       customFillStore,
       borderSizes: req.borderSizes?.[i],
+      structures: cfg.structures,
       into: lentArrays(req, i),
     });
     let terrain: MeshArrays = emptyMesh();
