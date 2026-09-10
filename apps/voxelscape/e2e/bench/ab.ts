@@ -85,7 +85,12 @@ const percent = (change: number): string =>
 const line = (metric: MetricComparison): string => {
   const range = (values: number[], middle: number): string =>
     `${show(middle, metric.unit)} [${show(Math.min(...values), metric.unit)}–${show(Math.max(...values), metric.unit)}]`;
-  return `  ${metric.name.padEnd(16)} ${range(metric.before, metric.beforeMiddle).padStart(26)} → ${range(metric.after, metric.afterMiddle).padStart(26)} ${percent(metric.change).padStart(8)}${metric.apart ? "  clear of the spread" : ""}`;
+  // A side that never recorded this has no numbers and no step to take from
+  // them; saying so is the whole of what the row has to report.
+  const side = (was: boolean, values: number[], middle: number): string =>
+    was ? range(values, middle) : "not measured";
+  const step = metric.change === null ? "" : percent(metric.change).padStart(8);
+  return `  ${metric.name.padEnd(16)} ${side(metric.beforeMeasured, metric.before, metric.beforeMiddle).padStart(26)} → ${side(metric.afterMeasured, metric.after, metric.afterMiddle).padStart(26)} ${step}${metric.apart ? "  clear of the spread" : ""}`;
 };
 
 /** The comparison as it reads in a terminal. */
@@ -112,7 +117,7 @@ export const formatAb = (report: AbReport): string => {
   lines.push("clear of the run-to-run spread:");
   for (const one of clear) {
     lines.push(
-      `  ${one.scenario.padEnd(8)} ${one.metric.name.padEnd(16)} ${show(one.metric.beforeMiddle, one.metric.unit)} → ${show(one.metric.afterMiddle, one.metric.unit)}  ${percent(one.metric.change)}`,
+      `  ${one.scenario.padEnd(8)} ${one.metric.name.padEnd(16)} ${show(one.metric.beforeMiddle, one.metric.unit)} → ${show(one.metric.afterMiddle, one.metric.unit)}  ${percent(one.metric.change ?? 0)}`,
     );
   }
   lines.push(

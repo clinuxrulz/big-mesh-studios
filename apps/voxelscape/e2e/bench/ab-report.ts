@@ -5,7 +5,7 @@
 // Nothing here decides that a change is good or bad. It decides one narrower
 // thing: whether a difference is larger than the disagreement between repeats
 // of the same commit, which is the only ground for reading it at all.
-import { metricsFor, phaseMetrics } from "./metrics.ts";
+import { measured, metricsFor, phaseMetrics } from "./metrics.ts";
 import type { Metric, Unit } from "./metrics.ts";
 import { describePower, samePower } from "./power.ts";
 import type { PowerState } from "./power.ts";
@@ -30,14 +30,22 @@ export interface Side {
 export interface MetricComparison {
   name: string;
   unit: Unit;
+  /**
+   * Whether each side's run carried what this reads. A commit from before a
+   * value was recorded has no number for it, and the difference between that
+   * and a measured zero is the difference between a value that appeared and a
+   * question nobody asked.
+   */
+  beforeMeasured: boolean;
+  afterMeasured: boolean;
   /** Every repeat's value on the earlier commit, and on this checkout. */
   before: number[];
   after: number[];
   /** The middle of each, which is what the change is measured between. */
   beforeMiddle: number;
   afterMiddle: number;
-  /** The change between the middles, as a share of the earlier one. */
-  change: number;
+  /** The change between the middles, or null when a side did not measure it. */
+  change: number | null;
   /** Whether the two sets of repeats stayed clear of each other. */
   apart: boolean;
 }
@@ -130,19 +138,24 @@ const compareMetric = (
   before: RunSummary[],
   after: RunSummary[],
 ): MetricComparison => {
-  const beforeValues = before.map(metric.of);
-  const afterValues = after.map(metric.of);
+  const beforeMeasured = before.every((run) => measured(metric, run));
+  const afterMeasured = after.every((run) => measured(metric, run));
+  const beforeValues = beforeMeasured ? before.map(metric.of) : [];
+  const afterValues = afterMeasured ? after.map(metric.of) : [];
   const beforeMiddle = median(beforeValues);
   const afterMiddle = median(afterValues);
+  const both = beforeMeasured && afterMeasured;
   return {
     name: metric.name,
     unit: metric.unit,
+    beforeMeasured,
+    afterMeasured,
     before: beforeValues,
     after: afterValues,
     beforeMiddle,
     afterMiddle,
-    change: changeBetween(beforeMiddle, afterMiddle),
-    apart: standsApart(beforeValues, afterValues),
+    change: both ? changeBetween(beforeMiddle, afterMiddle) : null,
+    apart: both && standsApart(beforeValues, afterValues),
   };
 };
 
@@ -198,4 +211,6 @@ export const clearOfTheSpread = (
         .filter((metric) => metric.apart)
         .map((metric) => ({ scenario: scenario.name, metric })),
     )
-    .sort((a, b) => Math.abs(b.metric.change) - Math.abs(a.metric.change));
+    .sort(
+      (a, b) => Math.abs(b.metric.change ?? 0) - Math.abs(a.metric.change ?? 0),
+    );

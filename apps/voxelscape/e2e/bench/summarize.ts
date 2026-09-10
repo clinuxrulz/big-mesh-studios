@@ -38,6 +38,13 @@ export interface Drops {
 export interface RunSummary {
   frames: number;
   durationMs: number;
+  /**
+   * The per-frame values and phases this run carried a column for. A run
+   * measured from an older commit knows nothing of one added since, and a
+   * comparison that read its absence as a zero would report the value arriving
+   * out of nowhere rather than never having been asked for.
+   */
+  recorded: string[];
   /** True when the run outlasted the probe's ring and its earliest frames are gone. */
   wrapped: boolean;
   /** Milliseconds between animation callbacks. */
@@ -262,6 +269,7 @@ export const summarize = (drain: PerfDrain): RunSummary => {
   return {
     frames: drain.framesSeen,
     durationMs: drain.durationMs,
+    recorded: [...drain.fieldNames, ...drain.phaseNames],
     wrapped: drain.wrapped,
     gap: spreadOf(realGaps),
     mainThread: spreadOf(mainThread),

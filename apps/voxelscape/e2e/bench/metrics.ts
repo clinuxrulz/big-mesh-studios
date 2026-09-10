@@ -12,7 +12,17 @@ export interface Metric {
   name: string;
   of: (run: RunSummary) => number;
   unit: Unit;
+  /**
+   * The column this reads, when it reads one. A run measured from a commit
+   * that carried no such column has no number here at all, which is not the
+   * same as having measured zero.
+   */
+  needs?: string;
 }
+
+/** Whether a run carried what a metric reads, and so has a number for it. */
+export const measured = (metric: Metric, run: RunSummary): boolean =>
+  metric.needs === undefined || run.recorded.includes(metric.needs);
 
 /** How much longer a phase has to take than nothing at all to be worth comparing. */
 const PHASE_FLOOR_MS = 0.005;
@@ -30,13 +40,18 @@ const PHASE_FLOOR_MS = 0.005;
  * @returns The metrics to read the run on, in the order they are printed.
  */
 export const metricsFor = (pacing: RunContext["pacing"]): Metric[] => [
-  { name: "gap p50", of: (run) => run.gap.median, unit: "ms" },
-  { name: "gap p95", of: (run) => run.gap.p95, unit: "ms" },
-  { name: "gap p99", of: (run) => run.gap.p99, unit: "ms" },
-  { name: "worst frame", of: (run) => run.gap.max, unit: "ms" },
+  { name: "gap p50", of: (run) => run.gap.median, unit: "ms", needs: "gapMs" },
+  { name: "gap p95", of: (run) => run.gap.p95, unit: "ms", needs: "gapMs" },
+  { name: "gap p99", of: (run) => run.gap.p99, unit: "ms", needs: "gapMs" },
+  { name: "worst frame", of: (run) => run.gap.max, unit: "ms", needs: "gapMs" },
   { name: "main thread", of: (run) => run.mainThread.mean, unit: "ms" },
   { name: "worst main", of: (run) => run.mainThread.max, unit: "ms" },
-  { name: "gpu draw p50", of: (run) => run.gpu.median, unit: "ms" },
+  {
+    name: "gpu draw p50",
+    of: (run) => run.gpu.median,
+    unit: "ms",
+    needs: "gpuMs",
+  },
   pacing === "paced"
     ? { name: "dropped frames", of: (run) => run.drops.count, unit: "count" }
     : {
@@ -44,32 +59,60 @@ export const metricsFor = (pacing: RunContext["pacing"]): Metric[] => [
         of: (run) => run.overBudget.count,
         unit: "count",
       },
-  { name: "render scale", of: (run) => run.scale.median, unit: "count" },
-  { name: "triangles", of: (run) => run.triangles.median, unit: "count" },
+  {
+    name: "render scale",
+    of: (run) => run.scale.median,
+    unit: "count",
+    needs: "scale",
+  },
+  {
+    name: "triangles",
+    of: (run) => run.triangles.median,
+    unit: "count",
+    needs: "triangles",
+  },
   {
     name: "fills landed",
     of: (run) => run.counters.fillsLanded,
     unit: "count",
   },
   { name: "merges", of: (run) => run.counters.merges, unit: "count" },
-  { name: "uploaded", of: (run) => run.upload.totalBytes, unit: "bytes" },
+  {
+    name: "uploaded",
+    of: (run) => run.upload.totalBytes,
+    unit: "bytes",
+    needs: "uploadBytes",
+  },
   {
     name: "biggest upload",
     of: (run) => run.upload.maxFrameBytes,
     unit: "bytes",
+    needs: "uploadBytes",
   },
-  { name: "peak heap", of: (run) => run.heap.maxBytes, unit: "bytes" },
+  {
+    name: "peak heap",
+    of: (run) => run.heap.maxBytes,
+    unit: "bytes",
+    needs: "heapBytes",
+  },
   {
     name: "merged geometry",
     of: (run) => run.resident.mergedGeometryBytes,
     unit: "bytes",
+    needs: "mergedGeometryBytes",
   },
   {
     name: "block meshes",
     of: (run) => run.resident.blockGeometryBytes,
     unit: "bytes",
+    needs: "blockGeometryBytes",
   },
-  { name: "outrun frames", of: (run) => run.outrun.frames, unit: "count" },
+  {
+    name: "outrun frames",
+    of: (run) => run.outrun.frames,
+    unit: "count",
+    needs: "cellReady",
+  },
 ];
 
 /**
@@ -93,6 +136,7 @@ export const phaseMetrics = (runs: RunSummary[]): Metric[] => {
     name,
     of: (run: RunSummary) => run.phases[name]?.mean ?? 0,
     unit: "ms" as const,
+    needs: name,
   }));
 };
 

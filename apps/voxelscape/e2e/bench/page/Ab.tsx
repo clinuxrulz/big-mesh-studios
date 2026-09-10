@@ -47,6 +47,10 @@ function Commit(props: { sha: string; slot: 1 | 2 }): JSX.Element {
  */
 function Spread(props: { metric: MetricComparison }): JSX.Element {
   const values = [...props.metric.before, ...props.metric.after];
+  // Neither side carried this column, so there is nothing to place on a scale.
+  if (values.length === 0) {
+    return <></>;
+  }
   const low = Math.min(...values);
   const high = Math.max(...values);
   // The scale is the values' own range, but never narrower than a small share
@@ -135,9 +139,17 @@ function Scenario(props: {
             {(metric) => (
               <tr data-apart={metric.apart ? "yes" : "no"}>
                 <th scope="row">{metric.name}</th>
-                <td>{show(metric.beforeMiddle, metric.unit)}</td>
-                <td>{show(metric.afterMiddle, metric.unit)}</td>
-                <td>{percent(metric.change)}</td>
+                <td>
+                  {metric.beforeMeasured
+                    ? show(metric.beforeMiddle, metric.unit)
+                    : "not measured"}
+                </td>
+                <td>
+                  {metric.afterMeasured
+                    ? show(metric.afterMiddle, metric.unit)
+                    : "not measured"}
+                </td>
+                <td>{metric.change === null ? "" : percent(metric.change)}</td>
                 <td class="plot">
                   <Spread metric={metric} />
                 </td>
@@ -208,7 +220,7 @@ export function Ab(props: { report: AbReport }): JSX.Element {
                   <span class="from">
                     {`${show(one.metric.beforeMiddle, one.metric.unit)} → ${show(one.metric.afterMiddle, one.metric.unit)}`}
                   </span>
-                  <span class="by">{percent(one.metric.change)}</span>
+                  <span class="by">{percent(one.metric.change ?? 0)}</span>
                 </li>
               )}
             </For>
