@@ -207,7 +207,7 @@ export const formatScenario = (
       `(peak ${mebibytes(run.resident.maxBytes)}: ` +
       `${mebibytes(run.resident.voxelBytes)} voxels and light, ` +
       `${mebibytes(run.resident.mergedGeometryBytes)} merged geometry, ` +
-      `${mebibytes(run.resident.blockGeometryBytes)} block meshes the merge reads from)`,
+      `${mebibytes(run.resident.blockGeometryBytes)} block meshes waiting to be merged)`,
   );
   lines.push(
     `  heap     ${mebibytes(run.heap.startBytes)} → ${mebibytes(run.heap.endBytes)} ` +

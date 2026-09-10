@@ -556,6 +556,14 @@ export class TriangleRenderer {
   private readonly onBlockMeshed?: (index: number) => void;
 
   /** Each block's freshly built geometry, keyed by slot, for the merger to re-read. */
+  /**
+   * Whether each slot's build has landed, and whether it carried any geometry
+   * when it did. Outlives the build's own arrays, which are let go once a
+   * superchunk has copied them in, and answers the two questions asked of a
+   * member long after that: whether it is still being waited for, and whether
+   * it has anything worth drawing.
+   */
+  private readonly meshed = new Map<number, boolean>();
   private readonly chunkMeshes = new Map<
     number,
     { terrain: MeshArrays; water: MeshArrays }
@@ -686,6 +694,10 @@ export class TriangleRenderer {
         // already joined has been replaced, so it gives its room in the merged
         // arrays back and is joined again from this build on the next merge.
         this.chunkMeshes.set(index, { terrain, water });
+        this.meshed.set(
+          index,
+          terrain.indices.length > 0 || water.indices.length > 0,
+        );
         const key = this.blockSc.get(index);
         if (key !== undefined) {
           this.superchunks.get(key)?.retire(index);
@@ -803,9 +815,9 @@ export class TriangleRenderer {
    * Reconciles a superchunk's merged geometry against its current members'
    * cached builds and uploads it in place. The fast path appends only the
    * chunks that landed since the last rebuild (a scroll's entering shell), so
-   * a frame costs the new geometry's size, not the whole superchunk's; any
-   * change that invalidates already-joined data (membership moved, a chunk's
-   * data replaced) marks the superchunk for a full re-join.
+   * a frame costs the new geometry's size, not the whole superchunk's; a
+   * member whose data was replaced or whose slot moved away gives its room in
+   * the merged arrays back for the next member to write into.
    *
    * The merged arrays are uploaded once the superchunk's currently-meshing
    * members all land, so a scroll that fills a shell one chunk at a time pays
@@ -847,6 +859,11 @@ export class TriangleRenderer {
         continue;
       }
       superchunk.join(m.index, m.center, built);
+      // The superchunk copied the vertices into its own arrays, so this build
+      // has no reader left: the merged geometry is what draws, and a member
+      // whose voxels change is meshed again from its voxels rather than from
+      // here. Holding it would be a second copy of every block in the window.
+      this.chunkMeshes.delete(m.index);
       appended = true;
     }
     // Upload only when the superchunk has settled (every member meshed), when
@@ -855,7 +872,7 @@ export class TriangleRenderer {
     // next frame, so a scroll's burst of chunks costs a handful of uploads
     // instead of one per landed chunk.
     const missing = members.reduce(
-      (n, m) => n + (this.chunkMeshes.has(m.index) ? 0 : 1),
+      (n, m) => n + (this.meshed.has(m.index) ? 0 : 1),
       0,
     );
     const lastUpload = this.scLastUpload.get(key);
@@ -1306,11 +1323,7 @@ export class TriangleRenderer {
     }
     let sawContent = false;
     for (const m of members) {
-      const built = this.chunkMeshes.get(m.index);
-      if (
-        built === undefined ||
-        (built.terrain.indices.length === 0 && built.water.indices.length === 0)
-      ) {
+      if (this.meshed.get(m.index) !== true) {
         continue;
       }
       sawContent = true;
@@ -1344,10 +1357,10 @@ export class TriangleRenderer {
   }
 
   /**
-   * Bytes of the per-block meshes the workers built, which are kept for as long
-   * as the block is in the window: a superchunk that has to be re-joined in full
-   * reads every member's mesh again. They are a second copy of the same
-   * geometry as `mergedGeometryBytes` for every block already joined.
+   * Bytes of the per-block meshes the workers built and no superchunk has
+   * copied in yet: a block whose build has landed while the superchunk holding
+   * it waits its turn to merge. A build is let go as it joins, so this counts
+   * what is in flight rather than a second copy of what is already merged.
    */
   get blockGeometryBytes(): number {
     let bytes = 0;
@@ -1387,6 +1400,7 @@ export class TriangleRenderer {
     // any queue for it, but don't queue a rebuild — `onBlockChanged` does that
     // once the new data actually arrives
     this.chunkMeshes.delete(index);
+    this.meshed.delete(index);
     this.meshes.invalidate(index);
     // The slot's world and probe meshes still point at the old superchunk's
     // geometry pair, which the next full re-join hands back to the pool for

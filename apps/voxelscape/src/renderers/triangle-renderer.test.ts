@@ -303,7 +303,7 @@ describe("the occlusion probe's slot id", () => {
 });
 
 describe("what the renderer says it is holding", () => {
-  it("counts a block's own mesh apart from the superchunk it is merged into", () => {
+  it("lets a block's own mesh go once a superchunk has merged it in", () => {
     const renderer = rendererFor(blockWithFloor());
     renderer.repositionBlock(0, [0, 0, 0]);
     renderer.onBlockChanged(0);
@@ -316,11 +316,10 @@ describe("what the renderer says it is holding", () => {
 
     settle(renderer);
 
-    // Merged now — and the block's mesh is kept, because a superchunk that has
-    // to be re-joined in full reads every member's mesh again. The same
-    // geometry is held twice, which is what counting them apart shows.
+    // The superchunk has copied those vertices into its own arrays, and the
+    // block's are let go: the same geometry is held once, by whoever draws it.
     expect(renderer.mergedGeometryBytes).toBeGreaterThan(0);
-    expect(renderer.blockGeometryBytes).toBeGreaterThan(0);
+    expect(renderer.blockGeometryBytes).toBe(0);
   });
 });
 

@@ -123,8 +123,9 @@ export const Field = {
   /** Of those, the bytes held as the superchunks' merged geometry. */
   mergedGeometryBytes: 17,
   /**
-   * Of those, the bytes held as the per-block meshes the merge reads from,
-   * which is a second copy of every block already merged.
+   * Of those, the bytes held as per-block meshes whose superchunk has not
+   * copied them in yet — the geometry in flight between a worker finishing a
+   * block and the merge that takes it.
    */
   blockGeometryBytes: 18,
   /** Milliseconds the graphics card spent on the occlusion pass, from its own `GpuTimer`. */
