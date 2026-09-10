@@ -61,10 +61,10 @@ describe("fillSkyLight", () => {
     const light = new LightStore(store.voxels);
     fillSkyLight(store, light, center, flatConfig);
     // open-air rows above the surface are full sky
-    expect(light.skylight[light.paddedIndex(4, 7, 4)]).toBe(MAX_LIGHT);
-    expect(light.skylight[light.paddedIndex(4, 6, 4)]).toBe(MAX_LIGHT);
+    expect(light.skylightAt(light.paddedIndex(4, 7, 4))).toBe(MAX_LIGHT);
+    expect(light.skylightAt(light.paddedIndex(4, 6, 4))).toBe(MAX_LIGHT);
     // a buried row deep under rock sees no sky at all
-    expect(light.skylight[light.paddedIndex(4, 1, 4)]).toBe(0);
+    expect(light.skylightAt(light.paddedIndex(4, 1, 4))).toBe(0);
   });
 
   it("lights a shaft open to the sky but not a sealed air pocket", () => {
@@ -80,10 +80,10 @@ describe("fillSkyLight", () => {
     const light = new LightStore(store.voxels);
     fillSkyLight(store, light, center, flatConfig);
     // the shaft's top cell is seeded full and its floor holds full sky too
-    expect(light.skylight[light.paddedIndex(1, 7, 1)]).toBe(MAX_LIGHT);
-    expect(light.skylight[light.paddedIndex(1, 0, 1)]).toBe(MAX_LIGHT);
+    expect(light.skylightAt(light.paddedIndex(1, 7, 1))).toBe(MAX_LIGHT);
+    expect(light.skylightAt(light.paddedIndex(1, 0, 1))).toBe(MAX_LIGHT);
     // the sealed pocket has no connection to the surface
-    expect(light.skylight[light.paddedIndex(6, 4, 6)]).toBe(0);
+    expect(light.skylightAt(light.paddedIndex(6, 4, 6))).toBe(0);
   });
 });
 
@@ -98,9 +98,9 @@ describe("propagateLight (the shared BFS)", () => {
       { x: 4, y: 0, z: 4, level: MAX_LIGHT, fullSky: false },
     ];
     propagateLight(store, light, seeds, "skylight", false);
-    expect(light.skylight[light.paddedIndex(4, 0, 4)]).toBe(MAX_LIGHT);
-    expect(light.skylight[light.paddedIndex(4, 1, 4)]).toBe(MAX_LIGHT - 1);
-    expect(light.skylight[light.paddedIndex(4, 2, 4)]).toBe(MAX_LIGHT - 2);
+    expect(light.skylightAt(light.paddedIndex(4, 0, 4))).toBe(MAX_LIGHT);
+    expect(light.skylightAt(light.paddedIndex(4, 1, 4))).toBe(MAX_LIGHT - 1);
+    expect(light.skylightAt(light.paddedIndex(4, 2, 4))).toBe(MAX_LIGHT - 2);
   });
 
   it("lets a straight-down sky cursor reach full depth", () => {
@@ -113,7 +113,7 @@ describe("propagateLight (the shared BFS)", () => {
       { x: 4, y: 7, z: 4, level: MAX_LIGHT, fullSky: true },
     ];
     propagateLight(store, light, seeds, "skylight", true);
-    expect(light.skylight[light.paddedIndex(4, 0, 4)]).toBe(MAX_LIGHT);
+    expect(light.skylightAt(light.paddedIndex(4, 0, 4))).toBe(MAX_LIGHT);
   });
 
   it("lets a straight-down sky cursor pass through a cloud, stopping at rock", () => {
@@ -131,8 +131,8 @@ describe("propagateLight (the shared BFS)", () => {
     ];
     propagateLight(store, light, seeds, "skylight", true);
     // the cloud itself and the air row above the dirt hold full sky
-    expect(light.skylight[light.paddedIndex(4, 4, 4)]).toBe(MAX_LIGHT);
+    expect(light.skylightAt(light.paddedIndex(4, 4, 4))).toBe(MAX_LIGHT);
     // the dirt below the cloud still gets no light
-    expect(light.skylight[light.paddedIndex(4, 1, 4)]).toBe(0);
+    expect(light.skylightAt(light.paddedIndex(4, 1, 4))).toBe(0);
   });
 });

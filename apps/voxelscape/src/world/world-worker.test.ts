@@ -44,8 +44,7 @@ describe("world worker protocol", () => {
       scale: 2,
       data: new Uint8Array(64),
       hasWater: false,
-      skyLight: new Uint8Array(64),
-      blockLight: new Uint8Array(64),
+      light: new Uint8Array(64),
       tileRects: [],
     };
     const out = handleWorldMessage(request, undefined);

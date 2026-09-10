@@ -399,10 +399,7 @@ export const createVoxelWorld = ({
     get voxelBytes() {
       let bytes = 0;
       for (const block of blockGrid.blocks) {
-        bytes +=
-          block.store.data.byteLength +
-          block.light.skylight.byteLength +
-          block.light.blocklight.byteLength;
+        bytes += block.store.data.byteLength + block.light.data.byteLength;
       }
       return bytes;
     },

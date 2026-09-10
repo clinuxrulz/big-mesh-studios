@@ -17,7 +17,7 @@ export const fillBlockLight = (
   store: VoxelStore,
   light: LightStore,
 ): LightStore => {
-  light.blocklight.fill(0);
+  light.clearBlocklight();
   const [nx, ny, nz] = store.voxels;
   const p = store.padding;
   const seeds: LightCursor[] = [];

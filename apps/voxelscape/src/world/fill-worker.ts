@@ -23,19 +23,15 @@ import type { BorderSizes, FillStoreFn } from "./voxel-store";
 export const lentArrays = (
   req: {
     stores?: Uint8Array[];
-    skyLights?: Uint8Array[];
-    blockLights?: Uint8Array[];
+    lights?: Uint8Array[];
   },
   at: number,
 ): BlockArrays | undefined => {
   const storeData = req.stores?.[at];
-  const skyLight = req.skyLights?.[at];
-  const blockLight = req.blockLights?.[at];
-  return storeData === undefined ||
-    skyLight === undefined ||
-    blockLight === undefined
+  const light = req.lights?.[at];
+  return storeData === undefined || light === undefined
     ? undefined
-    : { storeData, skyLight, blockLight };
+    : { storeData, light };
 };
 
 export interface FillConfig {
@@ -67,8 +63,7 @@ export interface FillBatchRequest {
    * worker to allocate, which is what a client without spares to lend does.
    */
   stores?: Uint8Array[];
-  skyLights?: Uint8Array[];
-  blockLights?: Uint8Array[];
+  lights?: Uint8Array[];
 }
 
 export interface FillBatchResult {
@@ -83,10 +78,8 @@ export interface FillBatchResult {
   mightHaveVoxels: boolean[];
   /** Whether each block holds water; see `VoxelStore.hasWater`. */
   hasWater: boolean[];
-  /** Each block's sky light channel, one array per block. */
-  skyLight: Uint8Array[];
-  /** Each block's block light channel, one array per block. */
-  blockLight: Uint8Array[];
+  /** Each block's two light channels, one array per block. */
+  light: Uint8Array[];
 }
 
 export type FillWorkerMessage =
@@ -147,8 +140,7 @@ export async function* buildFillResults(
       storeData: [data.storeData],
       mightHaveVoxels: [data.mightHaveVoxels],
       hasWater: [data.hasWater],
-      skyLight: [data.skyLight],
-      blockLight: [data.blockLight],
+      light: [data.light],
     };
   }
 }
@@ -161,8 +153,8 @@ export const fillResultTransfers = (
   for (let i = 0; i < result.storeData.length; i++) {
     transfer.push(result.storeData[i].buffer);
   }
-  for (let i = 0; i < result.skyLight.length; i++) {
-    transfer.push(result.skyLight[i].buffer, result.blockLight[i].buffer);
+  for (let i = 0; i < result.light.length; i++) {
+    transfer.push(result.light[i].buffer);
   }
   return transfer;
 };

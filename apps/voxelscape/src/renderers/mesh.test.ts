@@ -78,6 +78,13 @@ const uvAt = (mesh: MeshArrays, i: number): [number, number] => [
 ];
 
 /** Every vertex's baked light, in the order the mesh holds them. */
+/** Every padded voxel lit to `level` of sky, which the mesher shades from. */
+const fillSkylight = (light: LightStore, level: number): void => {
+  for (let i = 0; i < light.data.length; i++) {
+    light.setSkylightAt(i, level);
+  }
+};
+
 const brightnesses = (mesh: MeshArrays): number[] =>
   Array.from({ length: vertexCount(mesh) }, (_, i) => brightnessAt(mesh, i));
 
@@ -466,7 +473,7 @@ describe("brightness baking", () => {
     const store = grassStore();
     const light = new LightStore(store.voxels);
     // every sky voxel at full brightness: a fully exposed surface
-    light.skylight.fill(MAX_LIGHT);
+    fillSkylight(light, MAX_LIGHT);
     const mesh = buildBlockMesh(store, [], light);
     expect(brightnesses(mesh).length).toBe(mesh.positions.length / 3);
     for (const b of brightnesses(mesh)) {
@@ -495,7 +502,7 @@ describe("brightness baking", () => {
     store.set(2, 1, 1, VOXEL_DIRT);
     store.set(2, 2, 1, VOXEL_DIRT);
     const light = new LightStore(store.voxels);
-    light.skylight.fill(MAX_LIGHT);
+    fillSkylight(light, MAX_LIGHT);
     const mesh = buildBlockMesh(store, [], light);
     const brightness = brightnesses(mesh);
     // at least one of the grass top-face's four corners shades below full

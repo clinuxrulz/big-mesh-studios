@@ -51,8 +51,7 @@ export interface FillMeshBatchRequest {
    * worker to allocate, which is what a client without spares to lend does.
    */
   stores?: Uint8Array[];
-  skyLights?: Uint8Array[];
-  blockLights?: Uint8Array[];
+  lights?: Uint8Array[];
 }
 
 export interface FillMeshBlockResult {
@@ -66,8 +65,7 @@ export interface FillMeshBlockResult {
   mightHaveVoxels: boolean;
   /** Whether the block holds water; see `VoxelStore.hasWater`. */
   hasWater: boolean;
-  skyLight: Uint8Array;
-  blockLight: Uint8Array;
+  light: Uint8Array;
   /** The terrain surface, built from the generated voxels and light. */
   terrain: MeshArrays;
   /** The water surface, likewise. */
@@ -113,10 +111,7 @@ export async function* buildFillMeshResults(
       });
       store.mightHaveVoxels = data.mightHaveVoxels;
       store.hasWater = data.hasWater;
-      const light = new LightStore(voxels, {
-        skylight: data.skyLight,
-        blocklight: data.blockLight,
-      });
+      const light = new LightStore(voxels, data.light);
       terrain = buildBlockMesh(store, req.tileRects, light, scratch.terrain);
       water = buildWaterMesh(store, light, scratch.water);
     }
@@ -128,8 +123,7 @@ export async function* buildFillMeshResults(
       storeData: data.storeData,
       mightHaveVoxels: data.mightHaveVoxels,
       hasWater: data.hasWater,
-      skyLight: data.skyLight,
-      blockLight: data.blockLight,
+      light: data.light,
       terrain,
       water,
     };
@@ -145,8 +139,7 @@ export const fillMeshResultTransfers = (
   result: FillMeshBlockResult,
 ): Transferable[] => [
   result.storeData.buffer,
-  result.skyLight.buffer,
-  result.blockLight.buffer,
+  result.light.buffer,
   ...meshArraysTransfers(result.terrain, result.water),
 ];
 

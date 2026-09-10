@@ -56,8 +56,15 @@ export const meshArraysTransfers = (
 export const handleMeshMessage = (
   request: MeshBuildRequest,
 ): MeshBuildResult => {
-  const { id, voxels, scale, data, hasWater, skyLight, blockLight, tileRects } =
-    request;
+  const {
+    id,
+    voxels,
+    scale,
+    data,
+    hasWater,
+    light: lightData,
+    tileRects,
+  } = request;
   const store = new VoxelStore({
     dims: [voxels[0] * scale, voxels[1] * scale, voxels[2] * scale],
     voxels,
@@ -65,18 +72,14 @@ export const handleMeshMessage = (
     data,
   });
   store.hasWater = hasWater;
-  const light = new LightStore(voxels, {
-    skylight: skyLight,
-    blocklight: blockLight,
-  });
+  const light = new LightStore(voxels, lightData);
   return {
     type: "mesh",
     id,
     terrain: buildBlockMesh(store, tileRects, light, scratch.terrain),
     water: buildWaterMesh(store, light, scratch.water),
     data,
-    skyLight,
-    blockLight,
+    light: lightData,
   };
 };
 
@@ -90,6 +93,5 @@ export const meshResultTransfers = (
 ): Transferable[] => [
   ...meshArraysTransfers(result.terrain, result.water),
   result.data.buffer,
-  result.skyLight.buffer,
-  result.blockLight.buffer,
+  result.light.buffer,
 ];

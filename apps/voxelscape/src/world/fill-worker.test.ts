@@ -156,8 +156,8 @@ describe("fill worker protocol", () => {
       ),
     );
     const transfers = fillResultTransfers(result);
-    // a store buffer, a sky-light buffer, and a block-light buffer
-    expect(transfers).toHaveLength(3);
+    // a store buffer and a light buffer, the two channels sharing the second
+    expect(transfers).toHaveLength(2);
     for (const t of transfers) {
       expect(t).toBeInstanceOf(ArrayBuffer);
     }

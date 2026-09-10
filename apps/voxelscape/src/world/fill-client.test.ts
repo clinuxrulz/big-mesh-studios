@@ -89,8 +89,7 @@ class FakeFillWorker {
       storeData: request.indices.map((_, at) => request.stores![at]),
       mightHaveVoxels: request.indices.map(() => true),
       hasWater: request.indices.map(() => false),
-      skyLight: request.indices.map((_, at) => request.skyLights![at]),
-      blockLight: request.indices.map((_, at) => request.blockLights![at]),
+      light: request.indices.map((_, at) => request.lights![at]),
     };
     for (const listener of this.messageListeners) {
       listener({ data: result } as MessageEvent);
@@ -108,8 +107,7 @@ class FakeFillWorker {
       storeData: request.indices.map(() => new Uint8Array(0)),
       mightHaveVoxels: request.indices.map(() => true),
       hasWater: request.indices.map(() => false),
-      skyLight: request.indices.map(() => new Uint8Array(0)),
-      blockLight: request.indices.map(() => new Uint8Array(0)),
+      light: request.indices.map(() => new Uint8Array(0)),
     };
     for (const listener of this.messageListeners) {
       listener({ data: result } as MessageEvent);
@@ -137,8 +135,7 @@ describe("FillClient lending", () => {
     const length = blocks[0].store.data.length;
     const [request] = worker.sent;
     expect(request.stores?.[0]).toHaveLength(length);
-    expect(request.skyLights?.[0]).toHaveLength(length);
-    expect(request.blockLights?.[0]).toHaveLength(length);
+    expect(request.lights?.[0]).toHaveLength(length);
   });
 
   it("lends the arrays a slot let go of, so a filled window allocates no more", () => {
@@ -363,8 +360,7 @@ describe("FillClient", () => {
             indices: [],
           },
           data: new Uint8Array(0),
-          skyLight: new Uint8Array(0),
-          blockLight: new Uint8Array(0),
+          light: new Uint8Array(0),
         },
       } as MessageEvent);
     }
@@ -438,8 +434,7 @@ describe("FillClient", () => {
           storeData: new Uint8Array(0),
           mightHaveVoxels: false,
           hasWater: false,
-          skyLight: new Uint8Array(0),
-          blockLight: new Uint8Array(0),
+          light: new Uint8Array(0),
           terrain: EMPTY_MESHES.terrain,
           water: EMPTY_MESHES.water,
         },
@@ -484,8 +479,7 @@ describe("FillClient", () => {
           storeData: new Uint8Array(0),
           mightHaveVoxels: false,
           hasWater: false,
-          skyLight: new Uint8Array(0),
-          blockLight: new Uint8Array(0),
+          light: new Uint8Array(0),
           terrain: EMPTY_MESHES.terrain,
           water: EMPTY_MESHES.water,
         },
@@ -524,8 +518,7 @@ describe("FillClient", () => {
           storeData: new Uint8Array(0),
           mightHaveVoxels: false,
           hasWater: false,
-          skyLight: new Uint8Array(0),
-          blockLight: new Uint8Array(0),
+          light: new Uint8Array(0),
           terrain: EMPTY_MESHES.terrain,
           water: EMPTY_MESHES.water,
         },

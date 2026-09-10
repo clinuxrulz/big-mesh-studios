@@ -17,20 +17,19 @@ describe("LightStore", () => {
     // back; a store allocating its own here would zero two volumes nobody
     // reads.
     const store = smallStore();
-    const skylight = new Uint8Array(store.data.length);
-    const blocklight = new Uint8Array(store.data.length);
-    skylight[0] = MAX_LIGHT;
-    const light = new LightStore(store.voxels, { skylight, blocklight });
-    expect(light.skylight).toBe(skylight);
-    expect(light.blocklight).toBe(blocklight);
-    expect(light.skylight[0]).toBe(MAX_LIGHT);
+    const data = new Uint8Array(store.data.length);
+    const light = new LightStore(store.voxels, data);
+    light.setSkylightAt(0, MAX_LIGHT);
+    expect(light.data).toBe(data);
+    expect(light.skylightAt(0)).toBe(MAX_LIGHT);
+    // The channels share a byte, so writing one must leave the other alone.
+    expect(light.blocklightAt(0)).toBe(0);
   });
 
   it("allocates its own channels when it is handed none", () => {
     const store = smallStore();
     const light = new LightStore(store.voxels);
-    expect(light.skylight.length).toBe(store.data.length);
-    expect(light.blocklight.length).toBe(store.data.length);
+    expect(light.data.length).toBe(store.data.length);
   });
 });
 
@@ -40,7 +39,7 @@ describe("fillBlockLight", () => {
     store.set(4, 4, 4, VOXEL_LAVA);
     const light = new LightStore(store.voxels);
     fillBlockLight(store, light);
-    expect(light.blocklight[light.paddedIndex(4, 4, 4)]).toBe(
+    expect(light.blocklightAt(light.paddedIndex(4, 4, 4))).toBe(
       EMISSIVE_LEVEL[VOXEL_LAVA],
     );
   });
@@ -50,8 +49,8 @@ describe("fillBlockLight", () => {
     store.set(4, 4, 4, VOXEL_LAVA);
     const light = new LightStore(store.voxels);
     fillBlockLight(store, light);
-    const near = light.blocklight[light.paddedIndex(5, 4, 4)];
-    const far = light.blocklight[light.paddedIndex(7, 4, 4)];
+    const near = light.blocklightAt(light.paddedIndex(5, 4, 4));
+    const far = light.blocklightAt(light.paddedIndex(7, 4, 4));
     expect(near).toBeGreaterThan(far);
     expect(far).toBeGreaterThan(0);
   });
@@ -63,7 +62,7 @@ describe("fillBlockLight", () => {
     store.set(6, 4, 4, VOXEL_AIR);
     const light = new LightStore(store.voxels);
     fillBlockLight(store, light);
-    expect(light.blocklight[light.paddedIndex(5, 4, 4)]).toBeLessThan(
+    expect(light.blocklightAt(light.paddedIndex(5, 4, 4))).toBeLessThan(
       MAX_LIGHT,
     );
   });
@@ -75,6 +74,6 @@ describe("fillBlockLight", () => {
     fillBlockLight(store, light);
     store.set(4, 4, 4, VOXEL_AIR);
     fillBlockLight(store, light);
-    expect(light.blocklight[light.paddedIndex(4, 4, 4)]).toBe(0);
+    expect(light.blocklightAt(light.paddedIndex(4, 4, 4))).toBe(0);
   });
 });

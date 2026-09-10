@@ -183,11 +183,10 @@ const cellLight = (
   x: number,
   y: number,
   z: number,
-): number =>
-  Math.max(
-    LIGHT_TO_UNIT(light.skylight[light.paddedIndex(x, y, z)]),
-    LIGHT_TO_UNIT(light.blocklight[light.paddedIndex(x, y, z)]),
-  );
+): number => {
+  const at = light.paddedIndex(x, y, z);
+  return LIGHT_TO_UNIT(Math.max(light.skylightAt(at), light.blocklightAt(at)));
+};
 
 /**
  * Whether a padded voxel blocks sight: anything that neither air nor water
@@ -806,10 +805,8 @@ export interface MeshBuildRequest {
   data: Uint8Array;
   /** Whether `data` holds any water voxel; an empty water sweep when false. */
   hasWater: boolean;
-  /** The block's sky light, one byte per padded voxel, matching `data`. */
-  skyLight: Uint8Array;
-  /** The block's block light, one byte per padded voxel, matching `data`. */
-  blockLight: Uint8Array;
+  /** The block's two light channels, one byte per padded voxel, matching `data`. */
+  light: Uint8Array;
   tileRects: VoxelTileConfig[];
 }
 
@@ -821,10 +818,8 @@ export interface MeshBuildResult {
   water: MeshArrays;
   /** The voxel buffer the worker read, echoed back so the caller can reuse it. */
   data: Uint8Array;
-  /** The sky light channel the worker read, echoed back for reuse. */
-  skyLight: Uint8Array;
-  /** The block light channel the worker read, echoed back for reuse. */
-  blockLight: Uint8Array;
+  /** The light channels the worker read, echoed back for reuse. */
+  light: Uint8Array;
 }
 
 /**

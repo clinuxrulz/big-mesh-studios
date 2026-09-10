@@ -1,6 +1,6 @@
 # How a voxel becomes a pixel
 
-Read out of the modules that do it at 61f30fc by `pnpm rendering`.
+Read out of the modules that do it at ff2915a by `pnpm rendering`.
 Every number below is the one the code declares, not a note about it.
 
 ## The path
@@ -81,14 +81,14 @@ which is the reverse of the way the data flows.
 
 ## What a block is
 
-|                      |                                                         |
-| -------------------- | ------------------------------------------------------- |
-| voxels a block       | 64³                                                     |
-| world units a voxel  | 2                                                       |
-| world units a block  | 128³                                                    |
-| border voxels a face | 1, so a block's arrays are 66³ = 287,496 long           |
-| bytes a block holds  | 862,488: voxels, skylight and blocklight, one byte each |
-| blocks a superchunk  | 2³, which is 256 world units a side                     |
+|                      |                                                                 |
+| -------------------- | --------------------------------------------------------------- |
+| voxels a block       | 64³                                                             |
+| world units a voxel  | 2                                                               |
+| world units a block  | 128³                                                            |
+| border voxels a face | 1, so a block's arrays are 66³ = 287,496 long                   |
+| bytes a block holds  | 574,992: a byte of voxel and a byte holding both light channels |
+| blocks a superchunk  | 2³, which is 256 world units a side                             |
 
 ## What a vertex carries
 

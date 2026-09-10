@@ -68,8 +68,7 @@ export const BLOCK_WORLD: Dim3 = [
  */
 export interface BlockArrays {
   storeData: Uint8Array;
-  skyLight: Uint8Array;
-  blockLight: Uint8Array;
+  light: Uint8Array;
 }
 
 export interface WorldBlock {
@@ -108,8 +107,7 @@ export const buildBlockShell = (params: {
   const into = params.into;
   if (into !== undefined) {
     into.storeData.fill(0);
-    into.skyLight.fill(0);
-    into.blockLight.fill(0);
+    into.light.fill(0);
   }
   return {
     center: params.center,
@@ -122,10 +120,7 @@ export const buildBlockShell = (params: {
     light:
       into === undefined
         ? new LightStore(voxels)
-        : new LightStore(voxels, {
-            skylight: into.skyLight,
-            blocklight: into.blockLight,
-          }),
+        : new LightStore(voxels, into.light),
     targetLod: lod,
   };
 };
@@ -447,10 +442,8 @@ export interface BlockData {
   hasWater: boolean;
   /** The level of detail these voxels were generated at. */
   lod: number;
-  /** The block's sky light channel, one byte per padded voxel. */
-  skyLight: Uint8Array;
-  /** The block's block light channel, one byte per padded voxel. */
-  blockLight: Uint8Array;
+  /** The block's two light channels, four bits each in one byte per padded voxel. */
+  light: Uint8Array;
 }
 
 /**
@@ -490,8 +483,7 @@ export const buildBlockData = (params: {
     mightHaveVoxels: store.mightHaveVoxels,
     hasWater: store.hasWater,
     lod,
-    skyLight: light.skylight,
-    blockLight: light.blocklight,
+    light: light.data,
   };
 };
 
@@ -514,7 +506,6 @@ export const applyLevelData = (block: WorldBlock, data: BlockData): void => {
   block.store.mightHaveVoxels = data.mightHaveVoxels;
   block.store.hasWater = data.hasWater;
   block.light.voxels = voxels;
-  block.light.skylight = data.skyLight;
-  block.light.blocklight = data.blockLight;
+  block.light.data = data.light;
   block.targetLod = data.lod;
 };

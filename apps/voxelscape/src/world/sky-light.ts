@@ -6,7 +6,13 @@
 // neighbour's light it holds.
 import type { Dim3 } from "./level-data";
 import { heightAt, type TerrainConfig } from "./noise";
-import { MAX_LIGHT, type LightChannel, type LightStore } from "./light-store";
+import {
+  LEVEL_MASK,
+  MAX_LIGHT,
+  shiftOfChannel,
+  type LightChannel,
+  type LightStore,
+} from "./light-store";
 import {
   VOXEL_AIR,
   VOXEL_CLOUD,
@@ -53,12 +59,21 @@ export const propagateLight = (
 ): void => {
   const [nx, ny, nz] = store.voxels;
   const p = store.padding;
-  const buf = light[channel];
+  // The two channels share a byte, so a level is read and written through the
+  // four bits this one occupies. Held as plain numbers rather than reached for
+  // through the store on every one of the millions of visits below.
+  const data = light.data;
+  const shift = shiftOfChannel(channel);
+  const keep = ~(LEVEL_MASK << shift);
+  const levelAt = (at: number): number => (data[at] >>> shift) & LEVEL_MASK;
+  const writeLevel = (at: number, level: number): void => {
+    data[at] = (data[at] & keep) | (level << shift);
+  };
   const queue: LightCursor[] = [];
   for (const s of seeds) {
     const at = idxOf(light, s.x, s.y, s.z);
-    if (s.level > buf[at]) {
-      buf[at] = s.level;
+    if (s.level > levelAt(at)) {
+      writeLevel(at, s.level);
     }
     queue.push(s);
   }
@@ -90,7 +105,7 @@ export const propagateLight = (
         continue;
       }
       const hereIdx = idxOf(light, x, y, z);
-      const here = buf[hereIdx];
+      const here = levelAt(hereIdx);
       // A full-sky cursor keeps full strength straight along its own column
       // (up or down through open air), so an open shaft stays bright to its
       // floor; a step sideways leaves the direct-sunlight column and decays.
@@ -98,7 +113,7 @@ export const propagateLight = (
       if (next <= here) {
         continue;
       }
-      buf[hereIdx] = next;
+      writeLevel(hereIdx, next);
       queue.push({ x, y, z, level: next, fullSky: next === MAX_LIGHT });
     }
   }
@@ -136,12 +151,12 @@ export const fillSkyLight = (
       const surface = heightAt(worldX, worldZ, config);
       for (let vy = -p; vy < ny + p; vy++) {
         const idx = light.paddedIndex(vx, vy, vz);
-        if (light.skylight[idx] !== 0) {
+        if (light.skylightAt(idx) !== 0) {
           continue;
         }
         const isAirOrWater = transmitsLight(store.atPadded(vx, vy, vz));
         if (isAirOrWater && worldYOf(vy) >= surface) {
-          light.skylight[idx] = MAX_LIGHT;
+          light.setSkylightAt(idx, MAX_LIGHT);
           seeds.push({ x: vx, y: vy, z: vz, level: MAX_LIGHT, fullSky: true });
         }
       }

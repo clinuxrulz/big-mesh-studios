@@ -141,15 +141,13 @@ export class MeshClient {
     // disposable copies, so they go back to the pool either way.
     if (requestedAt !== this.generation[msg.id]) {
       this.releaseBuffer(msg.data);
-      this.releaseBuffer(msg.skyLight);
-      this.releaseBuffer(msg.blockLight);
+      this.releaseBuffer(msg.light);
       return;
     }
     probe.count(Counter.meshesLanded);
     this.onMeshBuilt(msg.id, msg.terrain, msg.water);
     this.releaseBuffer(msg.data);
-    this.releaseBuffer(msg.skyLight);
-    this.releaseBuffer(msg.blockLight);
+    this.releaseBuffer(msg.light);
   }
 
   private onWorkerLost(): void {
@@ -318,10 +316,8 @@ export class MeshClient {
     const light = this.blocks[index].light;
     const data = this.acquireBuffer(store.data.byteLength);
     data.set(store.data);
-    const skyLight = this.acquireBuffer(light.skylight.byteLength);
-    skyLight.set(light.skylight);
-    const blockLight = this.acquireBuffer(light.blocklight.byteLength);
-    blockLight.set(light.blocklight);
+    const lightData = this.acquireBuffer(light.data.byteLength);
+    lightData.set(light.data);
     const request: MeshBuildRequest = {
       type: "mesh",
       id: index,
@@ -329,18 +325,13 @@ export class MeshClient {
       scale: store.scale,
       data,
       hasWater: store.hasWater,
-      skyLight,
-      blockLight,
+      light: lightData,
       tileRects: [...this.tilesById.values()],
     };
     const worker =
       this.pool.workers[this.nextWorker % this.pool.workers.length];
     this.nextWorker++;
-    worker?.postMessage(request, [
-      request.data.buffer,
-      request.skyLight.buffer,
-      request.blockLight.buffer,
-    ]);
+    worker?.postMessage(request, [request.data.buffer, request.light.buffer]);
   }
 
   /**

@@ -75,8 +75,7 @@ class FakeMeshWorker {
       // A real worker transfers the input buffers it read back for reuse, so
       // the fake does the same.
       data: request.data,
-      skyLight: request.skyLight,
-      blockLight: request.blockLight,
+      light: request.light,
     };
     for (const listener of this.messageListeners) {
       listener({ data: result } as MessageEvent);
@@ -190,8 +189,7 @@ describe("MeshClient", () => {
     const second = worker?.sent[1];
 
     expect(second?.data.buffer).toBe(first?.data.buffer);
-    expect(second?.skyLight.buffer).toBe(first?.skyLight.buffer);
-    expect(second?.blockLight.buffer).toBe(first?.blockLight.buffer);
+    expect(second?.light.buffer).toBe(first?.light.buffer);
   });
 
   it("builds on the calling thread when there is no worker", () => {
@@ -363,8 +361,7 @@ describe("MeshClient", () => {
           storeData: [new Uint8Array(0)],
           mightHaveVoxels: [false],
           hasWater: [false],
-          skyLight: [new Uint8Array(0)],
-          blockLight: [new Uint8Array(0)],
+          light: [new Uint8Array(0)],
         },
       } as MessageEvent);
     }

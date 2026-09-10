@@ -210,8 +210,7 @@ const makeWorld = (
       // previous cell's terrain between the reposition and its fill landing.
       const block = sphere.blocks[index];
       block.store.reset();
-      block.light.skylight.fill(0);
-      block.light.blocklight.fill(0);
+      block.light.data.fill(0);
     },
     onBlockRelease: (index) => {
       if (!withFlow) {

@@ -454,7 +454,7 @@ export const drawingOf = (): string => {
     `| border voxels a face | ${padding}, so a block's arrays are ${voxels + 2 * padding}³ = ${padded.toLocaleString()} long |`,
   );
   lines.push(
-    `| bytes a block holds | ${(padded * 3).toLocaleString()}: voxels, skylight and blocklight, one byte each |`,
+    `| bytes a block holds | ${(padded * 2).toLocaleString()}: a byte of voxel and a byte holding both light channels |`,
   );
   lines.push(
     `| blocks a superchunk | ${span}³, which is ${voxels * size * span} world units a side |`,

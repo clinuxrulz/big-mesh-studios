@@ -97,20 +97,17 @@ const lent = (
 ): {
   named: {
     stores: Uint8Array[];
-    skyLights: Uint8Array[];
-    blockLights: Uint8Array[];
+    lights: Uint8Array[];
   };
   buffers: ArrayBuffer[];
 } => ({
   named: {
     stores: sets.map((set) => set.storeData),
-    skyLights: sets.map((set) => set.skyLight),
-    blockLights: sets.map((set) => set.blockLight),
+    lights: sets.map((set) => set.light),
   },
   buffers: sets.flatMap((set) => [
     set.storeData.buffer as ArrayBuffer,
-    set.skyLight.buffer as ArrayBuffer,
-    set.blockLight.buffer as ArrayBuffer,
+    set.light.buffer as ArrayBuffer,
   ]),
 });
 
@@ -255,8 +252,7 @@ export class FillClient {
         // result on the floor would drop them with it.
         this.returnSpare({
           storeData: msg.storeData[j],
-          skyLight: msg.skyLight[j],
-          blockLight: msg.blockLight[j],
+          light: msg.light[j],
         });
         continue;
       }
@@ -268,8 +264,7 @@ export class FillClient {
         mightHaveVoxels: msg.mightHaveVoxels[j],
         hasWater: msg.hasWater[j],
         lod: msg.lods[j],
-        skyLight: msg.skyLight[j],
-        blockLight: msg.blockLight[j],
+        light: msg.light[j],
       });
       this.returnSpare(held);
       // The worker generated and lit the un-edited terrain, so re-lighting is
@@ -302,8 +297,7 @@ export class FillClient {
       // dropped here would have nothing to be filled into next time.
       this.returnSpare({
         storeData: msg.storeData,
-        skyLight: msg.skyLight,
-        blockLight: msg.blockLight,
+        light: msg.light,
       });
       return;
     }
@@ -322,8 +316,7 @@ export class FillClient {
       mightHaveVoxels: msg.mightHaveVoxels,
       hasWater: msg.hasWater,
       lod: msg.lod,
-      skyLight: msg.skyLight,
-      blockLight: msg.blockLight,
+      light: msg.light,
     });
     this.returnSpare(held);
     if (this.applyEdits(i) > 0) {
@@ -569,8 +562,7 @@ export class FillClient {
     return (
       held ?? {
         storeData: new Uint8Array(length),
-        skyLight: new Uint8Array(length),
-        blockLight: new Uint8Array(length),
+        light: new Uint8Array(length),
       }
     );
   }
@@ -601,8 +593,7 @@ export class FillClient {
     const block = this.blocks[index];
     return {
       storeData: block.store.data,
-      skyLight: block.light.skylight,
-      blockLight: block.light.blocklight,
+      light: block.light.data,
     };
   }
 
