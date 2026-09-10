@@ -130,8 +130,8 @@ describe("what /help lists", () => {
     const listed = windowCommands(world).help();
     const radius = listed.find((c) => c.name === "/world:radius");
     const lod = listed.find((c) => c.name === "/world:lod");
-    expect(radius?.args).toBe("<1..32> [yRadius]");
-    expect(lod?.args).toBe("off|auto|<full> <coarse>");
+    expect(radius?.args).toBe("<chunks> [chunks in Y]");
+    expect(lod?.args).toBe("off|auto|<full> <coarser>");
   });
 });
 
@@ -162,5 +162,44 @@ describe("/debug:stats", () => {
     const said = statsCommands(setShowStats).run("/debug:stats maybe");
     expect(setShowStats).not.toHaveBeenCalled();
     expect(said).toContain("usage");
+  });
+});
+
+describe("what the window commands explain", () => {
+  it("spells out each argument when asked with nothing to do", () => {
+    const { world } = worldSpy();
+    const said = windowCommands(world).run("/world:radius") as string;
+    // The state it is in, and then what the arguments would mean.
+    expect(said).toContain("radius 4");
+    expect(said).toContain("chunks in Y");
+    expect(said).toContain("128 world units");
+  });
+
+  it("says what the two level-of-detail numbers are for", () => {
+    const { world } = worldSpy();
+    const said = windowCommands(world).run("/world:lod") as string;
+    expect(said).toContain("full");
+    expect(said).toContain("coarser");
+    expect(said).toContain("off");
+    expect(said).toContain("auto");
+  });
+
+  it("explains rather than only refusing, when the arguments are wrong", () => {
+    const { world } = worldSpy();
+    const said = windowCommands(world).run("/world:radius lots") as string;
+    expect(said).toContain("usage");
+    expect(said).toContain("how far the window reaches");
+  });
+
+  it("describes both commands without naming a token nothing explains", () => {
+    const { world } = worldSpy();
+    const listed = windowCommands(world).help();
+    for (const name of ["/world:radius", "/world:lod"]) {
+      const description =
+        listed.find((c) => c.name === name)?.description ?? "";
+      // A description that only repeats the command's own name teaches nothing.
+      expect(description.length).toBeGreaterThan(30);
+      expect(description).toContain("chunks");
+    }
   });
 });

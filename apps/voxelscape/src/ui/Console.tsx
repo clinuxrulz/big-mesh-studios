@@ -17,8 +17,8 @@ export interface ConsoleInputHandle {
 }
 
 const ConsoleInput: Component<{
-  /** Every command name, for completing the one being typed. */
-  names: string[];
+  /** Every command, for completing the one being typed and hinting what it takes. */
+  commands: CommandHelp[];
   /** Whether the console panel is showing, and with it this input. */
   open: boolean;
   onCommand(command: string): void;
@@ -42,9 +42,9 @@ const ConsoleInput: Component<{
     if (!typed.startsWith("/") || typed.includes(" ")) {
       return [];
     }
-    return props.names.filter(
-      (name) => name.startsWith(typed) && name !== typed,
-    );
+    return props.commands
+      .map((command) => command.name)
+      .filter((name) => name.startsWith(typed) && name !== typed);
   };
 
   /**
@@ -59,6 +59,24 @@ const ConsoleInput: Component<{
   };
 
   const typed = (): string => value() ?? "";
+
+  /**
+   * What the command being typed still takes, ghosted after it once its name is
+   * spelled out in full. Completing a name is `candidate`'s job; this takes
+   * over when there is no name left to complete and the question becomes what
+   * goes after it.
+   */
+  const hint = (): string => {
+    const line = typed();
+    const command = props.commands.find(
+      (entry) => entry.name === line.trimEnd(),
+    );
+    if (command?.args === undefined) {
+      return "";
+    }
+    // A space of its own, unless what is typed already ends in one.
+    return `${line.endsWith(" ") ? "" : " "}${command.args}`;
+  };
   const candidates = (): string[] => candidatesFor(typed());
   /** The candidate the arrow keys have landed on, if any is left to show. */
   const candidate = (): string | undefined => candidates()[candidateIndex()];
@@ -190,6 +208,14 @@ const ConsoleInput: Component<{
           </div>
         )}
       </Show>
+      <Show when={hint()}>
+        {(args) => (
+          <div class={styles.completion} aria-hidden="true">
+            <span class={styles.typed}>{typed()}</span>
+            {args()}
+          </div>
+        )}
+      </Show>
       {/* A manual popover, kept a child of the field so that the panel around
           it counts as its ancestor and a click on a name doesn't dismiss the
           console. Showing it lifts it into the top layer, clear of the
@@ -289,8 +315,8 @@ const ConsoleOutput: Component<{ entries: ConsoleEntry[] }> = (props) => {
 
 export interface ConsoleProps {
   onCommand: (line: string) => CommandOutput | Promise<CommandOutput>;
-  /** Every command name, for completing the one being typed. */
-  names: string[];
+  /** Every command, for completing the one being typed and hinting what it takes. */
+  commands: CommandHelp[];
   /**
    * A line to append to the output that no typed command asked for, such as
    * the world reporting its atproto state at startup.
@@ -385,7 +411,7 @@ export const Console: Component<ConsoleProps> = (props) => {
         <div class={styles["input-container"]}>
           <span class={styles.prefix}>{">"}</span>
           <ConsoleInput
-            names={props.names}
+            commands={props.commands}
             open={Popover.isOpen()}
             onCommand={onCommand}
             ref={(handle) => {

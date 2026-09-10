@@ -46,6 +46,28 @@ export interface CommandEntry {
 const MAX_CHUNK_RADIUS = 32;
 
 /**
+ * What `/world:radius` takes, spelled out. Shown when it is asked with nothing
+ * to do, and when what it was given was not a size, because a token like
+ * `[chunks in Y]` says what to type without saying what it means.
+ */
+const RADIUS_USAGE =
+  "usage: /world:radius <chunks> [chunks in Y]\n" +
+  `chunks is how far the window reaches around the player, from 1 to ${MAX_CHUNK_RADIUS}, ` +
+  "a chunk being 128 world units. A second number does the same up and down; " +
+  "smaller than the first it flattens the window, which suits a world with more " +
+  "ground than sky. Every block refills.";
+
+/** What `/world:lod` takes, spelled out, and why the two numbers differ. */
+const LOD_USAGE =
+  "usage: /world:lod off | auto | <full> <coarser>\n" +
+  "full is how far full-resolution blocks reach and coarser how far the tier " +
+  "below it reaches; past that, blocks are coarsest. Each tier doubles the voxel " +
+  "size, so a block one tier out holds an eighth of the voxels and two tiers out " +
+  "a forty-ninth, which is what makes a wide window affordable. off keeps every " +
+  "block at full resolution however far away; auto puts the distances back to 3 " +
+  "and 4. Every block refills.";
+
+/**
  * What the block window is, in one line: how far it reaches, how many blocks
  * that is, where its levels of detail change, and what its voxels and light
  * weigh. The two commands that reshape it both answer with this, so asking and
@@ -342,11 +364,12 @@ export const createCommands = ({
       },
     },
     "/world:radius": {
-      description: "report or resize the block window, in chunks",
-      args: `<1..${MAX_CHUNK_RADIUS}> [yRadius]`,
+      description:
+        "how far the streamed block window reaches, in chunks of 128 units",
+      args: `<chunks> [chunks in Y]`,
       run: (rest) => {
         if (rest.length === 0) {
-          return describeWindow(world);
+          return `${describeWindow(world)}\n${RADIUS_USAGE}`;
         }
         const radius = Number(rest[0]);
         const radiusY = rest[1] === undefined ? undefined : Number(rest[1]);
@@ -354,22 +377,20 @@ export const createCommands = ({
           n === undefined ||
           (Number.isInteger(n) && n >= 1 && n <= MAX_CHUNK_RADIUS);
         if (!whole(radius) || !whole(radiusY)) {
-          return (
-            `usage: /world:radius <1..${MAX_CHUNK_RADIUS}> [yRadius]  ` +
-            "(the window refills)"
-          );
+          return RADIUS_USAGE;
         }
         world.reshape({ chunkRadius: radius, chunkRadiusY: radiusY });
         return describeWindow(world);
       },
     },
     "/world:lod": {
-      description: "report or move the distances each level of detail reaches",
-      args: "off|auto|<full> <coarse>",
+      description:
+        "the distances at which blocks drop to coarser voxels, in chunks",
+      args: "off|auto|<full> <coarser>",
       run: (rest) => {
         const argument = rest[0];
         if (argument === undefined) {
-          return describeWindow(world);
+          return `${describeWindow(world)}\n${LOD_USAGE}`;
         }
         // Off generates every block of the window at full resolution, which is
         // what the coarse shells are worth looking at against.
@@ -389,10 +410,7 @@ export const createCommands = ({
           full < 1 ||
           coarse < full
         ) {
-          return (
-            "usage: /world:lod off|auto|<full> <coarse>  " +
-            "(chunks; coarse is no nearer than full)"
-          );
+          return LOD_USAGE;
         }
         world.reshape({ lodBands: { full, coarse } });
         return describeWindow(world);

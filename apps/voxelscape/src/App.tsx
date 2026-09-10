@@ -102,7 +102,7 @@ const World: Component<{ launch: LaunchConfig }> = (props) => {
         <LoadingScreen />
         <Console
           onCommand={(line) => voxelscape.commands.run(line)}
-          names={voxelscape.commands.names()}
+          commands={voxelscape.commands.help()}
           notice={notice()}
         />
         <toasts.Stack>
