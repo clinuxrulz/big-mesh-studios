@@ -140,7 +140,7 @@ function Numbers(props: {
     ],
     [
       "geometry",
-      `${props.run.counters.merges} merges, ${props.run.counters.fullRejoins} of them whole rebuilds, ${props.run.counters.uploads} uploads`,
+      `${props.run.counters.merges} merges, ${props.run.counters.uploads} uploads`,
     ],
     [
       "queues at their deepest",

@@ -188,7 +188,7 @@ export const formatScenario = (
       `meshes ${run.counters.meshesRequested}→${run.counters.meshesLanded} ` +
       `(${run.counters.meshesFromFill} arrived with their fill) · ` +
       `${run.counters.scrolls} scrolls streaming ${run.counters.blocksStreamed} blocks · ` +
-      `${run.counters.merges} merges (${run.counters.fullRejoins} rebuilt whole), ` +
+      `${run.counters.merges} merges, ` +
       `${run.counters.uploads} uploads`,
   );
   lines.push(

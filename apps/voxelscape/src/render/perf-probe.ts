@@ -57,15 +57,9 @@ export const Counter = {
   /** Geometry adopted straight from a fill, which no mesh request ever asked for. */
   meshesFromFill: 4,
   merges: 5,
-  /**
-   * Merges that rebuilt a superchunk's geometry from every member rather than
-   * appending to what was already there, which owes the graphics card the
-   * whole superchunk again.
-   */
-  fullRejoins: 6,
-  uploads: 7,
-  scrolls: 8,
-  blocksStreamed: 9,
+  uploads: 6,
+  scrolls: 7,
+  blocksStreamed: 8,
 } as const;
 
 /** Each counter's name, at the index that counter is kept under. */
