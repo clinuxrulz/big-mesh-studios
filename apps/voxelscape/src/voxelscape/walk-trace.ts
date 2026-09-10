@@ -21,6 +21,12 @@ import type { PerfDrain, PerfProbeApi } from "../render/perf-probe";
  */
 const TRACE_FRAMES = 16384;
 
+/**
+ * How long a picture waits for a frame to be drawn before it is given up on.
+ * A world that is unmounted, or in a tab nobody is looking at, draws nothing.
+ */
+const PICTURE_WAIT_MS = 1000;
+
 /** Where the player stood and which way they faced. */
 export interface WalkTracePose {
   position: [number, number, number];
@@ -59,6 +65,13 @@ export interface WalkTraceFile {
   startedAt: string;
   seconds: number;
   setup: Record<string, unknown>;
+  /**
+   * The world as it stood when the walk began and when it ended. A walk nobody
+   * marked still carries something to look at, which the first one made did
+   * not: it was named after what was wrong and held no picture of it.
+   */
+  startPicture?: string;
+  endPicture?: string;
   marks: WalkTraceMark[];
   /** Every frame the probe timed, oldest first; see `PerfDrain`. */
   frames: PerfDrain;
@@ -74,13 +87,25 @@ export class WalkTraceRecorder {
   private startedOn = "";
   private name = "";
   private marks: WalkTraceMark[] = [];
+  private startPicture: string | undefined;
   private setup: Record<string, unknown> = {};
-  /** Whether a mark is waiting for the next frame to hand it a picture. */
-  private wanting = false;
+  /**
+   * Pictures asked for and waiting on the next drawn frame, oldest first. A
+   * queue rather than a flag because a walk can be stopped in the same breath
+   * as it is marked, and both want the drawing.
+   */
+  private wanted: Array<(picture: string | undefined) => void> = [];
 
+  /**
+   * @param waitMs How long a picture waits on a frame being drawn before it is
+   *   given up on. The default suits a world that is drawing; a caller with no
+   *   frames coming at all — a test, or a world not mounted — is better served
+   *   by a short one than by a wait nobody is going to satisfy.
+   */
   constructor(
     private readonly probe: PerfProbeApi,
     private readonly source: WalkTraceSource,
+    private readonly waitMs: number = PICTURE_WAIT_MS,
   ) {}
 
   /** Whether a walk is being recorded right now. */
@@ -105,6 +130,10 @@ export class WalkTraceRecorder {
     this.marks = [];
     this.setup = jsonSafe(this.source.setup()) as Record<string, unknown>;
     this.probe.arm(TRACE_FRAMES);
+    this.startPicture = undefined;
+    void this.wantPicture().then((picture) => {
+      this.startPicture = picture;
+    });
     // Handed back so a caller can say what it is recording without reading the
     // world a second time and risking a different answer.
     return this.setup;
@@ -120,12 +149,39 @@ export class WalkTraceRecorder {
     if (this.startedAt === undefined) {
       return;
     }
-    this.marks.push({
+    const mark: WalkTraceMark = {
       at: (performance.now() - this.startedAt) / 1000,
       note,
       pose: this.source.pose(),
+    };
+    this.marks.push(mark);
+    void this.wantPicture().then((picture) => {
+      mark.picture = picture;
     });
-    this.wanting = true;
+  }
+
+  /**
+   * A picture of the next frame drawn, or nothing if none is drawn soon. The
+   * world may be unmounted, or its tab hidden and its frames stopped, and a
+   * trace that never finishes because it is waiting for a drawing is worse
+   * than one that goes without.
+   */
+  private wantPicture(): Promise<string | undefined> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const give = (picture: string | undefined): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        resolve(picture);
+      };
+      this.wanted.push(give);
+      setTimeout(() => {
+        this.wanted = this.wanted.filter((waiting) => waiting !== give);
+        give(undefined);
+      }, this.waitMs);
+    });
   }
 
   /**
@@ -134,27 +190,57 @@ export class WalkTraceRecorder {
    * reads back as anything but blank.
    */
   takePicture(canvas: HTMLCanvasElement): void {
-    if (!this.wanting) {
+    const waiting = this.wanted;
+    if (waiting.length === 0) {
       return;
     }
-    this.wanting = false;
-    const mark = this.marks.at(-1);
-    if (mark === undefined) {
-      return;
-    }
+    this.wanted = [];
+    let picture: string | undefined;
     try {
-      mark.picture = canvas.toDataURL("image/png");
+      picture = canvas.toDataURL("image/png");
     } catch {
-      // A canvas the page is not allowed to read back leaves the mark without
-      // a picture rather than taking the frame down with it.
+      // A canvas the page is not allowed to read back leaves whoever was
+      // waiting without a picture rather than taking the frame down with it.
+    }
+    for (const give of waiting) {
+      give(picture);
     }
   }
 
-  /** Ends the recording and hands over what it holds, or nothing if none was running. */
-  stop(): WalkTraceFile | undefined {
+  /**
+   * One moment, written down on its own: what the world is set to, where the
+   * player stands, what they can see, and what they say is wrong with it.
+   *
+   * A walk is the right shape for a bug that takes finding. A bug already on
+   * screen only needs pointing at, and starting a recording to stop it a second
+   * later is a detour around saying so. Nothing is armed and no frames are
+   * held, so this leaves a walk being recorded alongside it undisturbed.
+   */
+  async snap(note: string): Promise<WalkTraceFile> {
+    const setup = jsonSafe(this.source.setup()) as Record<string, unknown>;
+    const pose = this.source.pose();
+    const picture = await this.wantPicture();
+    return {
+      name: note,
+      startedAt: new Date().toISOString(),
+      seconds: 0,
+      setup,
+      startPicture: picture,
+      marks: [{ at: 0, note, pose, picture }],
+      frames: this.probe.drain(),
+    };
+  }
+
+  /**
+   * Ends the recording and hands over what it holds, or nothing if none was
+   * running. Waits for one more frame on the way out, so the walk is bookended
+   * by a picture of where it finished as well as where it began.
+   */
+  async stop(): Promise<WalkTraceFile | undefined> {
     if (this.startedAt === undefined) {
       return undefined;
     }
+    const endPicture = await this.wantPicture();
     const seconds = (performance.now() - this.startedAt) / 1000;
     const frames = this.probe.drain();
     this.probe.disarm();
@@ -164,6 +250,8 @@ export class WalkTraceRecorder {
       startedAt: this.startedOn,
       seconds,
       setup: this.setup,
+      startPicture: this.startPicture,
+      endPicture,
       marks: this.marks,
       frames,
     };

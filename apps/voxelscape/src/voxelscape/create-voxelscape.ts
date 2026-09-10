@@ -5,7 +5,11 @@ import {
   Vector3,
 } from "@random-mesh/rmsl/scene";
 import { createSignal, type Accessor } from "solid-js";
-import { describeSetup, WalkTraceRecorder } from "./walk-trace";
+import {
+  describeSetup,
+  WalkTraceRecorder,
+  type WalkTraceFile,
+} from "./walk-trace";
 import { isEditableTarget } from "../utils";
 import { AtprotoController } from "../atproto/atproto-controller";
 import {
@@ -872,30 +876,19 @@ export const createVoxelscape = ({
       walkTrace.mark(note);
       return `marked ${walkTrace.marked}: ${note || "(no note)"}`;
     },
+    traceSnap: async (note) => {
+      const trace = await walkTrace.snap(note);
+      return writeTrace(trace, `snapped "${note || "(no note)"}"`);
+    },
     traceStop: async () => {
-      const trace = walkTrace.stop();
+      const trace = await walkTrace.stop();
       if (trace === undefined) {
         return "nothing is being traced";
       }
       const said =
         `traced ${trace.seconds.toFixed(0)}s, ${trace.marks.length} ` +
         `mark${trace.marks.length === 1 ? "" : "s"}`;
-      try {
-        const answer = await fetch("/__walktrace", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(trace),
-        });
-        if (!answer.ok) {
-          return `${said}, but the server refused it (${answer.status})`;
-        }
-        const { path } = (await answer.json()) as { path: string };
-        return `${said} — written to ${path}`;
-      } catch {
-        // No development server behind the page, which is every build but the
-        // one being worked on.
-        return `${said}, but there is no development server to write it to`;
-      }
+      return writeTrace(trace, said);
     },
     setShowStats: (on) => {
       const next = on ?? !showStats();
@@ -1229,6 +1222,32 @@ export const createVoxelscape = ({
       onNotice?.(`marked ${walkTrace.marked}`);
     });
   }
+
+  /**
+   * Hands a finished trace to the development server, which writes it where it
+   * can be read, and says where it went. Without a server behind the page —
+   * every build but the one being worked on — it says that instead of failing
+   * quietly.
+   */
+  const writeTrace = async (
+    trace: WalkTraceFile,
+    said: string,
+  ): Promise<string> => {
+    try {
+      const answer = await fetch("/__walktrace", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(trace),
+      });
+      if (!answer.ok) {
+        return `${said}, but the server refused it (${answer.status})`;
+      }
+      const { path } = (await answer.json()) as { path: string };
+      return `${said} — written to ${path}`;
+    } catch {
+      return `${said}, but there is no development server to write it to`;
+    }
+  };
 
   const mount = (canvas: HTMLCanvasElement): (() => void) => {
     mountedCanvas = canvas;

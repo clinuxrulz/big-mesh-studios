@@ -201,6 +201,8 @@ export interface CommandsParams {
   traceStart: (name: string) => string;
   /** Marks this moment of the walk being traced, with what was seen. */
   traceMark: (note: string) => string;
+  /** Writes down this one moment, without recording a walk around it. */
+  traceSnap: (note: string) => Promise<string>;
   /** Ends the trace, writes it, and says where it went. */
   traceStop: () => Promise<string>;
   /**
@@ -286,6 +288,7 @@ export const createCommands = ({
   setShowStats,
   traceStart,
   traceMark,
+  traceSnap,
   traceStop,
   setMultisampling,
 }: CommandsParams): Commander => {
@@ -454,6 +457,11 @@ export const createCommands = ({
       description: "mark this moment of the walk, and what is wrong with it",
       args: "<what you see>",
       run: (rest) => traceMark(rest.join(" ")),
+    },
+    "/trace:snap": {
+      description: "write down this one moment, without recording a walk",
+      args: "<what you see>",
+      run: (rest) => traceSnap(rest.join(" ")),
     },
     "/trace:stop": {
       description: "end the walk being recorded and write it down",
