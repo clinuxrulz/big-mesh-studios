@@ -166,10 +166,16 @@ const compareMetric = (
     after: afterValues,
     beforeMiddle,
     afterMiddle,
-    change:
-      both && !tooSmallToDivide(beforeMiddle, metric.unit)
-        ? changeBetween(beforeMiddle, afterMiddle)
-        : null,
+    // Two sides that measured the same thing have not changed, however small
+    // the thing is; it is an unequal pair with nothing to divide into that has
+    // no answer.
+    change: !both
+      ? null
+      : beforeMiddle === afterMiddle
+        ? 0
+        : tooSmallToDivide(beforeMiddle, metric.unit)
+          ? null
+          : changeBetween(beforeMiddle, afterMiddle),
     apart: both && standsApart(beforeValues, afterValues),
   };
 };
