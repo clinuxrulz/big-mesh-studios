@@ -17,7 +17,7 @@ time (`command !== "build" || mode === "bench"`): on under `pnpm dev` and
 (`--mode bench`). `src/render/perf-flag.d.ts` declares it as ambient so
 TypeScript knows the name without an import.
 
-Rather than gate every call site, the constant picks which *implementation*
+Rather than gate every call site, the constant picks which _implementation_
 `probe` and `GpuTimer` are, once, at the bottom of the modules that define
 them:
 
