@@ -838,7 +838,14 @@ export const createVoxelscape = ({
       avatar.player.yaw += route.turn * dt;
     }
     avatar.place();
+    // Under the same phase the frame's own scroll is timed under: a benchmark
+    // drives the player from here instead, and the window's work — evicting
+    // slots, teleporting them onto entering cells, asking for their fills — is
+    // the same work either way. Timed anywhere else it would read as a frame
+    // that spent seventeen milliseconds on nothing anybody named.
+    probe.begin(Phase.scroll);
     world.scrollTo(position.x, position.y, position.z);
+    probe.end(Phase.scroll);
   };
 
   /** Hands the probe this frame's queue depths, counters and player position. */
