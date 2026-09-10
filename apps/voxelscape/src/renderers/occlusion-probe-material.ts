@@ -8,7 +8,7 @@
 //
 // The id is the same for every vertex a probe mesh draws, so it is a uniform
 // the mesh sets before it draws rather than a colour on each of its vertices.
-import { mat3, vec4, type Node, type UniformNode } from "@random-mesh/rmsl";
+import { vec4, type Node, type UniformNode } from "@random-mesh/rmsl";
 import { Builder, NodeMaterial } from "@random-mesh/rmsl/scene";
 
 /**
@@ -44,12 +44,9 @@ export class OcclusionProbeMaterial
       : position4;
     const worldPosition = b.modelMatrix.mul(localPosition);
     b.positionWorld.assign(worldPosition.xyz);
-    let normal: Node<"vec3"> = b.normal;
-    if (b.instancing) {
-      normal = mat3(b.instanceMatrix).mul(normal);
-    }
-    b.normalWorld.assign(b.normalMatrix.mul(normal).normalize());
-    b.uvVarying.assign(b.uv);
+    // The fragment paints one flat id, so it reads neither the surface normal
+    // nor its texture coordinate — and touching them here would bind two
+    // attributes this pass has no use for.
     if (b.instancingColor) {
       b.instanceColorVarying.assign(b.instanceColor);
     }

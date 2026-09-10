@@ -27,10 +27,8 @@ const meshOf = (quads: number, at = 0): MeshArrays => {
     positions: new Float32Array(
       Array.from({ length: vertices * 3 }, (_, i) => at + i),
     ),
-    normals: new Float32Array(vertices * 3),
-    uvs: new Float32Array(vertices * 2),
-    tiles: new Float32Array(vertices),
-    brightness: new Float32Array(vertices).fill(1),
+    packed: new Uint8Array(vertices * 4).fill(255),
+    uvs: new Uint16Array(vertices * 2),
     indices: new Uint32Array(
       Array.from({ length: quads * 6 }, (_, i) => i % vertices),
     ),

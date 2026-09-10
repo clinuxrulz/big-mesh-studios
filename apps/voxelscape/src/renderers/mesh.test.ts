@@ -17,6 +17,7 @@ import {
   fillStore,
 } from "../world/voxel-store";
 import { LightStore, MAX_LIGHT } from "../world/light-store";
+import { normalOfFaceIndex, wholeNumberOfHalf } from "./vertex-format";
 
 const smallStore = (): VoxelStore =>
   new VoxelStore({ dims: [8, 8, 8], voxels: [4, 4, 4], scale: 2 });
@@ -59,6 +60,27 @@ const seaTerrain = {
 const faceCount = (mesh: MeshArrays): number => mesh.indices.length / 6;
 const vertexCount = (mesh: MeshArrays): number => mesh.positions.length / 3;
 
+/** The unit normal at a vertex, from the lane naming which way its face points. */
+const normalAt = (mesh: MeshArrays, i: number): [number, number, number] =>
+  normalOfFaceIndex(mesh.packed[i * 4]);
+
+/** The baked light at a vertex, back in the 0..1 the mesher wrote it from. */
+const brightnessAt = (mesh: MeshArrays, i: number): number =>
+  mesh.packed[i * 4 + 1] / 255;
+
+/** The sheet tile at a vertex. */
+const tileAt = (mesh: MeshArrays, i: number): number => mesh.packed[i * 4 + 2];
+
+/** The texture coordinate at a vertex, decoded from the half floats holding it. */
+const uvAt = (mesh: MeshArrays, i: number): [number, number] => [
+  wholeNumberOfHalf(mesh.uvs[i * 2]),
+  wholeNumberOfHalf(mesh.uvs[i * 2 + 1]),
+];
+
+/** Every vertex's baked light, in the order the mesh holds them. */
+const brightnesses = (mesh: MeshArrays): number[] =>
+  Array.from({ length: vertexCount(mesh) }, (_, i) => brightnessAt(mesh, i));
+
 /**
  * Whether every triangle's winding, by the right-hand rule over its indices,
  * agrees with its face's baked normal: what back-face culling relies on. The
@@ -66,7 +88,7 @@ const vertexCount = (mesh: MeshArrays): number => mesh.positions.length / 3;
  * on.
  */
 const windsOutward = (mesh: MeshArrays): boolean => {
-  const { positions, normals, indices } = mesh;
+  const { positions, indices } = mesh;
   for (let i = 0; i < indices.length; i += 3) {
     const [a, b, c] = [indices[i], indices[i + 1], indices[i + 2]];
     const ax = positions[a * 3];
@@ -81,8 +103,8 @@ const windsOutward = (mesh: MeshArrays): boolean => {
     const gx = uy * vz - uz * vy;
     const gy = uz * vx - ux * vz;
     const gz = ux * vy - uy * vx;
-    const dot =
-      gx * normals[a * 3] + gy * normals[a * 3 + 1] + gz * normals[a * 3 + 2];
+    const normal = normalAt(mesh, a);
+    const dot = gx * normal[0] + gy * normal[1] + gz * normal[2];
     if (dot <= 0) {
       return false;
     }
@@ -95,9 +117,9 @@ const windsOutward = (mesh: MeshArrays): boolean => {
 const tilesByNormal = (mesh: MeshArrays): Map<string, number[]> => {
   const out = new Map<string, number[]>();
   for (let i = 0; i < vertexCount(mesh); i++) {
-    const key = `${mesh.normals[i * 3]},${mesh.normals[i * 3 + 1]},${mesh.normals[i * 3 + 2]}`;
+    const key = normalAt(mesh, i).join(",");
     const list = out.get(key) ?? [];
-    list.push(mesh.tiles[i]);
+    list.push(tileAt(mesh, i));
     out.set(key, list);
   }
   return out;
@@ -108,13 +130,13 @@ const facesByNormal = (
 ): Map<string, Array<[number, number]>> => {
   const out = new Map<string, Array<[number, number]>>();
   for (let i = 0; i < vertexCount(mesh); i++) {
-    const key = `${mesh.normals[i * 3]},${mesh.normals[i * 3 + 1]},${mesh.normals[i * 3 + 2]}`;
+    const key = normalAt(mesh, i).join(",");
     let list = out.get(key);
     if (list === undefined) {
       list = [];
       out.set(key, list);
     }
-    list.push([mesh.uvs[i * 2], mesh.uvs[i * 2 + 1]]);
+    list.push(uvAt(mesh, i));
   }
   return out;
 };
@@ -126,11 +148,8 @@ const hasNormal = (
   z: number,
 ): boolean => {
   for (let i = 0; i < vertexCount(mesh); i++) {
-    if (
-      mesh.normals[i * 3] === x &&
-      mesh.normals[i * 3 + 1] === y &&
-      mesh.normals[i * 3 + 2] === z
-    ) {
+    const [nx, ny, nz] = normalAt(mesh, i);
+    if (nx === x && ny === y && nz === z) {
       return true;
     }
   }
@@ -397,7 +416,7 @@ describe("meshArraysToGeometry", () => {
     const geometry = meshArraysToGeometry(mesh);
     expect(geometry.drawCount).toBe(mesh.indices.length);
     expect(geometry.position?.count).toBe(vertexCount(mesh));
-    expect(geometry.normal?.count).toBe(vertexCount(mesh));
+    expect(geometry.attributes.packed?.count).toBe(vertexCount(mesh));
     expect(geometry.uv?.count).toBe(vertexCount(mesh));
   });
 });
@@ -421,7 +440,7 @@ describe("setGeometryData", () => {
     expect(geometry.drawCount).toBeGreaterThan(firstCount);
     expect(geometry.position?.count).toBe(grown.positions.length / 3);
     expect(geometry.position?.needsUpdate).toBe(true);
-    expect(geometry.normal?.needsUpdate).toBe(true);
+    expect(geometry.attributes.packed?.needsUpdate).toBe(true);
     expect(geometry.index?.count).toBe(grown.indices.length);
   });
 
@@ -449,8 +468,8 @@ describe("brightness baking", () => {
     // every sky voxel at full brightness: a fully exposed surface
     light.skylight.fill(MAX_LIGHT);
     const mesh = buildBlockMesh(store, [], light);
-    expect(mesh.brightness.length).toBe(mesh.positions.length / 3);
-    for (const b of mesh.brightness) {
+    expect(brightnesses(mesh).length).toBe(mesh.positions.length / 3);
+    for (const b of brightnesses(mesh)) {
       expect(b).toBeGreaterThan(0);
       expect(b).toBeLessThanOrEqual(1);
     }
@@ -461,8 +480,8 @@ describe("brightness baking", () => {
     // no light anywhere
     const light = new LightStore(store.voxels);
     const mesh = buildBlockMesh(store, [], light);
-    expect(mesh.brightness.length).toBeGreaterThan(0);
-    for (const b of mesh.brightness) {
+    expect(brightnesses(mesh).length).toBeGreaterThan(0);
+    for (const b of brightnesses(mesh)) {
       expect(b).toBeGreaterThanOrEqual(0);
       expect(b).toBeLessThanOrEqual(1);
     }
@@ -478,7 +497,7 @@ describe("brightness baking", () => {
     const light = new LightStore(store.voxels);
     light.skylight.fill(MAX_LIGHT);
     const mesh = buildBlockMesh(store, [], light);
-    const brightness = mesh.brightness;
+    const brightness = brightnesses(mesh);
     // at least one of the grass top-face's four corners shades below full
     expect(Math.min(...brightness)).toBeLessThan(1);
   });

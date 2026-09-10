@@ -19,7 +19,9 @@
  * length is tracked separately from the capacity, and `array()` returns a
  * view of exactly the written elements.
  */
-export class Growable<T extends Float32Array | Uint32Array> {
+export class Growable<
+  T extends Float32Array | Uint32Array | Uint16Array | Uint8Array,
+> {
   private buf: T;
   private readonly ctor: new (size: number) => T;
   private readonly chunk: number;
@@ -46,7 +48,7 @@ export class Growable<T extends Float32Array | Uint32Array> {
     this.buf = next;
   }
 
-  /** Appends `values` as-is (positions, normals, uvs). */
+  /** Appends `values` as-is (a member's positions, lanes or coordinates). */
   pushMany(values: ArrayLike<number>): void {
     this.growBy(values.length);
     this.buf.set(values, this.length);
@@ -101,13 +103,6 @@ export class Growable<T extends Float32Array | Uint32Array> {
     return this.buf.byteLength;
   }
 
-  /** Appends one value: a tile, or a brightness. */
-  push(value: number): void {
-    this.growBy(1);
-    this.buf[this.length] = value;
-    this.length += 1;
-  }
-
   /** Appends two, which is a texture coordinate. */
   pushPair(first: number, second: number): void {
     this.growBy(2);
@@ -116,13 +111,23 @@ export class Growable<T extends Float32Array | Uint32Array> {
     this.length += 2;
   }
 
-  /** Appends three, which is a position, a normal, or a triangle's indices. */
+  /** Appends three, which is a position or a triangle's indices. */
   pushTriple(first: number, second: number, third: number): void {
     this.growBy(3);
     this.buf[this.length] = first;
     this.buf[this.length + 1] = second;
     this.buf[this.length + 2] = third;
     this.length += 3;
+  }
+
+  /** Appends four, which is one vertex's group of packed lanes. */
+  pushQuad(first: number, second: number, third: number, fourth: number): void {
+    this.growBy(4);
+    this.buf[this.length] = first;
+    this.buf[this.length + 1] = second;
+    this.buf[this.length + 2] = third;
+    this.buf[this.length + 3] = fourth;
+    this.length += 4;
   }
 
   /**

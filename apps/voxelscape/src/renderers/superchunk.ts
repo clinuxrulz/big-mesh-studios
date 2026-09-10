@@ -23,6 +23,7 @@
 import { BufferAttribute, BufferGeometry } from "@random-mesh/rmsl/scene";
 import { Growable } from "./growable";
 import { setGeometryData, type MeshArrays, type Span } from "./mesh";
+import { VERTEX_BYTES } from "./vertex-format";
 import type { Dim3 } from "../world/level-data";
 
 /**
@@ -49,7 +50,7 @@ export interface MemberRanges {
 }
 
 /** The bytes one vertex of merged geometry adds to an upload. */
-export const VERTEX_UPLOAD_BYTES = 40;
+export const VERTEX_UPLOAD_BYTES = VERTEX_BYTES;
 
 /** The bytes one index of merged geometry adds to an upload. */
 export const INDEX_UPLOAD_BYTES = 4;
@@ -64,22 +65,18 @@ const EMPTY_RANGE: IndexRange = { start: 0, count: 0 };
  */
 interface MergedArrays {
   positions: Growable<Float32Array>;
-  normals: Growable<Float32Array>;
-  uvs: Growable<Float32Array>;
-  /** One number a vertex: the sheet tile its repeating texture wraps into. */
-  tiles: Growable<Float32Array>;
+  /** Four bytes a vertex: face direction, baked light, sheet tile, one spare. */
+  packed: Growable<Uint8Array>;
+  /** Two half floats a vertex, counted in cells rather than swept nought to one. */
+  uvs: Growable<Uint16Array>;
   indices: Growable<Uint32Array>;
-  /** One 0..1 brightness a vertex, carried from the per-block bake. */
-  brightness: Growable<Float32Array>;
 }
 
 const emptyArrays = (): MergedArrays => ({
   positions: new Growable(Float32Array),
-  normals: new Growable(Float32Array),
-  uvs: new Growable(Float32Array),
-  tiles: new Growable(Float32Array),
+  packed: new Growable(Uint8Array),
+  uvs: new Growable(Uint16Array),
   indices: new Growable(Uint32Array),
-  brightness: new Growable(Float32Array),
 });
 
 /**
@@ -131,21 +128,17 @@ const appendArrays = (
 ): void => {
   const base = into.positions.count / 3;
   into.positions.pushOffset(from.positions, dx, dy, dz);
-  into.normals.pushMany(from.normals);
+  into.packed.pushMany(from.packed);
   into.uvs.pushMany(from.uvs);
-  into.tiles.pushMany(from.tiles);
-  into.brightness.pushMany(from.brightness);
   into.indices.pushShifted(from.indices, base);
 };
 
-/** Bytes a pass's six arrays occupy, written or not, since growth doubles them. */
+/** Bytes a pass's arrays occupy, written or not, since growth doubles them. */
 const capacityBytes = (arrays: MergedArrays): number =>
   arrays.positions.capacityBytes +
-  arrays.normals.capacityBytes +
+  arrays.packed.capacityBytes +
   arrays.uvs.capacityBytes +
-  arrays.tiles.capacityBytes +
-  arrays.indices.capacityBytes +
-  arrays.brightness.capacityBytes;
+  arrays.indices.capacityBytes;
 
 /** One pass: its arrays, the room retired members left in them, and what it owes. */
 interface Pass {
@@ -236,10 +229,8 @@ const writeMember = (
     dy,
     dz,
   );
-  pass.arrays.normals.writeManyAt(run.vertexFirst * 3, mesh.normals);
+  pass.arrays.packed.writeManyAt(run.vertexFirst * 4, mesh.packed);
   pass.arrays.uvs.writeManyAt(run.vertexFirst * 2, mesh.uvs);
-  pass.arrays.tiles.writeManyAt(run.vertexFirst, mesh.tiles);
-  pass.arrays.brightness.writeManyAt(run.vertexFirst, mesh.brightness);
   pass.arrays.indices.writeShiftedAt(
     run.indexFirst,
     mesh.indices,
@@ -496,10 +487,8 @@ export class Superchunk {
         geometry,
         {
           positions: pass.arrays.positions.array(),
-          normals: pass.arrays.normals.array(),
+          packed: pass.arrays.packed.array(),
           uvs: pass.arrays.uvs.array(),
-          tiles: pass.arrays.tiles.array(),
-          brightness: pass.arrays.brightness.array(),
           indices: pass.arrays.indices.array(),
         },
         // Nothing written means nothing to send; an empty span says so, where

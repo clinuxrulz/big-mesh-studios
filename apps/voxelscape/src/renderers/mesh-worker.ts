@@ -32,20 +32,11 @@ export const meshArraysTransfers = (
   const seen = new Set<Transferable>();
   const transfer: Transferable[] = [];
   for (const mesh of [terrain, water]) {
-    const { positions, normals, uvs, tiles, brightness, indices } = mesh as {
-      positions: Float32Array;
-      normals: Float32Array;
-      uvs: Float32Array;
-      tiles: Float32Array;
-      brightness: Float32Array;
-      indices: Uint32Array;
-    };
+    const { positions, packed, uvs, indices } = mesh;
     for (const buffer of [
       positions.buffer,
-      normals.buffer,
+      packed.buffer,
       uvs.buffer,
-      tiles.buffer,
-      brightness.buffer,
       indices.buffer,
     ]) {
       if (!seen.has(buffer)) {

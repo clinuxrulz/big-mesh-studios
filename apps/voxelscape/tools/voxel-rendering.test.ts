@@ -13,25 +13,26 @@ import {
 describe("what a vertex carries", () => {
   it("reads the attributes the mesher actually sets", () => {
     expect(vertexAttributes()).toEqual([
-      { name: "position", elements: 3 },
-      { name: "normal", elements: 3 },
-      { name: "uv", elements: 2 },
-      { name: "tileIndex", elements: 1 },
-      { name: "brightness", elements: 1 },
+      { name: "position", elements: 3, format: "float32x3" },
+      { name: "packed", elements: 4, format: "unorm8x4" },
+      { name: "uv", elements: 2, format: "float16x2" },
     ]);
   });
 
   it("adds up to what the upload budget spends against", () => {
-    // The budget paces a frame's uploads against `VERTEX_UPLOAD_BYTES`. An
-    // attribute added without changing it makes every estimate wrong by four
-    // bytes a vertex, which is the kind of quiet error nothing else here would
-    // catch.
+    // The budget paces a frame's uploads against `VERTEX_BYTES`. An attribute
+    // added, or one whose format narrowed, without changing it makes every
+    // estimate wrong by the difference a vertex — the kind of quiet error
+    // nothing else here would catch.
     const summed = vertexAttributes().reduce(
-      (sum, attribute) => sum + attribute.elements * 4,
+      (sum, attribute) =>
+        sum +
+        attribute.elements *
+          (Number(attribute.format.split("x")[0].replace(/^[a-z]+/, "")) / 8),
       0,
     );
     const declared = Number(
-      constantsOf("renderers/superchunk.ts", ["VERTEX_UPLOAD_BYTES"])[0].value,
+      constantsOf("renderers/vertex-format.ts", ["VERTEX_BYTES"])[0].value,
     );
     expect(summed).toBe(declared);
   });

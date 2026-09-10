@@ -18,7 +18,11 @@
 // to the translucent water pass; lava, which is opaque and textured, is
 // emitted into the terrain pass so it shares the terrain material and the
 // opaque draw order.
-import { BufferAttribute, BufferGeometry } from "@random-mesh/rmsl/scene";
+import {
+  BufferAttribute,
+  BufferGeometry,
+  type VertexFormat,
+} from "@random-mesh/rmsl/scene";
 import type { VoxelTileConfig } from "./atlas";
 import { Growable } from "./growable";
 import {
@@ -32,6 +36,7 @@ import {
 import { surfaceFractionOfLevel } from "../world/fluid";
 import { LIGHT_TO_UNIT, type LightStore } from "../world/light-store";
 import { SlicePlane } from "./plane-merge";
+import { faceIndexOf, halfOfWholeNumber } from "./vertex-format";
 
 /**
  * Vertex arrays for one mesh, at exactly the length the build wrote. Typed all
@@ -40,18 +45,20 @@ import { SlicePlane } from "./plane-merge";
  */
 export interface MeshArrays {
   positions: Float32Array;
-  normals: Float32Array;
+  /**
+   * Four bytes a vertex: which way the face points, how lit it is, which tile
+   * of the sheet it shows, and one byte spare. See `vertex-format.ts` for what
+   * each lane holds and why they share one attribute.
+   */
+  packed: Uint8Array;
   /**
    * Texture coordinates counted in cells rather than swept nought to one, so a
-   * quad covering several cells repeats its tile once per cell. Which tile
-   * each vertex repeats is `tiles`.
+   * quad covering several cells repeats its tile once per cell. Which tile each
+   * vertex repeats is a lane of `packed`. Held as half floats, which carry
+   * every whole number a coordinate can be exactly.
    */
-  uvs: Float32Array;
-  /** Each vertex's tile of the sheet, one number a vertex. */
-  tiles: Float32Array;
+  uvs: Uint16Array;
   indices: Uint32Array;
-  /** One 0..1 brightness per vertex, baked from the block's light + corner occlusion. */
-  brightness: Float32Array;
 }
 
 /**
@@ -64,30 +71,37 @@ export interface MeshArrays {
  */
 export class MeshBuilder {
   readonly positions = new Growable(Float32Array);
-  readonly normals = new Growable(Float32Array);
-  readonly uvs = new Growable(Float32Array);
-  readonly tiles = new Growable(Float32Array);
-  readonly brightness = new Growable(Float32Array);
+  readonly packed = new Growable(Uint8Array);
+  readonly uvs = new Growable(Uint16Array);
   readonly indices = new Growable(Uint32Array);
 
   /** Empties every array for the next block, keeping the buffers. */
   clear(): void {
     this.positions.clear();
-    this.normals.clear();
+    this.packed.clear();
     this.uvs.clear();
-    this.tiles.clear();
-    this.brightness.clear();
     this.indices.clear();
+  }
+
+  /**
+   * Writes one vertex's lane group: the direction its face points, its baked
+   * light, and its tile of the sheet, each as the byte the shader decodes.
+   */
+  pushPacked(face: number, brightness: number, tile: number): void {
+    this.packed.pushQuad(face, Math.round(brightness * 255), tile, 0);
+  }
+
+  /** Writes one vertex's texture coordinate, as the half floats it is held in. */
+  pushUv(u: number, v: number): void {
+    this.uvs.pushPair(halfOfWholeNumber(u), halfOfWholeNumber(v));
   }
 
   /** What was written, as arrays of their own. */
   finish(): MeshArrays {
     return {
       positions: this.positions.exact(),
-      normals: this.normals.exact(),
+      packed: this.packed.exact(),
       uvs: this.uvs.exact(),
-      tiles: this.tiles.exact(),
-      brightness: this.brightness.exact(),
       indices: this.indices.exact(),
     };
   }
@@ -96,10 +110,8 @@ export class MeshBuilder {
 /** A mesh with nothing in it, for a block with no face to show. */
 export const emptyMesh = (): MeshArrays => ({
   positions: new Float32Array(0),
-  normals: new Float32Array(0),
-  uvs: new Float32Array(0),
-  tiles: new Float32Array(0),
-  brightness: new Float32Array(0),
+  packed: new Uint8Array(0),
+  uvs: new Uint16Array(0),
   indices: new Uint32Array(0),
 });
 
@@ -323,14 +335,12 @@ const emitCubeFace = (
       axis === 1 ? wy + sign * h : wy + (yo - 0.5) * 2 * h,
       axis === 2 ? wz + sign * h : wz + (zo - 0.5) * 2 * h,
     );
-    ctx.into.normals.pushTriple(
-      axis === 0 ? sign : 0,
-      axis === 1 ? sign : 0,
-      axis === 2 ? sign : 0,
+    ctx.into.pushUv(u, v);
+    ctx.into.pushPacked(
+      faceIndexOf(axis, sign),
+      cornerLight === null ? 1 : cornerLight[k],
+      tile,
     );
-    ctx.into.uvs.pushPair(u, v);
-    ctx.into.tiles.push(tile);
-    ctx.into.brightness.push(cornerLight === null ? 1 : cornerLight[k]);
   }
   finishQuad(ctx, base, axis, sign);
 };
@@ -373,14 +383,8 @@ const emitMergedFace = (
     point[a1] = (first + offsets[a1] * wide - voxels[a1] / 2) * scale;
     point[a2] = (second + offsets[a2] * tall - voxels[a2] / 2) * scale;
     ctx.into.positions.pushTriple(point[0], point[1], point[2]);
-    ctx.into.normals.pushTriple(
-      axis === 0 ? sign : 0,
-      axis === 1 ? sign : 0,
-      axis === 2 ? sign : 0,
-    );
-    ctx.into.uvs.pushPair(u * alongU, v * alongV);
-    ctx.into.tiles.push(tile);
-    ctx.into.brightness.push(shade);
+    ctx.into.pushUv(u * alongU, v * alongV);
+    ctx.into.pushPacked(faceIndexOf(axis, sign), shade, tile);
   }
   finishQuad(ctx, base, axis, sign);
 };
@@ -425,14 +429,12 @@ const emitFluidFace = (
       yAt(fy),
       axis === 2 ? wz + sign * h : wz + (zo - 0.5) * 2 * h,
     );
-    ctx.into.normals.pushTriple(
-      axis === 0 ? sign : 0,
-      axis === 1 ? sign : 0,
-      axis === 2 ? sign : 0,
+    ctx.into.pushUv(u, v);
+    ctx.into.pushPacked(
+      faceIndexOf(axis, sign),
+      cornerLight === null ? 1 : cornerLight[k],
+      tile,
     );
-    ctx.into.uvs.pushPair(u, v);
-    ctx.into.tiles.push(tile);
-    ctx.into.brightness.push(cornerLight === null ? 1 : cornerLight[k]);
   }
   finishQuad(ctx, base, axis, sign);
 };
@@ -702,11 +704,14 @@ export const buildWaterMesh = (
  * grew) uploads nothing extra.
  */
 const attrWithRange = (
-  array: Float32Array | Uint32Array,
+  array: Float32Array | Uint32Array | Uint16Array | Uint8Array,
   itemSize: number,
   span: Span | undefined,
+  format?: VertexFormat,
+  normalized = false,
 ): BufferAttribute => {
-  const attribute = new BufferAttribute(array, itemSize);
+  const attribute = new BufferAttribute(array, itemSize, normalized);
+  attribute.format = format;
   if (span !== undefined) {
     // Counted in numbers here, where the span counts vertices or indices.
     attribute.updateRange = {
@@ -750,24 +755,26 @@ export const setGeometryData = (
   mesh: MeshArrays,
   written?: WrittenSpans,
 ): void => {
-  const attr = (name: string, array: Float32Array, itemSize: number): void => {
-    geometry.setAttribute(
-      name,
-      attrWithRange(array, itemSize, written?.vertices),
-    );
-  };
-  attr("position", mesh.positions, 3);
-  attr("normal", mesh.normals, 3);
+  geometry.setAttribute(
+    "position",
+    attrWithRange(mesh.positions, 3, written?.vertices, "float32x3"),
+  );
+  // The face direction, the baked light and the tile, a byte each, scaled into
+  // 0..1 on the way in. A material that reads none of them (the probe, the
+  // picker) simply never binds it.
+  geometry.setAttribute(
+    "packed",
+    attrWithRange(mesh.packed, 4, written?.vertices, "unorm8x4", true),
+  );
   if (mesh.uvs.length > 0) {
-    attr("uv", mesh.uvs, 2);
-    attr("tileIndex", mesh.tiles, 1);
+    // Half floats in a Uint16Array, which the array type alone cannot say.
+    geometry.setAttribute(
+      "uv",
+      attrWithRange(mesh.uvs, 2, written?.vertices, "float16x2"),
+    );
   } else {
     geometry.deleteAttribute("uv");
-    geometry.deleteAttribute("tileIndex");
   }
-  // The per-vertex brightness mults the surface colour; a material that does
-  // not reference it (the probe, the picker) simply never binds it.
-  attr("brightness", mesh.brightness, 1);
   // wrap as a BufferAttribute so `setIndex` keeps the Uint32 type without
   // rescanning the array for the 16-bit cutoff
   geometry.setIndex(attrWithRange(mesh.indices, 1, written?.indices));

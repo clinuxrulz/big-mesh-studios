@@ -46,6 +46,7 @@ import {
   type IndexRange,
 } from "./superchunk";
 import { MeshClient } from "./mesh-client";
+import { faceNormalOf, MAX_TILE_INDEX } from "./vertex-format";
 import { Counter, Phase, probe } from "../render/perf-probe";
 import type { WorldWorkerPool } from "../world/worker-pool";
 import { OcclusionDebugMaterial } from "./occlusion-debug-material";
@@ -121,12 +122,11 @@ export class TriangleMaterial extends NodeMaterial {
   }
 
   protected setup(b: Builder, _scene: Scene): void {
-    void b.attribute("brightness", "float");
+    void b.attribute("packed", "vec4");
     void b.varying("brightness", "float");
     // A quad covers as many cells as its faces merged into it, and its texture
     // coordinates count those cells, so the fragment wraps them back into the
     // one tile this vertex names.
-    void b.attribute("tileIndex", "float");
     void b.varying("tileIndex", "float");
     this.atlasColumnsUniform = b.materialUniform(
       "atlasColumns",
@@ -191,21 +191,23 @@ export class TriangleMaterial extends NodeMaterial {
   }
 
   protected buildVertexBody(b: Builder): Node<"vec4"> {
-    const brightnessVarying = b.varying("brightness", "float");
-    brightnessVarying.assign(b.attribute("brightness", "float"));
+    // One attribute holds three of this vertex's four small numbers, each a
+    // byte scaled into 0..1; `vertex-format.ts` says which lane is which.
+    const packed = b.attribute("packed", "vec4");
+    b.varying("brightness", "float").assign(packed.y);
+    b.varying("tileIndex", "float").assign(packed.z.mul(255).round());
     const position4 = vec4(b.position, 1);
     const localPosition = b.instancing
       ? b.instanceMatrix.mul(position4)
       : position4;
     const worldPosition = b.modelMatrix.mul(localPosition);
     b.positionWorld.assign(worldPosition.xyz);
-    let normal: Node<"vec3"> = b.normal;
+    let normal = faceNormalOf(packed.x.mul(255).round());
     if (b.instancing) {
       normal = mat3(b.instanceMatrix).mul(normal);
     }
     b.normalWorld.assign(b.normalMatrix.mul(normal).normalize());
     b.uvVarying.assign(b.uv);
-    b.varying("tileIndex", "float").assign(b.attribute("tileIndex", "float"));
     return b.projectionMatrix.mul(b.viewMatrix.mul(worldPosition));
   }
 
@@ -294,7 +296,7 @@ export class TriangleWaterMaterial extends NodeMaterial {
   }
 
   protected setup(b: Builder, _scene: Scene): void {
-    void b.attribute("brightness", "float");
+    void b.attribute("packed", "vec4");
     void b.varying("brightness", "float");
     this.fogColorUniform = b.materialUniform(
       "fogColor",
@@ -314,15 +316,15 @@ export class TriangleWaterMaterial extends NodeMaterial {
   }
 
   protected buildVertexBody(b: Builder): Node<"vec4"> {
-    const brightnessVarying = b.varying("brightness", "float");
-    brightnessVarying.assign(b.attribute("brightness", "float"));
+    const packed = b.attribute("packed", "vec4");
+    b.varying("brightness", "float").assign(packed.y);
     const position4 = vec4(b.position, 1);
     const localPosition = b.instancing
       ? b.instanceMatrix.mul(position4)
       : position4;
     const worldPosition = b.modelMatrix.mul(localPosition);
     b.positionWorld.assign(worldPosition.xyz);
-    let normal: Node<"vec3"> = b.normal;
+    let normal = faceNormalOf(packed.x.mul(255).round());
     if (b.instancing) {
       normal = mat3(b.instanceMatrix).mul(normal);
     }
@@ -461,11 +463,9 @@ export const scBounds = (cell: Dim3): { center: Dim3; half: number } => ({
 /** Bytes one block's built mesh occupies before it is merged. */
 const meshArraysResidentBytes = (arrays: MeshArrays): number =>
   arrays.positions.byteLength +
-  arrays.normals.byteLength +
+  arrays.packed.byteLength +
   arrays.uvs.byteLength +
-  arrays.tiles.byteLength +
-  arrays.indices.byteLength +
-  arrays.brightness.byteLength;
+  arrays.indices.byteLength;
 
 /** One view-frustum plane as the `[a, b, c, d]` of `a*x + b*y + c*z + d`. */
 type FrustumPlane = [number, number, number, number];
@@ -1515,6 +1515,17 @@ export class TriangleRenderer {
     texture: Texture,
     grid: AtlasGrid,
   ): void {
+    // A vertex names its tile in one byte, so a sheet with more cells than a
+    // byte can count cannot be drawn from. Caught here, where the sheet
+    // arrives, rather than as tiles wrapping onto each other in the world.
+    for (const tile of voxelTiles) {
+      const highest = Math.max(tile.top, tile.side, tile.bottom);
+      if (highest > MAX_TILE_INDEX) {
+        throw new Error(
+          `[atlas] tile index ${highest} is past the ${MAX_TILE_INDEX} a vertex can name`,
+        );
+      }
+    }
     this.triMaterial.tilesTexture = texture;
     this.triMaterial.atlasGrid = grid;
     this.triMaterial.needsUpdate = true;

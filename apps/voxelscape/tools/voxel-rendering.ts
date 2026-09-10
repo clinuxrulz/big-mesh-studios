@@ -26,8 +26,16 @@ const APP_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC_DIR = join(APP_DIR, "src");
 const DRAWING = join(APP_DIR, "docs", "voxel-rendering.md");
 
-/** How many bytes one element of an attribute takes: everything here is a float. */
-const BYTES_AN_ELEMENT = 4;
+/**
+ * How many bytes one component of a vertex format takes, read out of the
+ * format's own name: `float32x3` is three of four, `unorm8x4` four of one. The
+ * attributes are no longer all floats, so the width has to come from the
+ * format rather than being assumed.
+ */
+const bytesAComponent = (format: string): number => {
+  const bits = Number(format.split("x")[0].replace(/^[a-z]+/, ""));
+  return bits / 8;
+};
 
 /**
  * The modules the path runs through, in the order it runs, each with what it
@@ -78,6 +86,10 @@ const PATH: Array<{ module: string; does: string }> = [
   {
     module: "renderers/mesh.ts",
     does: "sweeps a block for exposed faces and writes the quads they become",
+  },
+  {
+    module: "renderers/vertex-format.ts",
+    does: "what a vertex weighs, and which lane of it holds which of the small numbers",
   },
   {
     module: "renderers/growable.ts",
@@ -144,7 +156,8 @@ const GOVERNING: Record<string, readonly string[]> = {
     "GEOMETRY_POOL_FRAMES",
     "DEFAULT_OCCLUSION_INTERVAL",
   ],
-  "renderers/superchunk.ts": ["VERTEX_UPLOAD_BYTES", "INDEX_UPLOAD_BYTES"],
+  "renderers/superchunk.ts": ["INDEX_UPLOAD_BYTES"],
+  "renderers/vertex-format.ts": ["VERTEX_BYTES", "MAX_TILE_INDEX"],
   "renderers/mesh-client.ts": ["MAX_BUILDS_PER_DRAIN"],
 };
 
@@ -216,6 +229,8 @@ export const constantsOf = (
 export interface Attribute {
   name: string;
   elements: number;
+  /** The vertex format `setGeometryData` binds it as. */
+  format: string;
 }
 
 /**
@@ -228,18 +243,33 @@ export const vertexAttributes = (): Attribute[] => {
   const tree = treeOf(module);
   const attributes: Attribute[] = [];
   const walk = (node: ts.Node): void => {
+    // `geometry.setAttribute("name", attrWithRange(array, elements, span,
+    // "format", ...))` — the name comes from the outer call and the width from
+    // the format the inner one names.
     if (
       ts.isCallExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === "attr" &&
-      node.arguments.length === 3 &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "setAttribute" &&
+      node.arguments.length === 2 &&
       ts.isStringLiteral(node.arguments[0]) &&
-      ts.isNumericLiteral(node.arguments[2])
+      ts.isCallExpression(node.arguments[1]) &&
+      ts.isIdentifier(node.arguments[1].expression) &&
+      node.arguments[1].expression.text === "attrWithRange"
     ) {
-      attributes.push({
-        name: node.arguments[0].text,
-        elements: Number(node.arguments[2].text),
-      });
+      const inner = node.arguments[1];
+      const elements = inner.arguments[1];
+      const format = inner.arguments[3];
+      if (
+        ts.isNumericLiteral(elements) &&
+        format &&
+        ts.isStringLiteral(format)
+      ) {
+        attributes.push({
+          name: node.arguments[0].text,
+          elements: Number(elements.text),
+          format: format.text,
+        });
+      }
     }
     ts.forEachChild(node, walk);
   };
@@ -381,7 +411,8 @@ export const drawingOf = (): string => {
   const constant = (name: string): string =>
     declared.find((entry) => entry.name === name)?.value ?? "?";
   const vertexBytes = attributes.reduce(
-    (sum, attribute) => sum + attribute.elements * BYTES_AN_ELEMENT,
+    (sum, attribute) =>
+      sum + attribute.elements * bytesAComponent(attribute.format),
     0,
   );
   const lines: string[] = [
@@ -430,16 +461,20 @@ export const drawingOf = (): string => {
   lines.push("");
 
   lines.push("## What a vertex carries", "");
-  lines.push("| attribute | numbers | bytes |", "| --- | --- | --- |");
+  lines.push(
+    "| attribute | format | numbers | bytes |",
+    "| --- | --- | --- | --- |",
+  );
   for (const attribute of attributes) {
     lines.push(
-      `| \`${attribute.name}\` | ${attribute.elements} | ${attribute.elements * BYTES_AN_ELEMENT} |`,
+      `| \`${attribute.name}\` | \`${attribute.format}\` | ${attribute.elements} | ` +
+        `${attribute.elements * bytesAComponent(attribute.format)} |`,
     );
   }
   lines.push(`| **total** | | **${vertexBytes}** |`);
   lines.push("");
   lines.push(
-    `\`VERTEX_UPLOAD_BYTES\` says ${constant("VERTEX_UPLOAD_BYTES")}, which is what the frame's upload budget`,
+    `\`VERTEX_BYTES\` says ${constant("VERTEX_BYTES")}, which is what the frame's upload budget`,
     `spends against. An index costs ${constant("INDEX_UPLOAD_BYTES")} bytes on top, six to a quad.`,
     "",
   );
@@ -489,16 +524,17 @@ export const problemsWith = (drawing: string, held: string): string[] => {
   }
   const attributes = vertexAttributes();
   const summed = attributes.reduce(
-    (sum, attribute) => sum + attribute.elements * BYTES_AN_ELEMENT,
+    (sum, attribute) =>
+      sum + attribute.elements * bytesAComponent(attribute.format),
     0,
   );
   const declared = Number(
-    constantsOf("renderers/superchunk.ts", ["VERTEX_UPLOAD_BYTES"])[0]?.value ??
+    constantsOf("renderers/vertex-format.ts", ["VERTEX_BYTES"])[0]?.value ??
       "0",
   );
   if (summed !== declared) {
     problems.push(
-      `the vertex attributes come to ${summed} bytes and VERTEX_UPLOAD_BYTES says ${declared}: ` +
+      `the vertex attributes come to ${summed} bytes and VERTEX_BYTES says ${declared}: ` +
         `every upload estimate and the frame's byte budget are off by the difference`,
     );
   }

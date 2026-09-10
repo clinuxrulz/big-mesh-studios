@@ -7,13 +7,7 @@
 // and rotated through hue space by the golden angle, so even neighbouring
 // slots land on clearly different hues. The readback logic is untouched: this
 // is a view of the id, not a different way of encoding it.
-import {
-  mat3,
-  vec3,
-  vec4,
-  type Node,
-  type UniformNode,
-} from "@random-mesh/rmsl";
+import { vec3, vec4, type Node, type UniformNode } from "@random-mesh/rmsl";
 import { Builder, NodeMaterial } from "@random-mesh/rmsl/scene";
 import type { SlotColoured } from "./occlusion-probe-material";
 
@@ -40,12 +34,9 @@ export class OcclusionDebugMaterial
       : position4;
     const worldPosition = b.modelMatrix.mul(localPosition);
     b.positionWorld.assign(worldPosition.xyz);
-    let normal: Node<"vec3"> = b.normal;
-    if (b.instancing) {
-      normal = mat3(b.instanceMatrix).mul(normal);
-    }
-    b.normalWorld.assign(b.normalMatrix.mul(normal).normalize());
-    b.uvVarying.assign(b.uv);
+    // The fragment colours a slot id and nothing else, so neither the surface
+    // normal nor its texture coordinate is read — and touching them here would
+    // bind two attributes this pass has no use for.
     if (b.instancingColor) {
       b.instanceColorVarying.assign(b.instanceColor);
     }
