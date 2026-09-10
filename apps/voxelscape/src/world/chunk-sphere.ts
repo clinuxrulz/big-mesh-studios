@@ -183,6 +183,13 @@ export class ChunkSphere {
 
   private readonly cells: CellCoord[] = [];
   private readonly cellIndex = new Map<string, number>();
+  /**
+   * Whether each slot's voxels are the terrain of the cell it currently
+   * stands for. False from the moment a scroll points the slot at an entering
+   * cell until that cell's fill lands, which is the window in which the slot
+   * still physically holds the cell it left behind.
+   */
+  private readonly filled: boolean[] = [];
   private readonly free: number[] = [];
   private readonly onBlockReposition: (index: number, center: Dim3) => void;
   private readonly onBlockRelease?: (index: number) => void;
@@ -208,6 +215,7 @@ export class ChunkSphere {
         cell.z * BLOCK_WORLD[2],
       ];
       this.cells.push({ x: cell.x, y: cell.y, z: cell.z });
+      this.filled.push(false);
       // A shell's empty store is sized to the LOD its first cell gets, so the
       // initial allocation is no larger than the fills that follow; a slot
       // later filled at a different LOD resizes in place.
@@ -225,7 +233,10 @@ export class ChunkSphere {
     this.fillClient = new FillClient({
       terrain: params.terrain,
       blocks: this.blocks,
-      onBlockChanged: params.onBlockChanged,
+      onBlockChanged: (index, meshes) => {
+        this.filled[index] = true;
+        params.onBlockChanged(index, meshes);
+      },
       editLayer: params.editLayer,
       customFillStore: params.customFillStore,
       customFillStoreUrl: params.customFillStoreUrl,
@@ -237,12 +248,24 @@ export class ChunkSphere {
 
   /**
    * The slot holding the cell that contains a world point, or `undefined`
-   * when the window does not hold that cell. Backs `query` and the caller's
-   * "is this cell's data ready" check.
+   * when the window does not hold that cell, or holds it in a slot whose
+   * terrain has not arrived. Backs `query` and the caller's "is this cell's
+   * data ready" check, so a query about a cell being streamed is answered the
+   * same way as one about a cell outside the window: nothing is there.
    */
   slotAt(worldX: number, worldY: number, worldZ: number): number | undefined {
     const [cx, cy, cz] = chunkCellOf(worldX, worldY, worldZ);
-    return this.cellIndex.get(cellKey({ x: cx, y: cy, z: cz }));
+    const slot = this.cellIndex.get(cellKey({ x: cx, y: cy, z: cz }));
+    return slot === undefined || !this.filled[slot] ? undefined : slot;
+  }
+
+  /**
+   * Whether a slot's voxels are the terrain of the cell it currently stands
+   * for, for a caller walking the block array by index rather than asking
+   * about a world point.
+   */
+  hasTerrain(slot: number): boolean {
+    return this.filled[slot];
   }
 
   /** Slots waiting for terrain data, on a worker batch or on the main thread. */
@@ -275,6 +298,7 @@ export class ChunkSphere {
         cells[i].z * BLOCK_WORLD[2],
       ];
       this.blocks[i].center = c;
+      this.filled[i] = false;
       this.onBlockReposition(i, c);
     }
 
@@ -393,6 +417,11 @@ export class ChunkSphere {
       ];
       this.blocks[slot].center = c;
       this.blocks[slot].targetLod = lodAt(cell, { x: cx, y: cy, z: cz });
+      // The slot still holds the cell it left behind, and now stands for this
+      // one: until the fill lands it answers for neither, and every query
+      // about it is turned away rather than the voxels being zeroed to make
+      // the wrong answer a harmless one.
+      this.filled[slot] = false;
       // reposition both renderers' meshes for this slot; the triangle
       // renderer also clears its geometry there to avoid flashing the old
       // block's surface at the new location

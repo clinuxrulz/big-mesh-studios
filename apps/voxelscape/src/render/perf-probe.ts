@@ -1,10 +1,9 @@
 /**
  * The stretches of one frame the probe times separately. The order is the
  * order they run in, and the numbers index every per-phase array here. A
- * stretch can sit inside another and be timed under both: five `scroll`
- * stretches divide the window's move between them, two more divide the
- * teleport inside that, and `advance`, `occlusion` and `draw` are the three
- * every other stretch falls inside.
+ * stretch can sit inside another and be timed under both: the five `scroll`
+ * stretches divide the window's move between them, and `advance`, `occlusion`
+ * and `draw` are the three every other stretch falls inside.
  */
 export const Phase = {
   player: 0,
@@ -17,34 +16,28 @@ export const Phase = {
    */
   scrollEvict: 3,
   /**
-   * Teleporting a freed slot onto each entering cell: clearing the voxels and
-   * light it held, and unseating its geometry from the superchunk that drew it.
+   * Teleporting a freed slot onto each entering cell, which unseats its
+   * geometry from the superchunk that was drawing it and enrols it in the one
+   * its new cell belongs to.
    */
   scrollTeleport: 4,
-  /** Of the teleport, zeroing the voxels and the two light channels the slot held. */
-  scrollClear: 5,
-  /**
-   * Of the teleport, moving the slot's geometry out of the superchunk it was
-   * drawn in and into the one its new cell belongs to.
-   */
-  scrollRegroup: 6,
   /** Ordering the cells about to be streamed so the player's own comes first. */
-  scrollOrder: 7,
+  scrollOrder: 5,
   /**
    * The level of detail and the six neighbouring voxel sizes each entering cell
    * is asked for, and handing that batch to the fill client.
    */
-  scrollRequest: 8,
-  flow: 9,
-  multiplayer: 10,
-  monsters: 11,
-  environment: 12,
-  meshDrain: 13,
-  merge: 14,
-  rendererTick: 15,
-  advance: 16,
-  occlusion: 17,
-  draw: 18,
+  scrollRequest: 6,
+  flow: 7,
+  multiplayer: 8,
+  monsters: 9,
+  environment: 10,
+  meshDrain: 11,
+  merge: 12,
+  rendererTick: 13,
+  advance: 14,
+  occlusion: 15,
+  draw: 16,
 } as const;
 
 /** Each phase's name, at the index that phase is timed under. */

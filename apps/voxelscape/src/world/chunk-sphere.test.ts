@@ -180,6 +180,39 @@ describe("ChunkSphere", () => {
     vi.useRealTimers();
   });
 
+  it("answers nothing for an entering cell until its fill lands", async () => {
+    vi.useFakeTimers();
+    // The smallest window there is — seven cells — so the whole test costs a
+    // dozen of the sync fallback's per-cell sweeps rather than hundreds.
+    const { sphere } = sphereWithRecordedFills(1);
+    sphere.fillFrom(0, 0, 0);
+    await vi.runAllTimersAsync();
+
+    // One cell east of the new centre, and two from the old one, so it is a
+    // cell the window did not hold before this move.
+    const entering = cellCenter({ x: 2, y: 0, z: 0 });
+    sphere.scrollTo(cellCenter({ x: 1, y: 0, z: 0 })[0], 0, 0);
+
+    // A slot has been moved onto the cell — it stands at those coordinates —
+    // but it is still holding the voxels of the cell it was freed from, so
+    // the window turns a query about it away rather than answering with them.
+    const slot = sphere.blocks.findIndex((block) =>
+      block.center.every((axis, at) => axis === entering[at]),
+    );
+    expect(slot).toBeGreaterThanOrEqual(0);
+    expect(sphere.hasTerrain(slot)).toBe(false);
+    expect(
+      sphere.slotAt(entering[0], entering[1], entering[2]),
+    ).toBeUndefined();
+
+    await vi.runAllTimersAsync();
+    vi.useRealTimers();
+
+    // Its fill has landed, so the same slot now answers for it.
+    expect(sphere.hasTerrain(slot)).toBe(true);
+    expect(sphere.slotAt(entering[0], entering[1], entering[2])).toBe(slot);
+  }, 15_000);
+
   it.skip("streams the ball to a new centre, reusing freed slots and filling the player's cell first", async () => {
     vi.useFakeTimers();
     const radius = 2;
@@ -195,10 +228,13 @@ describe("ChunkSphere", () => {
     sphere.scrollTo(target[0], target[1], target[2]);
 
     // The block under the player is asked for first, so it is the first cell
-    // the fallback's one-block-per-task drain fills.
+    // the fallback's one-block-per-task drain fills. Until that fill lands the
+    // cell answers nothing: the slot standing on it still holds the voxels of
+    // the cell it was freed from.
+    expect(sphere.slotAt(target[0], target[1], target[2])).toBeUndefined();
+    vi.advanceTimersToNextTimer();
     const playerSlot = sphere.slotAt(target[0], target[1], target[2]);
     expect(playerSlot).toBeDefined();
-    vi.advanceTimersToNextTimer();
     expect(filled[0]).toBe(playerSlot);
     expect(sphere.blocks.length).toBe(cellsInSphere(radius));
 
@@ -230,9 +266,10 @@ describe("ChunkSphere", () => {
     const target = cellCenter({ x: 0, y: -3, z: 0 });
     sphere.scrollTo(target[0], target[1], target[2]);
 
+    expect(sphere.slotAt(target[0], target[1], target[2])).toBeUndefined();
+    vi.advanceTimersToNextTimer();
     const playerSlot = sphere.slotAt(target[0], target[1], target[2]);
     expect(playerSlot).toBeDefined();
-    vi.advanceTimersToNextTimer();
     expect(filled[0]).toBe(playerSlot);
     expect(sphere.blocks.length).toBe(cellsInSphere(radius));
 

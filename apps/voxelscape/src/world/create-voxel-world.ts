@@ -27,7 +27,6 @@ import {
 } from "./level-data";
 import { heightAt as terrainHeightAt, type TerrainConfig } from "./noise";
 import { VOXEL_AIR, VOXEL_LAVA, VOXEL_WATER, isFluidId } from "./voxel-store";
-import { Phase, probe } from "../render/perf-probe";
 
 /** Water absorption used by the water pass and the underwater tint alike. */
 const WATER_EXTINCTION = 0.12;
@@ -201,28 +200,13 @@ export const createVoxelWorld = ({
       // drawn once its geometry is built and `onBlockMeshed` fires from
       // inside this call.
       filled.add(i);
-      ready.add(i);
       renderer.onBlockChanged(i, meshes);
       for (const cb of filledListeners) {
         cb(i);
       }
     },
     onBlockReposition: (i, center) => {
-      // The slot now points at a different, as-yet-unfilled cell, so it no
-      // longer answers for the terrain it last held. Clear its voxels now,
-      // not when the new fill lands: between the reposition and that fill the
-      // slot still reads as its previous cell, so a recycled block (one whose
-      // old cell held a lava cave, say) would otherwise answer for the new
-      // coordinates with the old cell's terrain until the worker returns.
-      probe.begin(Phase.scrollClear);
-      sphere.blocks[i].store.reset();
-      sphere.blocks[i].light.skylight.fill(0);
-      sphere.blocks[i].light.blocklight.fill(0);
-      ready.delete(i);
-      probe.end(Phase.scrollClear);
-      probe.begin(Phase.scrollRegroup);
       renderer.repositionBlock(i, center);
-      probe.end(Phase.scrollRegroup);
     },
     onBlockRelease: (i) => releaseHandler?.(i),
     editLayer,
@@ -303,8 +287,6 @@ export const createVoxelWorld = ({
   const filled = new Set<number>();
   /** Slots that have been both generated and drawn at least once. */
   const drawn = new Set<number>();
-  /** Slots holding generated terrain for the cell they currently answer for. */
-  const ready = new Set<number>();
   /** The slot the player spawns in, or -1 until the initial fill has been asked for. */
   let spawnIndex = -1;
   const renderer: TriangleRenderer = new TriangleRenderer({
@@ -332,6 +314,12 @@ export const createVoxelWorld = ({
   const reapplyEdits = () => {
     const affected: number[] = [];
     for (let i = 0; i < blockGrid.blocks.length; i++) {
+      // A slot being streamed still holds the cell it left behind, so writing
+      // the overlay into it would put this cell's edits on that cell's
+      // terrain. Its own fill applies the overlay when it lands.
+      if (!sphere.hasTerrain(i)) {
+        continue;
+      }
       const block = blockGrid.blocks[i];
       if (editLayer.applyToBlock(block) > 0) {
         affected.push(i);
@@ -458,8 +446,7 @@ export const createVoxelWorld = ({
       sphere.scrollTo(x, y, z);
     },
     cellReady(x, y, z) {
-      const slot = sphere.slotAt(x, y, z);
-      return slot !== undefined && ready.has(slot);
+      return sphere.slotAt(x, y, z) !== undefined;
     },
     scheduleSave() {
       editPersistence.scheduleSave();
