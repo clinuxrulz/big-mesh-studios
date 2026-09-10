@@ -5,6 +5,8 @@ import {
   cellsInSphere,
   DEFAULT_LOD_BANDS,
   lodAt,
+  lodIsOff,
+  LOD_OFF,
   sphereCells,
 } from "./chunk-sphere";
 import { BLOCK_WORLD } from "./level-data";
@@ -525,5 +527,34 @@ describe("reshaping the window", () => {
     const origin = { x: 0, y: 0, z: 0 };
     expect(lodAt(twoOut, origin)).toBe(0);
     expect(lodAt(twoOut, origin, sphere.bands)).toBe(1);
+  });
+});
+
+describe("turning levels of detail off", () => {
+  it("keeps every cell at full resolution, however far out", () => {
+    const origin = { x: 0, y: 0, z: 0 };
+    for (const far of [1, 4, 9, 40, 1000]) {
+      expect(lodAt({ x: far, y: far, z: far }, origin, LOD_OFF)).toBe(0);
+    }
+    // The same cells drop to the coarser tiers under the usual bands.
+    expect(lodAt({ x: 40, y: 0, z: 0 }, origin, DEFAULT_LOD_BANDS)).toBe(2);
+  });
+
+  it("is what the bands say about themselves", () => {
+    expect(lodIsOff(LOD_OFF)).toBe(true);
+    expect(lodIsOff(DEFAULT_LOD_BANDS)).toBe(false);
+    expect(lodIsOff({ full: 99, coarse: 99 })).toBe(false);
+  });
+
+  it("gives every block of a reshaped window the finest voxels", () => {
+    const { sphere } = sphereWithRecordedFills(3);
+    sphere.fillFrom(0, 0, 0);
+
+    sphere.reshape(3, 2, LOD_OFF);
+
+    // A block's voxel scale is what its level of detail chose; with none, all
+    // of them are the finest the world has.
+    const scales = new Set(sphere.blocks.map((block) => block.targetLod));
+    expect([...scales]).toEqual([0]);
   });
 });

@@ -1,6 +1,7 @@
 import type { TriangleRenderer } from "./renderers/triangle-renderer";
 import type { WorldWorkerPool } from "./world/worker-pool";
 import type { VoxelWorld } from "./world/create-voxel-world";
+import { DEFAULT_LOD_BANDS, lodIsOff, LOD_OFF } from "./world/chunk-sphere";
 import type { AtprotoController } from "./atproto/atproto-controller";
 import type { ModelLibrary } from "./atproto/models";
 import { MONSTER_MODEL_NAME } from "./atproto/models";
@@ -52,12 +53,14 @@ const MAX_CHUNK_RADIUS = 32;
  */
 const describeWindow = (world: VoxelWorld): string => {
   const bands = world.lodBands;
+  const detail = lodIsOff(bands)
+    ? "every block at full detail"
+    : `full detail to ${bands.full} chunks, coarser to ${bands.coarse}, coarsest beyond`;
   const mib = (world.voxelBytes / 1048576).toFixed(1);
   return (
     `window radius ${world.chunkRadius} chunks (${world.chunkRadiusY} in Y), ` +
     `${world.blocks.length} blocks, ${world.ringRadius} world units of sight; ` +
-    `full detail to ${bands.full} chunks, coarser to ${bands.coarse}, coarsest beyond; ` +
-    `${mib}MiB of voxels and light`
+    `${detail}; ${mib}MiB of voxels and light`
   );
 };
 
@@ -362,12 +365,23 @@ export const createCommands = ({
     },
     "/world:lod": {
       description: "report or move the distances each level of detail reaches",
-      args: "<full> <coarse>",
+      args: "off|auto|<full> <coarse>",
       run: (rest) => {
-        if (rest.length === 0) {
+        const argument = rest[0];
+        if (argument === undefined) {
           return describeWindow(world);
         }
-        const full = Number(rest[0]);
+        // Off generates every block of the window at full resolution, which is
+        // what the coarse shells are worth looking at against.
+        if (argument === "off") {
+          world.reshape({ lodBands: LOD_OFF });
+          return describeWindow(world);
+        }
+        if (argument === "auto") {
+          world.reshape({ lodBands: DEFAULT_LOD_BANDS });
+          return describeWindow(world);
+        }
+        const full = Number(argument);
         const coarse = Number(rest[1]);
         if (
           !Number.isInteger(full) ||
@@ -375,7 +389,10 @@ export const createCommands = ({
           full < 1 ||
           coarse < full
         ) {
-          return "usage: /world:lod <full> <coarse>  (chunks; coarse is no nearer than full)";
+          return (
+            "usage: /world:lod off|auto|<full> <coarse>  " +
+            "(chunks; coarse is no nearer than full)"
+          );
         }
         world.reshape({ lodBands: { full, coarse } });
         return describeWindow(world);

@@ -5,7 +5,7 @@ import {
   type Commander,
   type CommandsParams,
 } from "./commands";
-import { DEFAULT_LOD_BANDS } from "./world/chunk-sphere";
+import { DEFAULT_LOD_BANDS, LOD_OFF } from "./world/chunk-sphere";
 import type { VoxelWorld } from "./world/create-voxel-world";
 
 /**
@@ -96,6 +96,26 @@ describe("/world:lod", () => {
     expect(said).toContain("usage");
   });
 
+  it("turns the levels of detail off", () => {
+    const { world, reshape } = worldSpy();
+    windowCommands(world).run("/world:lod off");
+    expect(reshape).toHaveBeenCalledWith({ lodBands: LOD_OFF });
+  });
+
+  it("puts them back where they started", () => {
+    const { world, reshape } = worldSpy();
+    windowCommands(world).run("/world:lod auto");
+    expect(reshape).toHaveBeenCalledWith({ lodBands: DEFAULT_LOD_BANDS });
+  });
+
+  it("says so when every block is at full detail", () => {
+    const { world } = worldSpy();
+    (world as { lodBands: typeof LOD_OFF }).lodBands = LOD_OFF;
+    expect(windowCommands(world).run("/world:lod")).toContain(
+      "every block at full detail",
+    );
+  });
+
   it("refuses a band that is not a whole number", () => {
     const { world, reshape } = worldSpy();
     const said = windowCommands(world).run("/world:lod 1.5 4");
@@ -111,7 +131,7 @@ describe("what /help lists", () => {
     const radius = listed.find((c) => c.name === "/world:radius");
     const lod = listed.find((c) => c.name === "/world:lod");
     expect(radius?.args).toBe("<1..32> [yRadius]");
-    expect(lod?.args).toBe("<full> <coarse>");
+    expect(lod?.args).toBe("off|auto|<full> <coarse>");
   });
 });
 

@@ -98,6 +98,21 @@ export interface LodBands {
 export const DEFAULT_LOD_BANDS: LodBands = { full: 3, coarse: 4 };
 
 /**
+ * Bands that reach everywhere, so every block of the window is generated at
+ * full resolution however far away it is. What "no levels of detail" means:
+ * the coarse shells cost nothing to look at, and everything the window holds
+ * is worth eight times what its coarser tiers would be.
+ */
+export const LOD_OFF: LodBands = {
+  full: Number.POSITIVE_INFINITY,
+  coarse: Number.POSITIVE_INFINITY,
+};
+
+/** Whether these bands leave every block of the window at full resolution. */
+export const lodIsOff = (bands: LodBands): boolean =>
+  !Number.isFinite(bands.full);
+
+/**
  * The level of detail a cell is generated at, from its euclidean distance in
  * chunks from the player's cell. Each level doubles the voxel size, so a
  * block's voxel count drops by eight per level.
