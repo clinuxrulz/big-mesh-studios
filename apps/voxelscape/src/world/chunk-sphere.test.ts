@@ -1,6 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
-import { ChunkSphere, cellsInSphere, sphereCells } from "./chunk-sphere";
+import {
+  ChunkSphere,
+  cellsInSphere,
+  DEFAULT_LOD_BANDS,
+  lodAt,
+  sphereCells,
+} from "./chunk-sphere";
 import { BLOCK_WORLD } from "./level-data";
 import { DEFAULT_TERRAIN } from "./noise";
 import type { BorderSizes } from "./voxel-store";
@@ -438,5 +444,86 @@ describe("ChunkSphere", () => {
 
     await vi.runAllTimersAsync();
     vi.useRealTimers();
+  });
+});
+
+describe("reshaping the window", () => {
+  /** Every cell the window stands for, as the coordinates it was given. */
+  const heldCells = (sphere: ChunkSphere): string[] =>
+    sphere.blocks
+      .map((block) =>
+        block.center
+          .map((unit, axis) => Math.round(unit / BLOCK_WORLD[axis]))
+          .join(","),
+      )
+      .sort();
+
+  it("grows the pool to the cells a wider window holds", () => {
+    const { sphere } = sphereWithRecordedFills(2);
+    sphere.fillFrom(0, 0, 0);
+    expect(sphere.blocks.length).toBe(cellsInSphere(2, 2));
+
+    sphere.reshape(3, 2, DEFAULT_LOD_BANDS);
+
+    expect(sphere.radius).toBe(3);
+    expect(sphere.blocks.length).toBe(cellsInSphere(3, 2));
+    // Every cell of the wider window, each held exactly once.
+    expect(heldCells(sphere)).toEqual(
+      sphereCells({ x: 0, y: 0, z: 0 }, 3, 2)
+        .map((c) => `${c.x},${c.y},${c.z}`)
+        .sort(),
+    );
+  });
+
+  it("shrinks the pool, keeping the array everything else holds", () => {
+    const { sphere } = sphereWithRecordedFills(3);
+    sphere.fillFrom(0, 0, 0);
+    const held = sphere.blocks;
+
+    sphere.reshape(2, 2, DEFAULT_LOD_BANDS);
+
+    expect(sphere.blocks).toBe(held);
+    expect(sphere.blocks.length).toBe(cellsInSphere(2, 2));
+    expect(heldCells(sphere)).toEqual(
+      sphereCells({ x: 0, y: 0, z: 0 }, 2, 2)
+        .map((c) => `${c.x},${c.y},${c.z}`)
+        .sort(),
+    );
+  });
+
+  it("answers for the block under the player as soon as it has reshaped", () => {
+    const { sphere } = sphereWithRecordedFills(2);
+    sphere.fillFrom(0, 0, 0);
+    sphere.reshape(3, 2, DEFAULT_LOD_BANDS);
+
+    // Reshaping fills the centre block on this thread before it returns, so
+    // the ground under the player never goes missing; the rest of the window
+    // is turned away until its own fill lands, as it is after any scroll.
+    expect(sphere.query(0, 0, 0)).toBeDefined();
+    expect(sphere.query(BLOCK_WORLD[0] * 40, 0, 0)).toBeUndefined();
+  });
+
+  it("gives every slot a cell, so no two slots answer for the same point", () => {
+    const { sphere } = sphereWithRecordedFills(3);
+    sphere.fillFrom(0, 0, 0);
+    sphere.reshape(2, 2, DEFAULT_LOD_BANDS);
+
+    // A slot left over from the wider window keeping its old centre would
+    // shadow a real block in any lookup that matches on centre alone.
+    expect(new Set(heldCells(sphere)).size).toBe(sphere.blocks.length);
+  });
+
+  it("moves the levels of detail where the bands say", () => {
+    const { sphere } = sphereWithRecordedFills(3);
+    sphere.fillFrom(0, 0, 0);
+
+    sphere.reshape(3, 2, { full: 1, coarse: 2 });
+
+    expect(sphere.bands).toEqual({ full: 1, coarse: 2 });
+    // Two chunks out is full detail by default and coarser under these bands.
+    const twoOut = { x: 2, y: 0, z: 0 };
+    const origin = { x: 0, y: 0, z: 0 };
+    expect(lodAt(twoOut, origin)).toBe(0);
+    expect(lodAt(twoOut, origin, sphere.bands)).toBe(1);
   });
 });

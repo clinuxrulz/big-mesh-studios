@@ -1,5 +1,6 @@
 import type { TriangleRenderer } from "./renderers/triangle-renderer";
 import type { WorldWorkerPool } from "./world/worker-pool";
+import type { VoxelWorld } from "./world/create-voxel-world";
 import type { AtprotoController } from "./atproto/atproto-controller";
 import type { ModelLibrary } from "./atproto/models";
 import { MONSTER_MODEL_NAME } from "./atproto/models";
@@ -30,6 +31,23 @@ export interface CommandEntry {
   args?: string;
   run: (rest: string[]) => string | Promise<string>;
 }
+
+/**
+ * What the block window is, in one line: how far it reaches, how many blocks
+ * that is, where its levels of detail change, and what its voxels and light
+ * weigh. The two commands that reshape it both answer with this, so asking and
+ * changing read the same.
+ */
+const describeWindow = (world: VoxelWorld): string => {
+  const bands = world.lodBands;
+  const mib = (world.voxelBytes / 1048576).toFixed(1);
+  return (
+    `window radius ${world.chunkRadius} chunks (${world.chunkRadiusY} in Y), ` +
+    `${world.blocks.length} blocks, ${world.ringRadius} world units of sight; ` +
+    `full detail to ${bands.full} chunks, coarser to ${bands.coarse}, coarsest beyond; ` +
+    `${mib}MiB of voxels and light`
+  );
+};
 
 /** One command as `/help` describes it: what to type, and what it does. */
 export interface CommandHelp {
@@ -86,6 +104,8 @@ export interface CommandsParams {
   renderer: TriangleRenderer;
   /** The world's shared fill-and-mesh worker pool, to report and resize it. */
   workerPool: WorldWorkerPool;
+  /** The streamed block window, to report and resize it. */
+  world: VoxelWorld;
   dayNight: DayNightController;
   weather: WeatherController;
   sound: SoundController;
@@ -194,6 +214,7 @@ const readPlaceRequest = (
 export const createCommands = ({
   renderer,
   workerPool,
+  world,
   dayNight,
   weather,
   sound,
@@ -300,6 +321,45 @@ export const createCommands = ({
           return workerPool.describe();
         }
         return "usage: /world:workers auto|<0..8>  (0 runs fills and meshes on the main thread)";
+      },
+    },
+    "/world:radius": {
+      description: "report or resize the block window, in chunks",
+      args: "<1..8> [yRadius]",
+      run: (rest) => {
+        if (rest.length === 0) {
+          return describeWindow(world);
+        }
+        const radius = Number(rest[0]);
+        const radiusY = rest[1] === undefined ? undefined : Number(rest[1]);
+        const whole = (n: number | undefined): boolean =>
+          n === undefined || (Number.isInteger(n) && n >= 1 && n <= 8);
+        if (!whole(radius) || radius === undefined || !whole(radiusY)) {
+          return "usage: /world:radius <1..8> [yRadius]  (the window refills)";
+        }
+        world.reshape({ chunkRadius: radius, chunkRadiusY: radiusY });
+        return describeWindow(world);
+      },
+    },
+    "/world:lod": {
+      description: "report or move the distances each level of detail reaches",
+      args: "<full> <coarse>",
+      run: (rest) => {
+        if (rest.length === 0) {
+          return describeWindow(world);
+        }
+        const full = Number(rest[0]);
+        const coarse = Number(rest[1]);
+        if (
+          !Number.isInteger(full) ||
+          !Number.isInteger(coarse) ||
+          full < 1 ||
+          coarse < full
+        ) {
+          return "usage: /world:lod <full> <coarse>  (chunks; coarse is no nearer than full)";
+        }
+        world.reshape({ lodBands: { full, coarse } });
+        return describeWindow(world);
       },
     },
     "/render:resolution": {

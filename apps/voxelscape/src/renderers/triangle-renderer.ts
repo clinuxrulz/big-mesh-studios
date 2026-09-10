@@ -1406,6 +1406,14 @@ export class TriangleRenderer {
     return this.meshes.inFlightCount;
   }
 
+  /**
+   * Grows the per-slot bookkeeping to a window of `count` slots, for a window
+   * that has just been made larger.
+   */
+  growTo(count: number): void {
+    this.meshes.growTo(count);
+  }
+
   repositionBlock(index: number, center: Dim3): void {
     const newCell = superchunkCellOf(center);
     const newKey = scKey(newCell);

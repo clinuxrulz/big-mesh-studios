@@ -81,23 +81,40 @@ export const cellsInSphere = (radius: number, yRadius = radius): number =>
   sphereCells({ x: 0, y: 0, z: 0 }, radius, yRadius).length;
 
 /**
- * The level of detail a cell is generated at, from its euclidean distance in
- * chunks from the player's cell. Cells within three chunks — out past the
- * fog's start, so everything the player can clearly see — stay at full
- * resolution; the shell from three to four chunks, which the fog hides
- * heavily, is one level coarser; anything beyond the ball's edge would be
- * coarsest. Each level doubles the voxel size, so a block's voxel count drops
- * by eight per level.
+ * How far, in chunks, each level of detail reaches. A cell within `full`
+ * chunks of the player's is generated at full resolution; one within `coarse`
+ * is a level coarser; anything past that is coarsest.
  */
-export const lodAt = (cell: CellCoord, center: CellCoord): number => {
+export interface LodBands {
+  full: number;
+  coarse: number;
+}
+
+/**
+ * The distances the world uses unless something asks for others: full
+ * resolution out past the fog's start, so everything the player can clearly
+ * see, and one level coarser through the shell the fog hides heavily.
+ */
+export const DEFAULT_LOD_BANDS: LodBands = { full: 3, coarse: 4 };
+
+/**
+ * The level of detail a cell is generated at, from its euclidean distance in
+ * chunks from the player's cell. Each level doubles the voxel size, so a
+ * block's voxel count drops by eight per level.
+ */
+export const lodAt = (
+  cell: CellCoord,
+  center: CellCoord,
+  bands: LodBands = DEFAULT_LOD_BANDS,
+): number => {
   const dx = cell.x - center.x;
   const dy = cell.y - center.y;
   const dz = cell.z - center.z;
   const distanceSquared = dx * dx + dy * dy + dz * dz;
-  if (distanceSquared <= 9) {
+  if (distanceSquared <= bands.full * bands.full) {
     return 0;
   }
-  if (distanceSquared <= 16) {
+  if (distanceSquared <= bands.coarse * bands.coarse) {
     return 1;
   }
   return 2;
@@ -113,10 +130,12 @@ export const lodAt = (cell: CellCoord, center: CellCoord): number => {
 export const borderSizesOf = (
   cell: CellCoord,
   center: CellCoord,
+  bands: LodBands = DEFAULT_LOD_BANDS,
 ): BorderSizes => {
   const at = (dx: number, dy: number, dz: number): number =>
     VOXEL_SIZE *
-    (1 << lodAt({ x: cell.x + dx, y: cell.y + dy, z: cell.z + dz }, center));
+    (1 <<
+      lodAt({ x: cell.x + dx, y: cell.y + dy, z: cell.z + dz }, center, bands));
   return {
     px: at(1, 0, 0),
     nx: at(-1, 0, 0),
@@ -191,8 +210,10 @@ export interface ChunkSphereParams {
  */
 export class ChunkSphere {
   readonly blocks: WorldBlock[];
-  readonly radius: number;
-  readonly yRadius: number;
+  radius: number;
+  yRadius: number;
+  /** How far each level of detail reaches, which `/world:lod` can move. */
+  bands: LodBands = DEFAULT_LOD_BANDS;
   /**
    * Resolves a world point to the block whose cell contains it. Backs the
    * terrain queries (height, collision), which must stay O(1) per call.
@@ -200,7 +221,7 @@ export class ChunkSphere {
   readonly query: BlockQuery;
 
   private readonly cells: CellCoord[] = [];
-  private readonly cellIndex: CoordinateMap<number>;
+  private cellIndex: CoordinateMap<number>;
   /**
    * Whether each slot's voxels are the terrain of the cell it currently
    * stands for. False from the moment a scroll points the slot at an entering
@@ -242,7 +263,7 @@ export class ChunkSphere {
       // later filled at a different LOD resizes in place.
       return buildBlockShell({
         center,
-        lod: lodAt(cell, { x: 0, y: 0, z: 0 }),
+        lod: lodAt(cell, { x: 0, y: 0, z: 0 }, this.bands),
       });
     });
 
@@ -306,6 +327,65 @@ export class ChunkSphere {
    *
    * @returns The slot containing (`x`, `y`, `z`) — the one asked for first.
    */
+  /**
+   * Rebuilds the window at a different size, or at different level-of-detail
+   * distances, around the cell it is already centred on. The pool grows or
+   * shrinks to the new cell count and every slot is filled again, because a
+   * cell that keeps its slot may still want different voxels: a wider window
+   * moves the level-of-detail shells outward under cells that were already
+   * held, and moving the shells directly does the same.
+   *
+   * `blocks` keeps its identity across this, which everything holding it
+   * depends on, so the array is truncated or extended in place rather than
+   * replaced.
+   *
+   * @param radius Chunk radius in X and Z.
+   * @param yRadius Chunk radius in Y.
+   * @param bands How far each level of detail reaches.
+   * @returns The slot the window's centre now falls in.
+   */
+  reshape(radius: number, yRadius: number, bands: LodBands): number {
+    const wanted = cellsInSphere(radius, yRadius);
+    const before = this.blocks.length;
+    // Every slot is about to stand for a different cell, or for none, so each
+    // gives up the moving fluid it holds before its voxels go.
+    for (let slot = 0; slot < before; slot++) {
+      this.onBlockRelease?.(slot);
+    }
+    // A slot the smaller window will not have gives up its geometry first:
+    // dropped after the truncation there would be nothing left to drop it by,
+    // and its meshes would be held for a slot that no longer exists.
+    for (let slot = wanted; slot < before; slot++) {
+      this.onBlockReposition(slot, this.blocks[slot].center);
+    }
+    this.radius = radius;
+    this.yRadius = yRadius;
+    this.bands = bands;
+    this.blocks.length = wanted;
+    this.cells.length = wanted;
+    this.filled.length = wanted;
+    for (let slot = before; slot < wanted; slot++) {
+      const cell = { x: 0, y: 0, z: 0 };
+      this.blocks[slot] = buildBlockShell({
+        center: [0, 0, 0],
+        lod: lodAt(cell, cell, this.bands),
+      });
+      this.cells[slot] = cell;
+      this.filled[slot] = false;
+    }
+    // Nothing keeps its cell, so the index and the free list start again
+    // rather than being mended entry by entry.
+    this.cellIndex = new CoordinateMap<number>(wanted * 2);
+    this.free.length = 0;
+    this.fillClient.resizeTo(wanted);
+    const at = this.centerCell;
+    return this.fillFrom(
+      at.x * BLOCK_WORLD[0],
+      at.y * BLOCK_WORLD[1],
+      at.z * BLOCK_WORLD[2],
+    );
+  }
+
   fillFrom(x: number, y: number, z: number): number {
     const center = chunkCellOf(x, y, z);
     this.centerCell = { x: center[0], y: center[1], z: center[2] };
@@ -333,21 +413,29 @@ export class ChunkSphere {
     // rest are handed to the worker. Nothing can be drawn and the player
     // cannot be let in until this one block exists, and waiting for a worker
     // to start costs several times more than the block does.
-    const nearestLod = lodAt(this.cells[nearest], this.centerCell);
+    const nearestLod = lodAt(this.cells[nearest], this.centerCell, this.bands);
     this.blocks[nearest].targetLod = nearestLod;
     this.fillClient.fillNow(
       nearest,
       nearestLod,
-      borderSizesOf(this.cells[nearest], this.centerCell),
+      borderSizesOf(this.cells[nearest], this.centerCell, this.bands),
     );
     for (const index of rest) {
-      this.blocks[index].targetLod = lodAt(this.cells[index], this.centerCell);
+      this.blocks[index].targetLod = lodAt(
+        this.cells[index],
+        this.centerCell,
+        this.bands,
+      );
     }
     this.fillClient.requestFill(
       rest,
       rest.map((index) => this.blocks[index].center),
-      rest.map((index) => lodAt(this.cells[index], this.centerCell)),
-      rest.map((index) => borderSizesOf(this.cells[index], this.centerCell)),
+      rest.map((index) =>
+        lodAt(this.cells[index], this.centerCell, this.bands),
+      ),
+      rest.map((index) =>
+        borderSizesOf(this.cells[index], this.centerCell, this.bands),
+      ),
       [x, y, z],
     );
     return nearest;
@@ -409,7 +497,7 @@ export class ChunkSphere {
         this.free.push(slot);
         continue;
       }
-      const desiredLod = lodAt(cell, center);
+      const desiredLod = lodAt(cell, center, this.bands);
       if (
         desiredLod !== this.lodOf(slot) &&
         desiredLod !== this.blocks[slot].targetLod
@@ -439,7 +527,7 @@ export class ChunkSphere {
         cell.z * BLOCK_WORLD[2],
       ];
       this.blocks[slot].center = c;
-      this.blocks[slot].targetLod = lodAt(cell, center);
+      this.blocks[slot].targetLod = lodAt(cell, center, this.bands);
       // The slot still holds the cell it left behind, and now stands for this
       // one: until the fill lands it answers for neither, and every query
       // about it is turned away rather than the voxels being zeroed to make
@@ -475,8 +563,12 @@ export class ChunkSphere {
     this.fillClient.requestFill(
       order,
       order.map((index) => this.blocks[index].center),
-      order.map((index) => lodAt(this.cells[index], this.centerCell)),
-      order.map((index) => borderSizesOf(this.cells[index], this.centerCell)),
+      order.map((index) =>
+        lodAt(this.cells[index], this.centerCell, this.bands),
+      ),
+      order.map((index) =>
+        borderSizesOf(this.cells[index], this.centerCell, this.bands),
+      ),
       [x, y, z],
     );
     probe.end(Phase.scrollRequest);

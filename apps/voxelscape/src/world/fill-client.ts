@@ -367,6 +367,48 @@ export class FillClient {
     this.drainWorkerFills();
   }
 
+  /**
+   * Resizes the per-slot bookkeeping to a window of `count` slots, and lets go
+   * of work asked for on behalf of a slot past the end of it. A slot added
+   * without this reads its generation as nothing, so every fill that lands for
+   * it looks stale; one removed without it leaves work that reads a block the
+   * window no longer holds.
+   */
+  resizeTo(count: number): void {
+    while (this.fillGen.length < count) {
+      this.fillGen.push(0);
+      this.fillLod.push(0);
+      this.fillBorder.push(undefined);
+    }
+    this.fillGen.length = count;
+    this.fillLod.length = count;
+    this.fillBorder.length = count;
+    // Work asked for on behalf of a slot the window no longer has: dropped
+    // here, because everything downstream of it reads the block that slot
+    // stood for and there is no longer one to read.
+    const drop = (slot: number): boolean => slot >= count;
+    for (const set of [
+      this.pendingFills,
+      this.fillInflight,
+      this.pendingSyncFills,
+    ]) {
+      for (const slot of [...set]) {
+        if (drop(slot)) set.delete(slot);
+      }
+    }
+    for (const map of [
+      this.pendingCenter,
+      this.pendingLod,
+      this.pendingBorder,
+      this.pendingSyncLods,
+      this.pendingSyncBorder,
+    ]) {
+      for (const slot of [...map.keys()]) {
+        if (drop(slot)) map.delete(slot);
+      }
+    }
+  }
+
   /** Slots waiting for terrain data, on a worker batch or on the main thread. */
   get pendingCount(): number {
     return this.pendingFills.size + this.pendingSyncFills.size;
@@ -520,6 +562,12 @@ export class FillClient {
 
   private syncFillBlock(i: number, lod = 0, borderSizes?: BorderSizes): void {
     const block = this.blocks[i];
+    // A fill deferred to a later turn, for a slot a reshaped window has since
+    // let go of. The work was scheduled before the slot went and cannot be
+    // called back, so it is dropped where it lands.
+    if (block === undefined) {
+      return;
+    }
     // The store's resolution is the fill's: a slot filled at a different
     // level of detail than it was built at has to read its voxels at that
     // LOD's scale before the fill writes into it.

@@ -677,6 +677,7 @@ export const createVoxelscape = ({
   const commands = createCommands({
     renderer: world.renderer,
     workerPool: world.workerPool,
+    world,
     dayNight: environment.dayNight,
     weather: environment.weather,
     sound: environment.sound,

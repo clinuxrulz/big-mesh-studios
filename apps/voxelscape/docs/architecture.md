@@ -1,14 +1,14 @@
 # What voxelscape is made of
 
-Drawn from the imports under `src` at ff2915a by `pnpm architecture`.
+Drawn from the imports under `src` at cf51e5c by `pnpm architecture`.
 Nothing here is written by hand: change the code and run it again.
 
 ```mermaid
 graph TD
-  shell["shell<br/>5 files · 1387 lines"]
-  voxelscape["voxelscape<br/>2 files · 1125 lines"]
-  world["world<br/>23 files · 6048 lines"]
-  renderers["renderers<br/>13 files · 4658 lines"]
+  shell["shell<br/>5 files · 1447 lines"]
+  voxelscape["voxelscape<br/>2 files · 1126 lines"]
+  world["world<br/>23 files · 6218 lines"]
+  renderers["renderers<br/>13 files · 4681 lines"]
   render["render<br/>4 files · 1120 lines"]
   player["player<br/>15 files · 3207 lines"]
   monsters["monsters<br/>6 files · 1638 lines"]
@@ -71,10 +71,10 @@ graph TD
 
 | area          | what it is for                                                         | files | lines |
 | ------------- | ---------------------------------------------------------------------- | ----- | ----- |
-| `shell`       | the page, the console, and what wires a world into them                | 5     | 1387  |
-| `voxelscape`  | one world: its frame, and every part below it                          | 2     | 1125  |
-| `world`       | voxels, light, the streaming window, and the workers that fill it      | 23    | 6048  |
-| `renderers`   | turning voxels into geometry, and drawing it                           | 13    | 4658  |
+| `shell`       | the page, the console, and what wires a world into them                | 5     | 1447  |
+| `voxelscape`  | one world: its frame, and every part below it                          | 2     | 1126  |
+| `world`       | voxels, light, the streaming window, and the workers that fill it      | 23    | 6218  |
+| `renderers`   | turning voxels into geometry, and drawing it                           | 13    | 4681  |
 | `render`      | the frame loop, the resolution scaler, and the probe that times them   | 4     | 1120  |
 | `player`      | the body, its input, its tools and what they do to the world           | 15    | 3207  |
 | `monsters`    | what wanders the world and fights the player                           | 6     | 1638  |

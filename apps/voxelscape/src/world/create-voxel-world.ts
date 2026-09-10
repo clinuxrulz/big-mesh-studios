@@ -2,7 +2,7 @@ import type { Group } from "@random-mesh/rmsl/scene";
 import { TriangleRenderer } from "../renderers/triangle-renderer";
 import { loadVoxelTiles } from "../renderers/tile-loader";
 import type { VoxelTileConfig } from "../renderers/atlas";
-import { ChunkSphere } from "./chunk-sphere";
+import { cellsInSphere, ChunkSphere, type LodBands } from "./chunk-sphere";
 import { WorldWorkerPool } from "./worker-pool";
 import {
   blockWorldVoxelRange,
@@ -91,7 +91,22 @@ export interface VoxelWorld {
    */
   editLayer: EditLayer;
   /** The farthest the ring's outer edge can be from the player, in world units. */
-  ringRadius: number;
+  readonly ringRadius: number;
+  /** Chunk radius of the block window in X and Z, and in Y. */
+  readonly chunkRadius: number;
+  readonly chunkRadiusY: number;
+  /** How far each level of detail reaches, in chunks. */
+  readonly lodBands: LodBands;
+  /**
+   * Rebuilds the window at a different size, or at different level-of-detail
+   * distances, around the cell the player stands in. Every block is filled
+   * again, so the terrain comes back over the next second or so.
+   */
+  reshape(params: {
+    chunkRadius?: number;
+    chunkRadiusY?: number;
+    lodBands?: LodBands;
+  }): void;
   /**
    * The world's worker threads, shared by the fill and mesh clients, so the
    * console can report and resize them.
@@ -168,7 +183,11 @@ export const createVoxelWorld = ({
   onInitialDraw,
   createWorker,
 }: VoxelWorldConfig): VoxelWorld => {
-  const ringRadius = chunkRadius * BLOCK_WORLD[0];
+  /**
+   * The farthest the ring's outer edge can be from the player. Read from the
+   * sphere rather than held, so it follows a window that has been reshaped.
+   */
+  const ringRadiusOf = (): number => sphere.radius * BLOCK_WORLD[0];
   /**
    * Distance at which fog becomes fully opaque and rays stop marching. Set
    * to the window edge's closest possible approach to the player — half a
@@ -413,7 +432,28 @@ export const createVoxelWorld = ({
     water: renderer.water,
     underwaterTint: renderer.underwaterTint,
     editLayer,
-    ringRadius,
+    get ringRadius() {
+      return ringRadiusOf();
+    },
+    get chunkRadius() {
+      return sphere.radius;
+    },
+    get chunkRadiusY() {
+      return sphere.yRadius;
+    },
+    get lodBands() {
+      return sphere.bands;
+    },
+    reshape({ chunkRadius: radius, chunkRadiusY: radiusY, lodBands: bands }) {
+      const wantedRadius = radius ?? sphere.radius;
+      const wantedRadiusY = radiusY ?? sphere.yRadius;
+      // The renderer is given room for the new slots first: reshaping fills
+      // the block under the player on this thread, which meshes it before
+      // returning, and a slot the renderer has no room for would land looking
+      // stale and never be drawn.
+      renderer.growTo(cellsInSphere(wantedRadius, wantedRadiusY));
+      sphere.reshape(wantedRadius, wantedRadiusY, bands ?? sphere.bands);
+    },
     workerPool,
     reapplyEdits,
     applyEdits,

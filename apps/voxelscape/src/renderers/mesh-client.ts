@@ -175,6 +175,17 @@ export class MeshClient {
     this.generation[index]++;
   }
 
+  /**
+   * Grows the per-slot bookkeeping to a window of `count` slots, for a window
+   * that has just been made larger. A slot added without this counts its
+   * generation from nothing, and every build for it lands looking stale.
+   */
+  growTo(count: number): void {
+    while (this.generation.length < count) {
+      this.generation.push(0);
+    }
+  }
+
   /** Marks a block's mesh stale and queues a rebuild from its current data. */
   requestBuild(index: number): void {
     this.generation[index]++;
