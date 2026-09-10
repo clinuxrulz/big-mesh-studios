@@ -38,23 +38,42 @@ interface TraceEvent {
   args?: Record<string, unknown>;
 }
 
-/** A memory dump's numbers for one of the browser's processes. */
+/** One heading of a memory dump, and what it held. */
+interface DumpRoot {
+  name: string;
+  bytes: number;
+}
+
+/**
+ * What one of the browser's processes held, taken from its own first and last
+ * dumps rather than from whichever dump every process happened to answer
+ * together: they do not all answer every time, and a process that missed the
+ * last one would otherwise go unreported however much it was holding.
+ */
 export interface ProcessMemory {
   /** The process id, and the name the trace gave it if it named one. */
   pid: number;
   process: string;
   /**
-   * The dump's top-level totals, largest first. These are separate trees
-   * rather than parts of one sum — a browser counts the same bytes under more
-   * than one heading — so they are reported as they are rather than added up.
+   * Whether this is the process drawing the page. A browser runs several
+   * renderers and the others hold pages this run never opened, so the one
+   * holding a WebGL context is the one a measurement is about.
    */
-  roots: { name: string; bytes: number }[];
+  drawsThePage: boolean;
+  /**
+   * The top-level totals of its first dump and of its last, largest first.
+   * These are separate trees rather than parts of one sum — a browser counts
+   * the same bytes under more than one heading — so they are reported as they
+   * are rather than added up.
+   */
+  first: DumpRoot[];
+  last: DumpRoot[];
   /**
    * What the page's own graphics objects take, by kind: the vertex and index
    * buffers uploaded to the card, its textures, and its render targets. This
    * is the count no code inside the page can take for itself.
    */
-  webgl: { name: string; bytes: number }[];
+  webgl: DumpRoot[];
 }
 
 /** What one traced scenario is reduced to. */
@@ -64,8 +83,8 @@ export interface TraceSummary {
   events: number;
   /** The costliest work the graphics process did, by total time under each name. */
   graphicsSlices: { name: string; totalMs: number; count: number }[];
-  /** Each memory dump taken during the run, in the order they were taken. */
-  memory: ProcessMemory[][];
+  /** What each process was holding, largest last dump first. */
+  memory: ProcessMemory[];
 }
 
 /**
@@ -179,10 +198,13 @@ export const summarizeTrace = (
     .sort((a, b) => b.totalMs - a.totalMs)
     .slice(0, 12);
 
-  // Every process writes its own dump event, and the events of one dump share
-  // an id; grouping by that keeps a dump's processes together, and the groups
-  // stay in the order the dumps were asked for.
-  const dumps = new Map<string, ProcessMemory[]>();
+  // Each process is followed on its own, because they do not all write a dump
+  // every time one is taken: pairing the first and last dump of each keeps a
+  // process that answered only some of them.
+  const held = new Map<
+    number,
+    { first?: DumpRoot[]; last: DumpRoot[]; webgl: DumpRoot[] }
+  >();
   for (const event of events) {
     if (event.ph !== "v") {
       continue;
@@ -204,6 +226,9 @@ export const summarizeTrace = (
       .map(([name, bytes]) => ({ name, bytes }))
       .sort((a, b) => b.bytes - a.bytes)
       .slice(0, 6);
+    if (roots.length === 0) {
+      continue;
+    }
     // `webgl/context_0x…/buffers` and its siblings: the kind is the last
     // segment, and the context in the middle is an address worth dropping.
     const webgl = sized
@@ -215,25 +240,34 @@ export const summarizeTrace = (
       )
       .map(([name, bytes]) => ({ name: name.split("/")[2], bytes }))
       .sort((a, b) => b.bytes - a.bytes);
-    if (roots.length === 0) {
-      continue;
+    const seen = held.get(event.pid);
+    if (seen === undefined) {
+      held.set(event.pid, { last: roots, webgl });
+    } else {
+      seen.first = seen.first ?? seen.last;
+      seen.last = roots;
+      if (webgl.length > 0) {
+        seen.webgl = webgl;
+      }
     }
-    const key = event.id ?? String(event.ts);
-    const forDump = dumps.get(key) ?? [];
-    forDump.push({
-      pid: event.pid,
-      process: names.get(event.pid) ?? `process ${event.pid}`,
-      roots,
-      webgl,
-    });
-    dumps.set(key, forDump);
   }
+  const largest = (roots: DumpRoot[]): number => roots[0]?.bytes ?? 0;
+  const memory = [...held]
+    .map(([pid, dumps]): ProcessMemory => ({
+      pid,
+      process: names.get(pid) ?? `process ${pid}`,
+      drawsThePage: dumps.webgl.length > 0,
+      first: dumps.first ?? dumps.last,
+      last: dumps.last,
+      webgl: dumps.webgl,
+    }))
+    .sort((a, b) => largest(b.last) - largest(a.last));
 
   return {
     file,
     events: events.length,
     graphicsSlices,
-    memory: [...dumps.values()],
+    memory,
   };
 };
 
@@ -254,23 +288,22 @@ export const formatTrace = (summary: TraceSummary): string => {
       );
     }
   }
-  const first = summary.memory[0];
-  const last = summary.memory[summary.memory.length - 1];
-  if (first !== undefined && last !== undefined) {
+  // The page lives in one renderer and its drawing is done by the graphics
+  // process; the browser runs other renderers for pages this run never opened,
+  // and its own helpers, none of which a change here moves.
+  const worthReading = summary.memory.filter(
+    (process) =>
+      process.drawsThePage ||
+      (process.process === "GPU Process" && process.last.length > 0),
+  );
+  if (worthReading.length > 0) {
     lines.push("    what the browser was holding, first dump → last:");
-    // The page lives in the renderer and its drawing is done by the graphics
-    // process; the rest are the browser's own helpers, which no change here
-    // moves.
-    const worthReading = last.filter(
-      (process) =>
-        process.process === "Renderer" || process.process === "GPU Process",
-    );
     for (const process of worthReading) {
-      const before = first.find((candidate) => candidate.pid === process.pid);
-      lines.push(`      ${process.process}`);
-      for (const root of process.roots) {
+      const which = process.drawsThePage ? " (drawing this page)" : "";
+      lines.push(`      ${process.process}${which}`);
+      for (const root of process.last) {
         const was =
-          before?.roots.find((candidate) => candidate.name === root.name)
+          process.first.find((candidate) => candidate.name === root.name)
             ?.bytes ?? 0;
         lines.push(
           `        ${root.name.padEnd(24)} ${mebibytes(was).padStart(9)} → ${mebibytes(root.bytes).padStart(9)}`,

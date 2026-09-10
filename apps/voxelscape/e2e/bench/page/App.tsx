@@ -315,12 +315,11 @@ function Scenario(props: {
 }
 
 function Trace(props: { trace: TraceSummary }): JSX.Element {
-  const last = () => props.trace.memory[props.trace.memory.length - 1] ?? [];
-  const first = () => props.trace.memory[0] ?? [];
   const worthReading = () =>
-    last().filter(
+    props.trace.memory.filter(
       (process) =>
-        process.process === "Renderer" || process.process === "GPU Process",
+        process.drawsThePage ||
+        (process.process === "GPU Process" && process.last.length > 0),
     );
   return (
     <section class="trace">
@@ -342,17 +341,19 @@ function Trace(props: { trace: TraceSummary }): JSX.Element {
         <For each={worthReading()}>
           {(process) => (
             <table class="numbers">
-              <caption>{process.process}</caption>
+              <caption>
+                {process.drawsThePage
+                  ? `${process.process} (drawing this page)`
+                  : process.process}
+              </caption>
               <tbody>
-                <For each={process.roots}>
+                <For each={process.last}>
                   {(root) => (
                     <tr>
                       <th scope="row">{root.name}</th>
                       <td>
                         {`${mebibytes(
-                          first()
-                            .find((was) => was.pid === process.pid)
-                            ?.roots.find((was) => was.name === root.name)
+                          process.first.find((was) => was.name === root.name)
                             ?.bytes ?? 0,
                         )} → ${mebibytes(root.bytes)}`}
                       </td>
