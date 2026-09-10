@@ -101,51 +101,49 @@ export const Field = {
   visible: 7,
   /** Chunk meshes drawn this frame, one draw call each. */
   drawnMeshes: 8,
-  /** What that would be if each unbroken run of a superchunk's visible members drew as one. */
-  coalescedMeshes: 9,
   /** Blocks waiting for terrain data. */
-  fillPending: 10,
+  fillPending: 9,
   /** Blocks whose terrain data a worker is generating. */
-  fillInFlight: 11,
+  fillInFlight: 10,
   /** Blocks waiting for geometry. */
-  meshPending: 12,
+  meshPending: 11,
   /** Blocks whose geometry a worker is building. */
-  meshInFlight: 13,
+  meshInFlight: 12,
   /** Superchunks whose merged geometry is out of date. */
-  dirtySuperchunks: 14,
+  dirtySuperchunks: 13,
   /**
    * The JavaScript heap in bytes, sampled about once a second. What the browser
    * reports here counts the storage behind typed arrays as well as the objects
    * around them, so the voxels and geometry below are inside this number rather
    * than beside it.
    */
-  heapBytes: 15,
+  heapBytes: 14,
   /**
    * Bytes the world holds in main memory — voxels, light and geometry —
    * counted rather than sampled, so it is the same number on every machine
    * and the one a memory ceiling is measured against.
    */
-  residentBytes: 16,
+  residentBytes: 15,
   /** Of those, the bytes held as voxels and the light shadowing them. */
-  voxelBytes: 17,
+  voxelBytes: 16,
   /** Of those, the bytes held as the superchunks' merged geometry. */
-  mergedGeometryBytes: 18,
+  mergedGeometryBytes: 17,
   /**
    * Of those, the bytes held as the per-block meshes the merge reads from,
    * which is a second copy of every block already merged.
    */
-  blockGeometryBytes: 19,
+  blockGeometryBytes: 18,
   /** Milliseconds the graphics card spent on the occlusion pass, from its own `GpuTimer`. */
-  gpuOcclusionMs: 20,
+  gpuOcclusionMs: 19,
   /**
    * Whether the block the player stands in has its terrain, as 1 or 0. The
    * world holds the player still while it is 0, so a run of zeroes is the
    * player having outrun what the workers could stream.
    */
-  cellReady: 21,
-  playerX: 22,
-  playerY: 23,
-  playerZ: 24,
+  cellReady: 20,
+  playerX: 21,
+  playerY: 22,
+  playerZ: 23,
 } as const;
 
 /** Each per-frame value's name, at the column it is recorded in. */

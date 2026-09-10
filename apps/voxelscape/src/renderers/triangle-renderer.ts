@@ -39,7 +39,12 @@ import type { PerspectiveCamera } from "@random-mesh/rmsl/scene";
 import type { AtlasGrid, VoxelTileConfig } from "./atlas";
 import { BLOCK_WORLD, type Dim3, type WorldBlock } from "../world/level-data";
 import type { BlockMeshes, MeshArrays } from "./mesh";
-import { meshUploadBytes, Superchunk, type GeometryPair } from "./superchunk";
+import {
+  meshUploadBytes,
+  Superchunk,
+  type GeometryPair,
+  type IndexRange,
+} from "./superchunk";
 import { MeshClient } from "./mesh-client";
 import { Counter, Phase, probe } from "../render/perf-probe";
 import type { WorldWorkerPool } from "../world/worker-pool";
@@ -650,8 +655,8 @@ export class TriangleRenderer {
   private lastSaw = 0;
   /** Chunk meshes left visible by the last `applyVisibility`, so one draw call each. */
   private drawnMeshes = 0;
-  /** What those would come to if each unbroken run of one superchunk's visible members drew as one. */
-  private coalescedMeshes = 0;
+  /** One superchunk's visible members while `drawRuns` orders them, reused every frame. */
+  private readonly runOrder: number[] = [];
   // Fullscreen underwater tint (the water pass tints the view
   // in-shader instead). Drawn last with depth-testing off so it washes the
   // whole view when the camera dips below the sea.
@@ -1004,6 +1009,10 @@ export class TriangleRenderer {
     let mesh = map.get(slot);
     if (mesh === undefined) {
       mesh = new Mesh();
+      // Its own range object for the life of the mesh, never the superchunk's:
+      // a frame widens this one to cover the members drawn alongside it, which
+      // would otherwise be widening the record of where a member's vertices sit.
+      mesh.drawRange = { start: 0, count: 0 };
       container.add(mesh);
       map.set(slot, mesh);
     }
@@ -1021,7 +1030,8 @@ export class TriangleRenderer {
     mesh.geometry = geometry;
     mesh.material = material;
     mesh.position.set(center[0], center[1], center[2]);
-    mesh.drawRange = range;
+    mesh.drawRange.start = range.start;
+    mesh.drawRange.count = range.count;
   }
 
   /** Shrinks a slot's existing mesh to an empty range when its data vanished. */
@@ -1032,7 +1042,8 @@ export class TriangleRenderer {
   ): void {
     const mesh = map.get(slot);
     if (mesh !== undefined) {
-      mesh.drawRange = range;
+      mesh.drawRange.start = range.start;
+      mesh.drawRange.count = range.count;
     }
   }
 
@@ -1067,13 +1078,31 @@ export class TriangleRenderer {
 
   private updateTriCount(): void {
     let tris = 0;
-    for (const mesh of this.scChunkTerrain.values()) {
-      tris += mesh.drawRange.count / 3;
+    for (const slot of this.scChunkTerrain.keys()) {
+      tris += this.ownRange(slot, true).count / 3;
     }
-    for (const mesh of this.scChunkWater.values()) {
-      tris += mesh.drawRange.count / 3;
+    for (const slot of this.scChunkWater.keys()) {
+      tris += this.ownRange(slot, false).count / 3;
     }
     this.totalTriangles = Math.round(tris);
+  }
+
+  /**
+   * Where one member's own vertices sit in its superchunk's joined geometry,
+   * which is what decides whether it has anything to draw and where its
+   * neighbours' runs begin. A mesh's `drawRange` cannot answer that: it holds
+   * what the mesh draws this frame, which may be several members at once.
+   */
+  private ownRange(slot: number, terrain: boolean): IndexRange {
+    const key = this.blockSc.get(slot);
+    const superchunk =
+      key === undefined ? undefined : this.superchunks.get(key);
+    if (superchunk === undefined) {
+      return EMPTY_RANGE;
+    }
+    return terrain
+      ? superchunk.terrainRangeOf(slot)
+      : superchunk.waterRangeOf(slot);
   }
 
   /**
@@ -1091,69 +1120,87 @@ export class TriangleRenderer {
     this.lastSaw = 0;
     this.drawnMeshes = 0;
     for (const [slot, mesh] of this.scChunkTerrain) {
-      mesh.visible = this.chunkVisible(slot, mesh, planes, playerKey, true);
-      if (mesh.visible) {
-        this.drawnMeshes++;
-      }
+      mesh.visible = this.chunkVisible(slot, true, planes, playerKey, true);
     }
     for (const [slot, mesh] of this.scChunkWater) {
-      mesh.visible = this.chunkVisible(slot, mesh, planes, playerKey, false);
-      if (mesh.visible) {
-        this.drawnMeshes++;
-      }
+      mesh.visible = this.chunkVisible(slot, false, planes, playerKey, false);
     }
-    if (probe.armed) {
-      this.coalescedMeshes =
-        this.runsOf(this.scChunkTerrain) + this.runsOf(this.scChunkWater);
-    }
+    this.drawRuns(this.scChunkTerrain, true);
+    this.drawRuns(this.scChunkWater, false);
   }
 
   /**
-   * How few draw calls one kind of mesh would take if every visible run of a
-   * superchunk's geometry were drawn as one: the visible members grouped by
-   * superchunk, ordered by where their vertices sit, and counted as one for
-   * each stretch of them that is unbroken.
+   * Draws each unbroken run of one superchunk's visible members as a single
+   * call. Its members share a geometry, a material and a position — they are
+   * all seated at the superchunk's own centre — so members whose vertices lie
+   * end to end are one call's worth of work being asked for several times. The
+   * first member of a run widens its range over the rest, and the rest stand
+   * down; the triangles drawn are the same either way.
+   *
+   * Left alone while the probe pass is drawn to the screen, where each slot
+   * paints itself in its own colour and has to be its own call.
    */
-  private runsOf(meshes: Map<number, Mesh>): number {
-    const byKey = new Map<string, { start: number; count: number }[]>();
-    for (const [slot, mesh] of meshes) {
-      if (!mesh.visible) {
-        continue;
-      }
-      const key = this.blockSc.get(slot);
-      if (key === undefined) {
-        continue;
-      }
-      const held = byKey.get(key);
-      if (held === undefined) {
-        byKey.set(key, [mesh.drawRange]);
-      } else {
-        held.push(mesh.drawRange);
-      }
-    }
-    let runs = 0;
-    for (const ranges of byKey.values()) {
-      ranges.sort((a, b) => a.start - b.start);
-      runs++;
-      for (let at = 1; at < ranges.length; at++) {
-        if (ranges[at].start !== ranges[at - 1].start + ranges[at - 1].count) {
-          runs++;
+  private drawRuns(meshes: Map<number, Mesh>, terrain: boolean): void {
+    if (this.showProbe) {
+      for (const mesh of meshes.values()) {
+        if (mesh.visible) {
+          this.drawnMeshes++;
         }
       }
+      return;
     }
-    return runs;
+    const order = this.runOrder;
+    for (const [key, members] of this.scMembers) {
+      const superchunk = this.superchunks.get(key);
+      if (superchunk === undefined) {
+        continue;
+      }
+      order.length = 0;
+      for (const member of members) {
+        if (meshes.get(member.index)?.visible === true) {
+          order.push(member.index);
+        }
+      }
+      if (order.length === 0) {
+        continue;
+      }
+      order.sort(
+        (a, b) =>
+          this.ownRange(a, terrain).start - this.ownRange(b, terrain).start,
+      );
+      let leader = meshes.get(order[0]) as Mesh;
+      let start = this.ownRange(order[0], terrain).start;
+      let count = this.ownRange(order[0], terrain).count;
+      for (let at = 1; at < order.length; at++) {
+        const range = this.ownRange(order[at], terrain);
+        if (range.start === start + count) {
+          count += range.count;
+          (meshes.get(order[at]) as Mesh).visible = false;
+          continue;
+        }
+        leader.drawRange.start = start;
+        leader.drawRange.count = count;
+        this.drawnMeshes++;
+        leader = meshes.get(order[at]) as Mesh;
+        start = range.start;
+        count = range.count;
+      }
+      leader.drawRange.start = start;
+      leader.drawRange.count = count;
+      this.drawnMeshes++;
+    }
   }
 
   /** Whether one chunk mesh draws this frame, counting what the occlusion hides. */
   private chunkVisible(
     slot: number,
-    mesh: Mesh,
+    terrain: boolean,
     planes: FrustumPlane[],
     playerKey: string,
     countOccluded: boolean,
   ): boolean {
     const center = this.slotCenter.get(slot);
-    if (center === undefined || mesh.drawRange.count <= 0) {
+    if (center === undefined || this.ownRange(slot, terrain).count <= 0) {
       return false;
     }
     if (!inFrustum(planes, center, BLOCK_HALF)) {
@@ -1339,7 +1386,8 @@ export class TriangleRenderer {
     ]) {
       const mesh = map.get(index);
       if (mesh !== undefined) {
-        mesh.drawRange = EMPTY_RANGE;
+        mesh.drawRange.start = 0;
+        mesh.drawRange.count = 0;
       }
     }
     this.slotCenter.delete(index);
@@ -1727,11 +1775,6 @@ export class TriangleRenderer {
    */
   get lastDrawnMeshes(): number {
     return this.drawnMeshes;
-  }
-
-  /** What `lastDrawnMeshes` would be if each unbroken run drew as one call. */
-  get lastCoalescedMeshes(): number {
-    return this.coalescedMeshes;
   }
 
   /** How many chunks the last probe query saw (the set it found visible). */

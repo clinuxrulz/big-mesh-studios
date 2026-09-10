@@ -426,9 +426,23 @@ export class Superchunk {
   /** Where each pass draws `member` from, or empty ranges for one not held. */
   rangeOf(member: number): MemberRanges {
     return {
-      terrain: this.terrainRanges.get(member) ?? EMPTY_RANGE,
-      water: this.waterRanges.get(member) ?? EMPTY_RANGE,
+      terrain: this.terrainRangeOf(member),
+      water: this.waterRangeOf(member),
     };
+  }
+
+  /**
+   * Where a member's terrain indices sit in the joined geometry, or an empty
+   * run when it holds none. Answered without building anything, for a caller
+   * asking once a frame for every member of the window.
+   */
+  terrainRangeOf(member: number): IndexRange {
+    return this.terrainRanges.get(member) ?? EMPTY_RANGE;
+  }
+
+  /** Where a member's water indices sit in the joined geometry, likewise. */
+  waterRangeOf(member: number): IndexRange {
+    return this.waterRanges.get(member) ?? EMPTY_RANGE;
   }
 
   /**

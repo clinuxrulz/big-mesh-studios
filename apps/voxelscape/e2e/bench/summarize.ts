@@ -83,7 +83,6 @@ export interface RunSummary {
     occluded: number;
     visible: number;
     drawnMeshes: number;
-    coalescedMeshes: number;
   };
   heap: { startBytes: number; endBytes: number; maxBytes: number };
   /** Bytes of voxels, light and geometry the world holds, counted rather than sampled. */
@@ -292,7 +291,6 @@ export const summarize = (drain: PerfDrain): RunSummary => {
       occluded: spreadOf(columnFor(drain, "occluded")).median,
       visible: spreadOf(columnFor(drain, "visible")).median,
       drawnMeshes: spreadOf(columnFor(drain, "drawnMeshes")).median,
-      coalescedMeshes: spreadOf(columnFor(drain, "coalescedMeshes")).median,
     },
     heap: {
       startBytes: heap[0] ?? 0,
