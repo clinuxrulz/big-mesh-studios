@@ -170,6 +170,8 @@ export interface CommandsParams {
    * omitted.
    */
   setDebugPerf: (on?: boolean) => string;
+  /** Shows or hides the statistics toast, and says which it did. */
+  setShowStats: (on?: boolean) => string;
   /**
    * Turns multisampling on or off, flipping it if `on` is omitted. The canvas
    * is remade either way, since a context holds the sample count it was made
@@ -250,6 +252,7 @@ export const createCommands = ({
   setFlying,
   setNoClip,
   setDebugPerf,
+  setShowStats,
   setMultisampling,
 }: CommandsParams): Commander => {
   return new Commander({
@@ -396,6 +399,23 @@ export const createCommands = ({
           return resolution.describe();
         }
         return "usage: /render:resolution auto|<0.1..1>  (1 renders every display pixel)";
+      },
+    },
+    "/debug:stats": {
+      description: "show or hide the statistics toast",
+      args: "[on|off]",
+      run: (rest) => {
+        const argument = rest[0];
+        if (argument === "on") {
+          return setShowStats(true);
+        }
+        if (argument === "off") {
+          return setShowStats(false);
+        }
+        if (argument === undefined) {
+          return setShowStats();
+        }
+        return "usage: /debug:stats [on|off]";
       },
     },
     "/render:perf": {

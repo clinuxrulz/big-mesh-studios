@@ -114,3 +114,33 @@ describe("what /help lists", () => {
     expect(lod?.args).toBe("<full> <coarse>");
   });
 });
+
+describe("/debug:stats", () => {
+  /** The console, with only the toggle this command reaches for. */
+  const statsCommands = (setShowStats: (on?: boolean) => string): Commander =>
+    createCommands({ setShowStats } as unknown as CommandsParams);
+
+  it("turns the panel on and off by name", () => {
+    const setShowStats = vi.fn(() => "stats shown");
+    statsCommands(setShowStats).run("/debug:stats on");
+    expect(setShowStats).toHaveBeenCalledWith(true);
+
+    const off = vi.fn(() => "stats hidden");
+    statsCommands(off).run("/debug:stats off");
+    expect(off).toHaveBeenCalledWith(false);
+  });
+
+  it("flips it when asked for neither", () => {
+    const setShowStats = vi.fn(() => "stats shown");
+    const said = statsCommands(setShowStats).run("/debug:stats");
+    expect(setShowStats).toHaveBeenCalledWith();
+    expect(said).toBe("stats shown");
+  });
+
+  it("refuses anything else", () => {
+    const setShowStats = vi.fn(() => "stats shown");
+    const said = statsCommands(setShowStats).run("/debug:stats maybe");
+    expect(setShowStats).not.toHaveBeenCalled();
+    expect(said).toContain("usage");
+  });
+});

@@ -1,0 +1,24 @@
+.panel {
+  display: grid;
+  gap: 0.1rem;
+  font: 12px/1.4 monospace;
+  min-width: 15rem;
+}
+
+.row,
+.rowDim {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+/* A figure that is part of the one above it rather than beside it. */
+.rowDim {
+  opacity: 0.65;
+  padding-left: 0.75rem;
+}
+
+.value {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

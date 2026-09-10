@@ -109,6 +109,32 @@ export interface VoxelscapeConfig {
   onNotice?: (line: string) => void;
 }
 
+/**
+ * What the statistics panel reads: one snapshot of what the world costs right
+ * now. Gathered when asked rather than held, so nothing is counted on a frame
+ * nobody is looking.
+ */
+export interface WorldStats {
+  /**
+   * The whole JavaScript heap, which only Chromium reports; undefined
+   * elsewhere. Counts the storage behind the typed arrays below as well as the
+   * objects around them, so those are inside this number rather than beside it.
+   */
+  heapBytes: number | undefined;
+  /** Of what the world holds: its voxels and the light shadowing them. */
+  voxelBytes: number;
+  /** The superchunks' merged geometry, at the capacity it grew to. */
+  mergedGeometryBytes: number;
+  /** Per-block meshes no superchunk has copied in yet. */
+  blockGeometryBytes: number;
+  blocks: number;
+  chunkRadius: number;
+  triangles: number;
+  /** Blocks waiting on terrain, and on geometry. */
+  fillsPending: number;
+  meshesPending: number;
+}
+
 export interface Voxelscape {
   scene: Scene;
   camera: PerspectiveCamera;
@@ -141,6 +167,10 @@ export interface Voxelscape {
   };
   /** Whether `onDebugStats` is being called, which `/render:perf` toggles. */
   debugPerf: Accessor<boolean>;
+  /** Whether the statistics panel is shown, which `/debug:stats` toggles. */
+  showStats: Accessor<boolean>;
+  /** What the world costs right now, for the panel to draw. */
+  stats: () => WorldStats;
   /** Last strike or use result, so the HUD can show silent failures. */
   editStatus: Accessor<string>;
   /** What the crosshair is over, or null when the primary button would find nothing. */
@@ -207,6 +237,30 @@ export const createVoxelscape = ({
     {},
   );
   const [debugPerf, setDebugPerf] = createSignal(initialDebugPerf);
+  const [showStats, setShowStats] = createSignal(false);
+
+  /**
+   * What the world costs right now. Read from the world and the renderer
+   * themselves rather than from the performance probe, which the build players
+   * get leaves out entirely — the panel these feed is worth having in any
+   * build.
+   */
+  const stats = (): WorldStats => {
+    const heap = (
+      performance as unknown as { memory?: { usedJSHeapSize: number } }
+    ).memory;
+    return {
+      heapBytes: heap?.usedJSHeapSize,
+      voxelBytes: world.voxelBytes,
+      mergedGeometryBytes: world.renderer.mergedGeometryBytes,
+      blockGeometryBytes: world.renderer.blockGeometryBytes,
+      blocks: world.blocks.length,
+      chunkRadius: world.chunkRadius,
+      triangles: world.renderer.triangleCount,
+      fillsPending: world.fillPendingCount,
+      meshesPending: world.renderer.meshPendingCount,
+    };
+  };
   /**
    * Whether the canvas is drawn multisampled. How many samples a pixel is held
    * at is settled when the drawing context is made and fixed for its life, so
@@ -748,6 +802,11 @@ export const createVoxelscape = ({
       setDebugPerf(next);
       return next ? "performance readout shown" : "performance readout hidden";
     },
+    setShowStats: (on) => {
+      const next = on ?? !showStats();
+      setShowStats(next);
+      return next ? "stats shown" : "stats hidden";
+    },
     setMultisampling: (on) => {
       const next = on ?? !multisampling();
       if (next === multisampling()) {
@@ -1088,6 +1147,8 @@ export const createVoxelscape = ({
     commands,
     placeEditor,
     debugPerf,
+    showStats,
+    stats,
     editStatus,
     target,
     npcAim,

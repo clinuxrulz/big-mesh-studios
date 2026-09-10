@@ -20,7 +20,7 @@ import { Console } from "./ui/Console";
 import { DialogOverlay } from "./ui/Dialog";
 import { EditHud } from "./ui/EditHud";
 import { HealthHud } from "./ui/HealthHud";
-import { PositionHud } from "./ui/PositionHud";
+import { StatsToast } from "./ui/StatsToast";
 import { LoadingScreen, LoadingToast } from "./ui/LoadingScreen";
 import { createToasts, Toast } from "./ui/Toasts";
 import { createMediaQuery } from "@big-mesh-studios/utils/create-media-query";
@@ -95,7 +95,6 @@ const World: Component<{ launch: LaunchConfig }> = (props) => {
         </Show>
         <EditHud />
         <HealthHud />
-        <PositionHud />
         <DialogOverlay />
         <Show when={voxelscape.placeEditor.open()}>
           <PlaceEditor />
@@ -107,6 +106,11 @@ const World: Component<{ launch: LaunchConfig }> = (props) => {
           notice={notice()}
         />
         <toasts.Stack>
+          <Show when={voxelscape.showStats()}>
+            <Toast>
+              <StatsToast />
+            </Toast>
+          </Show>
           <Show when={voxelscape.debugPerf()}>
             <Toast>
               <div
