@@ -194,11 +194,17 @@ const noteWritten = (
   }
 };
 
+/** Where one member's mesh ended up in a pass: its indices, and its vertices. */
+interface Placement {
+  indices: IndexRange;
+  vertices: IndexRange;
+}
+
 /**
- * Writes one member's mesh into a pass and answers the run of indices it drew
- * into: over the first freed run both of its parts fit in, or at the end when
- * none does. Its vertices are re-origined by `(memberCentre − superchunkCentre)`
- * and its indices re-based on wherever its vertices landed.
+ * Writes one member's mesh into a pass and answers where it went: over the
+ * first freed run both of its parts fit in, or at the end when none does. Its
+ * vertices are re-origined by `(memberCentre − superchunkCentre)` and its
+ * indices re-based on wherever its vertices landed.
  */
 const writeMember = (
   pass: Pass,
@@ -206,7 +212,7 @@ const writeMember = (
   dx: number,
   dy: number,
   dz: number,
-): IndexRange => {
+): Placement => {
   const vertices = mesh.positions.length / 3;
   const indices = mesh.indices.length;
   const fits = pass.free.findIndex(
@@ -217,7 +223,10 @@ const writeMember = (
     const indexFirst = pass.arrays.indices.count;
     appendArrays(pass.arrays, mesh, dx, dy, dz);
     noteWritten(pass, vertexFirst, vertices, indexFirst, indices);
-    return { start: indexFirst, count: indices };
+    return {
+      indices: { start: indexFirst, count: indices },
+      vertices: { start: vertexFirst, count: vertices },
+    };
   }
   const run = pass.free[fits];
   pass.arrays.positions.writeOffsetAt(
@@ -252,7 +261,10 @@ const writeMember = (
   } else {
     pass.free.splice(fits, 1);
   }
-  return { start: run.indexFirst, count: indices };
+  return {
+    indices: { start: run.indexFirst, count: indices },
+    vertices: { start: run.vertexFirst, count: vertices },
+  };
 };
 
 /** Keeps the room a member's runs occupied, for the next member that fits. */
@@ -379,31 +391,11 @@ export class Superchunk {
       ],
       [this.waterPass, meshes.water, this.waterRanges, this.waterVertices],
     ] as const) {
-      const before = pass.arrays.positions.count / 3;
-      const range = writeMember(pass, mesh, dx, dy, dz);
-      ranges.set(member, range);
-      // Where its vertices landed: the run it reused, or the end it grew from.
-      const count = mesh.positions.length / 3;
-      const start =
-        range.count === 0 ? before : this.vertexStartOf(pass, range);
-      vertices.set(member, { start, count });
+      const placed = writeMember(pass, mesh, dx, dy, dz);
+      ranges.set(member, placed.indices);
+      vertices.set(member, placed.vertices);
     }
     this.joined.add(member);
-  }
-
-  /**
-   * Where the vertices of the member drawing `range` start. The first index of
-   * a member's run points at one of its own vertices, and every member's
-   * indices were re-based on the vertex it starts from, so the lowest index in
-   * the run is that vertex.
-   */
-  private vertexStartOf(pass: Pass, range: IndexRange): number {
-    const indices = pass.arrays.indices.array();
-    let lowest = Infinity;
-    for (let at = range.start; at < range.start + range.count; at++) {
-      lowest = Math.min(lowest, indices[at]);
-    }
-    return lowest === Infinity ? 0 : lowest;
   }
 
   /**
