@@ -31,8 +31,7 @@ describe("what a vertex carries", () => {
       0,
     );
     const declared = Number(
-      constantsOf("renderers/triangle-renderer.ts", ["VERTEX_UPLOAD_BYTES"])[0]
-        .value,
+      constantsOf("renderers/superchunk.ts", ["VERTEX_UPLOAD_BYTES"])[0].value,
     );
     expect(summed).toBe(declared);
   });

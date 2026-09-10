@@ -1,5 +1,9 @@
 # Stream chunks in a spherical window and draw them in superchunks
 
+> The type named `Superchunk` (`src/renderers/superchunk.ts`) is the merged
+> geometry described below, not the region: a superchunk cell is a key `scKey`
+> builds, with no type of its own. Nothing else here has changed.
+
 > Superseded in part by [ADR 0021](./0021-async-player-cell-fill.md), which
 > stops filling the player's cell synchronously on scroll and gates physics on
 > its fill landing instead. The startup spawn-block fill and the rest of this

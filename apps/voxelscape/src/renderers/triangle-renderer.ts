@@ -22,7 +22,6 @@ import { float, mat3, pow, vec2, vec3, vec4 } from "@random-mesh/rmsl";
 import {
   BoxGeometry,
   Builder,
-  BufferAttribute,
   BufferGeometry,
   Color,
   Group,
@@ -39,8 +38,8 @@ import {
 import type { PerspectiveCamera } from "@random-mesh/rmsl/scene";
 import type { AtlasGrid, VoxelTileConfig } from "./atlas";
 import { BLOCK_WORLD, type Dim3, type WorldBlock } from "../world/level-data";
-import { Growable } from "./growable";
-import { setGeometryData, type BlockMeshes, type MeshArrays } from "./mesh";
+import type { BlockMeshes, MeshArrays } from "./mesh";
+import { meshUploadBytes, Superchunk, type GeometryPair } from "./superchunk";
 import { MeshClient } from "./mesh-client";
 import { Counter, Phase, probe } from "../render/perf-probe";
 import type { WorldWorkerPool } from "../world/worker-pool";
@@ -411,17 +410,6 @@ const MAX_UPLOAD_BYTES_PER_FRAME = 2 * 1024 * 1024;
  */
 const GEOMETRY_POOL_FRAMES = 8;
 
-/**
- * The bytes one vertex of merged geometry adds to the GPU upload: position 12
- * + normal 12 + uv 8 + the tile it repeats 4 + brightness 4. A pass without
- * UVs is over-counted by their 12 bytes, which only tightens the frame's
- * budget. Indices are counted at `INDEX_UPLOAD_BYTES`.
- */
-const VERTEX_UPLOAD_BYTES = 40;
-
-/** The bytes one index of merged geometry adds to the GPU upload. */
-const INDEX_UPLOAD_BYTES = 4;
-
 /** Frames between the hardware occlusion queries, each a readback that stalls the pipeline. */
 const DEFAULT_OCCLUSION_INTERVAL = 200;
 /** Superchunk cells around the player's own that an occlusion result never hides. */
@@ -468,65 +456,6 @@ export const scBounds = (key: string): { center: Dim3; half: number } => {
     half: SUPERCHUNK_HALF,
   };
 };
-
-/**
- * The accumulating vertex arrays of a superchunk's merged geometry, typed so
- * a landed chunk can be appended without re-joining the whole superchunk and
- * without a boxed intermediate.
- */
-type MergedArrays = {
-  positions: Growable<Float32Array>;
-  normals: Growable<Float32Array>;
-  uvs: Growable<Float32Array>;
-  /** One number a vertex: the sheet tile its repeating texture wraps into. */
-  tiles: Growable<Float32Array>;
-  indices: Growable<Uint32Array>;
-  /** One 0..1 brightness per vertex, carried from the per-chunk bake. */
-  brightness: Growable<Float32Array>;
-};
-
-const emptyArrays = (): MergedArrays => ({
-  positions: new Growable(Float32Array),
-  normals: new Growable(Float32Array),
-  uvs: new Growable(Float32Array),
-  tiles: new Growable(Float32Array),
-  indices: new Growable(Uint32Array),
-  brightness: new Growable(Float32Array),
-});
-
-/**
- * The bytes of `arrays` the GPU does not yet hold: everything past the
- * `committedVerts` and `committedIndices` the last upload already sent. A full
- * re-join (both committed counts 0) counts the whole geometry; an append-only
- * rebuild counts only its tail.
- */
-const mergedTailBytes = (
-  arrays: MergedArrays,
-  committedVerts: number,
-  committedIndices: number,
-): number =>
-  Math.max(0, arrays.positions.count / 3 - committedVerts) *
-    VERTEX_UPLOAD_BYTES +
-  Math.max(0, arrays.indices.count - committedIndices) * INDEX_UPLOAD_BYTES;
-
-/**
- * The bytes appending one block's built arrays into a merged superchunk
- * eventually costs the GPU upload: the block's per-vertex attributes plus the
- * probe colour the merge stamps on each of its vertices, and its indices at
- * `INDEX_UPLOAD_BYTES` each.
- */
-const meshArraysBytes = (arrays: MeshArrays): number =>
-  (arrays.positions.length / 3) * VERTEX_UPLOAD_BYTES +
-  arrays.indices.length * INDEX_UPLOAD_BYTES;
-
-/** Bytes a superchunk's six merged attribute buffers occupy. */
-const mergedArraysBytes = (arrays: MergedArrays): number =>
-  arrays.positions.capacityBytes +
-  arrays.normals.capacityBytes +
-  arrays.uvs.capacityBytes +
-  arrays.tiles.capacityBytes +
-  arrays.indices.capacityBytes +
-  arrays.brightness.capacityBytes;
 
 /** Bytes one block's built mesh occupies before it is merged. */
 const meshArraysResidentBytes = (arrays: MeshArrays): number =>
@@ -578,86 +507,8 @@ const inFrustum = (
   return true;
 };
 
-/**
- * Appends one chunk's geometry to a superchunk's merged arrays at the
- * superchunk's origin: the chunk's block-local vertices are re-origined by
- * `(blockCenter - superchunkCenter)` and its indices are re-based on the
- * running vertex count. Which slot a run of triangles belongs to is not
- * written here: the probe mesh drawing that run carries its own slot id.
- */
-const appendArrays = (
-  into: MergedArrays,
-  a: MeshArrays,
-  dx: number,
-  dy: number,
-  dz: number,
-): void => {
-  const base = into.positions.count / 3;
-  into.positions.pushOffset(a.positions, dx, dy, dz);
-  into.normals.pushMany(a.normals);
-  into.uvs.pushMany(a.uvs);
-  into.tiles.pushMany(a.tiles);
-  into.brightness.pushMany(a.brightness);
-  into.indices.pushShifted(a.indices, base);
-};
-
-/**
- * Points a recycled pair's attributes at empty arrays, handing back the merged
- * arrays the superchunk that just left had grown. The attribute set itself is
- * kept, and each attribute is replaced when the pair is filled again: a mesh
- * still holding a live range over the pair draws from the card's copy, which
- * that fill overwrites, so what it shows does not change here.
- */
-const releaseGeometryArrays = (geometry: BufferGeometry): void => {
-  for (const [name, attribute] of Object.entries(geometry.attributes)) {
-    geometry.setAttribute(
-      name,
-      new BufferAttribute(new Float32Array(0), attribute.itemSize),
-    );
-  }
-  if (geometry.index !== null) {
-    geometry.setIndex(new BufferAttribute(new Uint32Array(0), 1));
-  }
-};
-
-/** A superchunk's merged arrays plus the member slots already joined into them. */
-interface SuperchunkState {
-  slots: Set<number>;
-  terrain: MergedArrays;
-  water: MergedArrays;
-  /** The uploaded geometry the slot meshes share, keyed by the merged arrays above. */
-  terrainGeometry: BufferGeometry;
-  waterGeometry: BufferGeometry;
-  /** Each member's contiguous run of indices in the merged geometry, for its `drawRange`. */
-  terrainRanges: Map<number, { start: number; count: number }>;
-  waterRanges: Map<number, { start: number; count: number }>;
-  /**
-   * How many vertices and indices of each pass the GPU already holds from the
-   * last upload, so an append-only rebuild re-sends just the tail instead of
-   * the whole merged geometry.
-   */
-  committed: {
-    terrainVerts: number;
-    terrainIndices: number;
-    waterVerts: number;
-    waterIndices: number;
-  };
-}
-
-/**
- * A superchunk's pair of upload geometries. Kept stable for the life of the
- * superchunk holding it and recycled between superchunks: the renderer keys its
- * GPU buffers by geometry object, so filling a pooled pair again refills the
- * buffers it already has instead of allocating another set, and a pair nothing
- * is going to take is disposed so the renderer lets those buffers go.
- */
-interface SuperchunkGeometry {
-  terrain: BufferGeometry;
-  water: BufferGeometry;
-}
-
 /** A recycled pair, with the bytes of card memory the arrays that filled it measured. */
-interface PooledGeometry extends SuperchunkGeometry {
+interface PooledGeometry extends GeometryPair {
   bytes: number;
 }
 
@@ -721,7 +572,7 @@ export class TriangleRenderer {
   /** Each slot's world-space centre, for the per-chunk frustum and near tests. */
   private readonly slotCenter = new Map<number, Dim3>();
   /** Each superchunk's merged arrays, uploaded geometry, and members' index runs. */
-  private readonly scMerged = new Map<string, SuperchunkState>();
+  private readonly superchunks = new Map<string, Superchunk>();
   /**
    * Geometry pairs returned by superchunks that left the window, handed to the
    * next superchunk to fill in place. Filling a pair the card already has
@@ -733,8 +584,6 @@ export class TriangleRenderer {
   private geometryPoolBytes = 0;
   /** The most the pool holds before a recycled pair is handed back to the card instead. */
   private readonly geometryPoolBudgetBytes: number;
-  /** Superchunks whose merged geometry must be fully re-joined (membership or data replaced). */
-  private readonly scNeedsFull = new Set<string>();
   /** Superchunks whose merged geometry is stale and awaiting an upload this frame. */
   private readonly dirty = new Set<string>();
   /** Frame a superchunk's merged geometry was last uploaded on (drives the stall backstop). */
@@ -832,9 +681,7 @@ export class TriangleRenderer {
         this.chunkMeshes.set(index, { terrain, water });
         const key = this.blockSc.get(index);
         if (key !== undefined) {
-          if (this.scMerged.get(key)?.slots.has(index) === true) {
-            this.scNeedsFull.add(key);
-          }
+          this.superchunks.get(key)?.replace(index);
           if (!this.heldForGroup(index, key)) {
             this.dirty.add(key);
           }
@@ -875,12 +722,11 @@ export class TriangleRenderer {
       }
     }
     this.scMembers.delete(key);
-    const merged = this.scMerged.get(key);
+    const merged = this.superchunks.get(key);
     if (merged !== undefined) {
       this.recycleGeometryPair(merged);
     }
-    this.scMerged.delete(key);
-    this.scNeedsFull.delete(key);
+    this.superchunks.delete(key);
     this.dirty.delete(key);
     this.updateTriCount();
   }
@@ -891,7 +737,7 @@ export class TriangleRenderer {
    * and for each superchunk that reuses it, so the renderer re-fills the same
    * GPU buffers it already holds rather than allocating new ones.
    */
-  private takeGeometryPair(): SuperchunkGeometry {
+  private takeGeometryPair(): GeometryPair {
     const pooled = this.geometryPool.pop();
     if (pooled !== undefined) {
       this.geometryPoolBytes -= pooled.bytes;
@@ -910,21 +756,15 @@ export class TriangleRenderer {
    * either way, since a pooled pair is filled from the arrays of whichever
    * superchunk takes it.
    */
-  private recycleGeometryPair(state: SuperchunkState): void {
-    const bytes =
-      mergedArraysBytes(state.terrain) + mergedArraysBytes(state.water);
-    releaseGeometryArrays(state.terrainGeometry);
-    releaseGeometryArrays(state.waterGeometry);
+  private recycleGeometryPair(superchunk: Superchunk): void {
+    const bytes = superchunk.bytes;
+    const pair = superchunk.release();
     if (this.geometryPoolBytes + bytes > this.geometryPoolBudgetBytes) {
-      state.terrainGeometry.dispose();
-      state.waterGeometry.dispose();
+      pair.terrain.dispose();
+      pair.water.dispose();
       return;
     }
-    this.geometryPool.push({
-      terrain: state.terrainGeometry,
-      water: state.waterGeometry,
-      bytes,
-    });
+    this.geometryPool.push({ terrain: pair.terrain, water: pair.water, bytes });
     this.geometryPoolBytes += bytes;
   }
 
@@ -977,52 +817,30 @@ export class TriangleRenderer {
     if (members === undefined) {
       return false;
     }
-    const existing = this.scMerged.get(key);
-    const wasFull = existing === undefined || this.scNeedsFull.has(key);
-    let state: SuperchunkState;
-    let appended = false;
+    const existing = this.superchunks.get(key);
+    // A superchunk owing a rebuild holds vertices no member should be drawing,
+    // and rebuilding means joining every member's mesh into a fresh one — which
+    // only happens here, because the meshes are this renderer's to hold.
+    const wasFull = existing === undefined || existing.owesRebuild;
+    let superchunk: Superchunk;
     if (wasFull) {
       probe.count(Counter.fullRejoins);
-      const geometry = this.takeGeometryPair();
-      state = {
-        slots: new Set(),
-        terrain: emptyArrays(),
-        water: emptyArrays(),
-        terrainGeometry: geometry.terrain,
-        waterGeometry: geometry.water,
-        terrainRanges: new Map(),
-        waterRanges: new Map(),
-        committed: {
-          terrainVerts: 0,
-          terrainIndices: 0,
-          waterVerts: 0,
-          waterIndices: 0,
-        },
-      };
-      // The superchunk's old merged geometry is largely stale (its data was
-      // replaced or its membership moved), so its geometry is returned to the
-      // pool for the next superchunk instead of the renderer's cache keeping
-      // it forever alongside the replacement.
+      superchunk = new Superchunk(center, this.takeGeometryPair());
       if (existing !== undefined) {
         this.recycleGeometryPair(existing);
       }
-      this.scMerged.set(key, state);
-      this.scNeedsFull.delete(key);
-      for (const m of members) {
-        if (this.chunkMeshes.has(m.index)) {
-          this.appendChunk(state, m, center);
-          appended = true;
-        }
-      }
+      this.superchunks.set(key, superchunk);
     } else {
-      state = existing as SuperchunkState;
-      for (const m of members) {
-        if (state.slots.has(m.index) || !this.chunkMeshes.has(m.index)) {
-          continue;
-        }
-        this.appendChunk(state, m, center);
-        appended = true;
+      superchunk = existing;
+    }
+    let appended = false;
+    for (const m of members) {
+      const built = this.chunkMeshes.get(m.index);
+      if (built === undefined || superchunk.holds(m.index)) {
+        continue;
       }
+      superchunk.join(m.index, m.center, built);
+      appended = true;
     }
     // Upload only when the superchunk has settled (every member meshed), when
     // its membership itself changed (the stale data has to leave now), or
@@ -1045,56 +863,10 @@ export class TriangleRenderer {
       }
       return false;
     }
-    const { committed } = state;
-    setGeometryData(
-      state.terrainGeometry,
-      {
-        positions: state.terrain.positions.array(),
-        normals: state.terrain.normals.array(),
-        uvs: state.terrain.uvs.array(),
-        tiles: state.terrain.tiles.array(),
-        brightness: state.terrain.brightness.array(),
-        indices: state.terrain.indices.array(),
-      },
-      committed.terrainVerts,
-      committed.terrainIndices,
-    );
-
-    setGeometryData(
-      state.waterGeometry,
-      {
-        positions: state.water.positions.array(),
-        normals: state.water.normals.array(),
-        uvs: state.water.uvs.array(),
-        tiles: state.water.tiles.array(),
-        brightness: state.water.brightness.array(),
-        indices: state.water.indices.array(),
-      },
-      committed.waterVerts,
-      committed.waterIndices,
-    );
-
     this.scLastUpload.set(key, this.frame);
     probe.count(Counter.uploads);
-    // Count what this upload marked before the committed counters catch up, so
-    // the frame's debug figure reflects the merged bytes actually reaching the
-    // GPU rather than the pre-merge estimate the pacing spent against.
-    this.uploadBytesThisFrame +=
-      mergedTailBytes(
-        state.terrain,
-        committed.terrainVerts,
-        committed.terrainIndices,
-      ) +
-      mergedTailBytes(
-        state.water,
-        committed.waterVerts,
-        committed.waterIndices,
-      );
-    committed.terrainVerts = state.terrain.positions.count / 3;
-    committed.terrainIndices = state.terrain.indices.count;
-    committed.waterVerts = state.water.positions.count / 3;
-    committed.waterIndices = state.water.indices.count;
-    this.syncSlotMeshes(key, center, state);
+    this.uploadBytesThisFrame += superchunk.upload();
+    this.syncSlotMeshes(key, center, superchunk);
     this.updateTriCount();
     return true;
   }
@@ -1112,69 +884,34 @@ export class TriangleRenderer {
     if (members === undefined) {
       return 0;
     }
-    // A full re-join replaces the merged geometry wholesale, so every member
-    // whose build has landed is owed at whole-mesh size no matter what the old
-    // geometry already held. An append-only rebuild instead owes only the
-    // un-joined members and the merged arrays' un-committed tail.
-    if (this.scMerged.get(key) === undefined || this.scNeedsFull.has(key)) {
+    const superchunk = this.superchunks.get(key);
+    // A rebuild replaces the merged geometry wholesale, so every member whose
+    // build has landed is owed at whole-mesh size no matter what the old
+    // geometry already held.
+    if (superchunk === undefined || superchunk.owesRebuild) {
       let bytes = 0;
       for (const member of members) {
         const built = this.chunkMeshes.get(member.index);
         if (built !== undefined) {
           bytes +=
-            meshArraysBytes(built.terrain) + meshArraysBytes(built.water);
+            meshUploadBytes(built.terrain) + meshUploadBytes(built.water);
         }
       }
       return bytes;
     }
-    const state = this.scMerged.get(key) as SuperchunkState;
-    const joined = state.slots;
-    let bytes = 0;
+    // Otherwise the members not joined yet, plus whatever the superchunk itself
+    // has grown since its last upload.
+    let bytes = superchunk.pendingBytes;
     for (const member of members) {
-      if (joined.has(member.index)) {
+      if (superchunk.holds(member.index)) {
         continue;
       }
       const built = this.chunkMeshes.get(member.index);
       if (built !== undefined) {
-        bytes += meshArraysBytes(built.terrain) + meshArraysBytes(built.water);
+        bytes += meshUploadBytes(built.terrain) + meshUploadBytes(built.water);
       }
     }
-    bytes += mergedTailBytes(
-      state.terrain,
-      state.committed.terrainVerts,
-      state.committed.terrainIndices,
-    );
-    bytes += mergedTailBytes(
-      state.water,
-      state.committed.waterVerts,
-      state.committed.waterIndices,
-    );
     return bytes;
-  }
-
-  /** Appends one member's geometry to a superchunk's merged arrays and records its index run. */
-  private appendChunk(
-    state: SuperchunkState,
-    m: { index: number; center: Dim3 },
-    center: Dim3,
-  ): void {
-    const mesh = this.chunkMeshes.get(m.index)!;
-    const dx = m.center[0] - center[0];
-    const dy = m.center[1] - center[1];
-    const dz = m.center[2] - center[2];
-    const terrainStart = state.terrain.indices.count;
-    appendArrays(state.terrain, mesh.terrain, dx, dy, dz);
-    state.terrainRanges.set(m.index, {
-      start: terrainStart,
-      count: mesh.terrain.indices.length,
-    });
-    const waterStart = state.water.indices.count;
-    appendArrays(state.water, mesh.water, dx, dy, dz);
-    state.waterRanges.set(m.index, {
-      start: waterStart,
-      count: mesh.water.indices.length,
-    });
-    state.slots.add(m.index);
   }
 
   /**
@@ -1186,19 +923,20 @@ export class TriangleRenderer {
   private syncSlotMeshes(
     key: string,
     center: Dim3,
-    state: SuperchunkState,
+    superchunk: Superchunk,
   ): void {
     for (const m of this.scMembers.get(key)!) {
       this.slotCenter.set(m.index, m.center);
-      const terrainRange = state.terrainRanges.get(m.index) ?? EMPTY_RANGE;
-      const waterRange = state.waterRanges.get(m.index) ?? EMPTY_RANGE;
+      const { terrain: terrainRange, water: waterRange } = superchunk.rangeOf(
+        m.index,
+      );
       const hasTerrain = terrainRange.count > 0;
       const hasWater = waterRange.count > 0;
       if (hasTerrain) {
         const mesh = this.slotMesh(this.scChunkTerrain, this.terrain, m.index);
         this.seatSlotMesh(
           mesh,
-          state.terrainGeometry,
+          superchunk.terrain,
           this.worldTerrainMaterial(),
           center,
           terrainRange,
@@ -1206,7 +944,7 @@ export class TriangleRenderer {
         const probe = this.probeMesh(this.scProbeTerrain, m.index);
         this.seatSlotMesh(
           probe,
-          state.terrainGeometry,
+          superchunk.terrain,
           this.probeTerrainMaterial,
           center,
           terrainRange,
@@ -1216,7 +954,7 @@ export class TriangleRenderer {
         const mesh = this.slotMesh(this.scChunkWater, this.water, m.index);
         this.seatSlotMesh(
           mesh,
-          state.waterGeometry,
+          superchunk.water,
           this.worldWaterMaterial(),
           center,
           waterRange,
@@ -1224,7 +962,7 @@ export class TriangleRenderer {
         const probe = this.probeMesh(this.scProbeWater, m.index);
         this.seatSlotMesh(
           probe,
-          state.waterGeometry,
+          superchunk.water,
           this.probeWaterMaterial,
           center,
           waterRange,
@@ -1447,7 +1185,7 @@ export class TriangleRenderer {
    * chunk, not only once it has merged once.
    */
   private scOccluded(key: string, playerKey: string): boolean {
-    const mergedSlots = this.scMerged.get(key)?.slots;
+    const mergedSlots = this.superchunks.get(key)?.members;
     if (mergedSlots !== undefined && mergedSlots.size > 0) {
       for (const slot of mergedSlots as Set<number>) {
         if (!this.slotHiddenByOcclusion(slot, playerKey)) {
@@ -1496,9 +1234,8 @@ export class TriangleRenderer {
    */
   get mergedGeometryBytes(): number {
     let bytes = 0;
-    for (const state of this.scMerged.values()) {
-      bytes +=
-        mergedArraysBytes(state.terrain) + mergedArraysBytes(state.water);
+    for (const superchunk of this.superchunks.values()) {
+      bytes += superchunk.bytes;
     }
     return bytes;
   }
@@ -1577,7 +1314,7 @@ export class TriangleRenderer {
         // re-join on the next tick drops it. No synchronous upload: a scroll
         // repositions the whole entering cap, and uploading each of those in
         // one frame is the stall we are trying to avoid.
-        this.scNeedsFull.add(oldKey);
+        this.superchunks.get(oldKey)?.retire(index);
         this.dirty.add(oldKey);
       }
     }
@@ -1986,9 +1723,10 @@ export class TriangleRenderer {
    */
   dispose(): void {
     this.meshes.dispose();
-    for (const state of this.scMerged.values()) {
-      state.terrainGeometry.dispose();
-      state.waterGeometry.dispose();
+    for (const superchunk of this.superchunks.values()) {
+      const pair = superchunk.release();
+      pair.terrain.dispose();
+      pair.water.dispose();
     }
     for (const pooled of this.geometryPool) {
       pooled.terrain.dispose();

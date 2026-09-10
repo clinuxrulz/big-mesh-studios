@@ -1,6 +1,6 @@
 # What voxelscape is made of
 
-Drawn from the imports under `src` at 5a86cfd by `pnpm architecture`.
+Drawn from the imports under `src` at 862c3e6 by `pnpm architecture`.
 Nothing here is written by hand: change the code and run it again.
 
 ```mermaid
@@ -8,7 +8,7 @@ graph TD
   shell["shell<br/>5 files · 1387 lines"]
   voxelscape["voxelscape<br/>2 files · 1113 lines"]
   world["world<br/>23 files · 5897 lines"]
-  renderers["renderers<br/>11 files · 4133 lines"]
+  renderers["renderers<br/>12 files · 4207 lines"]
   render["render<br/>4 files · 1004 lines"]
   player["player<br/>15 files · 3207 lines"]
   monsters["monsters<br/>6 files · 1638 lines"]
@@ -74,7 +74,7 @@ graph TD
 | `shell`       | the page, the console, and what wires a world into them                | 5     | 1387  |
 | `voxelscape`  | one world: its frame, and every part below it                          | 2     | 1113  |
 | `world`       | voxels, light, the streaming window, and the workers that fill it      | 23    | 5897  |
-| `renderers`   | turning voxels into geometry, and drawing it                           | 11    | 4133  |
+| `renderers`   | turning voxels into geometry, and drawing it                           | 12    | 4207  |
 | `render`      | the frame loop, the resolution scaler, and the probe that times them   | 4     | 1004  |
 | `player`      | the body, its input, its tools and what they do to the world           | 15    | 3207  |
 | `monsters`    | what wanders the world and fights the player                           | 6     | 1638  |
@@ -107,7 +107,7 @@ graph TD
 | `player`      | `world`       | 7                |
 | `renderers`   | `environment` | 1                |
 | `renderers`   | `render`      | 2                |
-| `renderers`   | `world`       | 4                |
+| `renderers`   | `world`       | 5                |
 | `shell`       | `atproto`     | 4                |
 | `shell`       | `environment` | 2                |
 | `shell`       | `monsters`    | 1                |

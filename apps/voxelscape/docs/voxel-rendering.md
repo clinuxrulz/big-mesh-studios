@@ -1,6 +1,6 @@
 # How a voxel becomes a pixel
 
-Read out of the modules that do it at 42a2f85 by `pnpm rendering`.
+Read out of the modules that do it at 862c3e6 by `pnpm rendering`.
 Every number below is the one the code declares, not a note about it.
 
 ## The path
@@ -16,6 +16,7 @@ graph TD
   world_sky_light["world/sky-light.ts<br/>drops skylight down every column and spreads it sideways"]
   world_block_light["world/block-light.ts<br/>spreads the light emitters give off"]
   renderers_plane_merge["renderers/plane-merge.ts<br/>covers one plane of like faces with as few rectangles as it can"]
+  renderers_superchunk["renderers/superchunk.ts<br/>one superchunk's merged geometry: each member's run, and what the card holds of it"]
   renderers_mesh["renderers/mesh.ts<br/>sweeps a block for exposed faces and writes the quads they become"]
   renderers_growable["renderers/growable.ts<br/>the typed arrays a mesh is accumulated into, and reused for the next block"]
   world_fill_mesh_worker["world/fill-mesh-worker.ts<br/>does all of the above for a batch of blocks, off the main thread"]
@@ -41,6 +42,8 @@ graph TD
   world_block_light --> world_light_store
   world_block_light --> world_sky_light
   world_block_light --> world_voxel_store
+  renderers_superchunk --> renderers_growable
+  renderers_superchunk --> renderers_mesh
   renderers_mesh --> renderers_atlas
   renderers_mesh --> renderers_growable
   renderers_mesh --> world_voxel_store
@@ -60,8 +63,8 @@ graph TD
   renderers_mesh_client --> render_perf_probe
   renderers_mesh_client --> renderers_mesh
   renderers_triangle_renderer --> renderers_atlas
-  renderers_triangle_renderer --> renderers_growable
   renderers_triangle_renderer --> renderers_mesh
+  renderers_triangle_renderer --> renderers_superchunk
   renderers_triangle_renderer --> renderers_mesh_client
   renderers_triangle_renderer --> render_perf_probe
   renderers_triangle_renderer --> renderers_occlusion
@@ -139,7 +142,7 @@ are the drawing that follows it.
 | `MAX_UPLOAD_STALL_FRAMES`    | `6`                                  | `renderers/triangle-renderer.ts` | Frames a superchunk may keep gaining members before a partial upload is forced.                                                                          |
 | `MAX_UPLOAD_BYTES_PER_FRAME` | `2 * 1024 * 1024`                    | `renderers/triangle-renderer.ts` | The bytes of merged geometry one frame may mark for GPU upload.                                                                                          |
 | `GEOMETRY_POOL_FRAMES`       | `8`                                  | `renderers/triangle-renderer.ts` | Frames' worth of upload the recycled geometry pool holds.                                                                                                |
-| `VERTEX_UPLOAD_BYTES`        | `40`                                 | `renderers/triangle-renderer.ts` | The bytes one vertex of merged geometry adds to the GPU upload: position 12 + normal 12 + uv 8 + the tile it repeats 4 + brightness 4.                   |
-| `INDEX_UPLOAD_BYTES`         | `4`                                  | `renderers/triangle-renderer.ts` | The bytes one index of merged geometry adds to the GPU upload.                                                                                           |
 | `DEFAULT_OCCLUSION_INTERVAL` | `200`                                | `renderers/triangle-renderer.ts` | Frames between the hardware occlusion queries, each a readback that stalls the pipeline.                                                                 |
+| `VERTEX_UPLOAD_BYTES`        | `40`                                 | `renderers/superchunk.ts`        | The bytes one vertex of merged geometry adds to an upload.                                                                                               |
+| `INDEX_UPLOAD_BYTES`         | `4`                                  | `renderers/superchunk.ts`        | The bytes one index of merged geometry adds to an upload.                                                                                                |
 | `MAX_BUILDS_PER_DRAIN`       | `12`                                 | `renderers/mesh-client.ts`       | How many block meshes to hand the workers per drain, in total; the workers do the heavy lifting, so the main thread only pays for wrapping the requests. |

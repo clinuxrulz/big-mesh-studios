@@ -4,6 +4,7 @@ import { PerspectiveCamera } from "@random-mesh/rmsl/scene";
 import type { BufferGeometry } from "@random-mesh/rmsl/scene";
 import { scBounds, TriangleRenderer } from "./triangle-renderer";
 import { probeColor } from "./occlusion";
+import type { Superchunk } from "./superchunk";
 import { buildBlockShell, type WorldBlock } from "../world/level-data";
 import { VOXEL_GRASS } from "../world/voxel-store";
 
@@ -343,13 +344,10 @@ describe("the recycled geometry pool", () => {
     renderer: TriangleRenderer,
   ): { terrain: BufferGeometry; water: BufferGeometry } => {
     const inside = renderer as unknown as {
-      scMerged: Map<
-        string,
-        { terrainGeometry: BufferGeometry; waterGeometry: BufferGeometry }
-      >;
+      superchunks: Map<string, Superchunk>;
     };
-    const [state] = [...inside.scMerged.values()];
-    return { terrain: state.terrainGeometry, water: state.waterGeometry };
+    const [superchunk] = [...inside.superchunks.values()];
+    return { terrain: superchunk.terrain, water: superchunk.water };
   };
 
   /** A renderer whose one block is meshed and merged into a superchunk at the origin. */

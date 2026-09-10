@@ -72,6 +72,10 @@ const PATH: Array<{ module: string; does: string }> = [
     does: "covers one plane of like faces with as few rectangles as it can",
   },
   {
+    module: "renderers/superchunk.ts",
+    does: "one superchunk's merged geometry: each member's run, and what the card holds of it",
+  },
+  {
     module: "renderers/mesh.ts",
     does: "sweeps a block for exposed faces and writes the quads they become",
   },
@@ -138,10 +142,9 @@ const GOVERNING: Record<string, readonly string[]> = {
     "MAX_UPLOAD_BYTES_PER_FRAME",
     "MAX_UPLOAD_STALL_FRAMES",
     "GEOMETRY_POOL_FRAMES",
-    "VERTEX_UPLOAD_BYTES",
-    "INDEX_UPLOAD_BYTES",
     "DEFAULT_OCCLUSION_INTERVAL",
   ],
+  "renderers/superchunk.ts": ["VERTEX_UPLOAD_BYTES", "INDEX_UPLOAD_BYTES"],
   "renderers/mesh-client.ts": ["MAX_BUILDS_PER_DRAIN"],
 };
 
@@ -490,8 +493,8 @@ export const problemsWith = (drawing: string, held: string): string[] => {
     0,
   );
   const declared = Number(
-    constantsOf("renderers/triangle-renderer.ts", ["VERTEX_UPLOAD_BYTES"])[0]
-      ?.value ?? "0",
+    constantsOf("renderers/superchunk.ts", ["VERTEX_UPLOAD_BYTES"])[0]?.value ??
+      "0",
   );
   if (summed !== declared) {
     problems.push(
