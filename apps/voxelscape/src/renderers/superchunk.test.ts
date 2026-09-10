@@ -119,42 +119,120 @@ describe("Superchunk", () => {
     });
   });
 
-  it("owes a rebuild once a member's voxels have been replaced", () => {
+  it("stops drawing a retired member at once, and keeps its room", () => {
     const superchunk = new Superchunk(CENTER, pair());
     superchunk.join(1, [0, 0, 0], meshes(2));
-    expect(superchunk.owesRebuild).toBe(false);
+    superchunk.join(2, [64, 0, 0], meshes(3));
+    superchunk.upload();
+    expect(superchunk.freeBytes).toBe(0);
 
-    superchunk.replace(1);
+    superchunk.retire(1);
 
-    // The member is still a member — what is stale is the vertices behind it,
-    // and only a rebuild from every member's mesh is rid of them.
-    expect(superchunk.owesRebuild).toBe(true);
-    expect(superchunk.holds(1)).toBe(true);
+    expect(superchunk.rangeOf(1).terrain).toEqual({ start: 0, count: 0 });
+    expect(superchunk.holds(1)).toBe(false);
+    expect(superchunk.members.size).toBe(1);
+    // What it was using is held for the next member that fits: eight vertices
+    // and twelve indices, the two quads it drew.
+    expect(superchunk.freeBytes).toBe(
+      8 * VERTEX_UPLOAD_BYTES + 12 * INDEX_UPLOAD_BYTES,
+    );
+    // The member that stayed draws exactly what it drew before.
+    expect(superchunk.rangeOf(2).terrain).toEqual({ start: 12, count: 18 });
   });
 
-  it("says nothing is owed when a member it never held is replaced", () => {
+  it("writes the next member into the room a retired one left", () => {
     const superchunk = new Superchunk(CENTER, pair());
-    superchunk.join(1, [0, 0, 0], meshes(1));
-    superchunk.replace(7);
-    expect(superchunk.owesRebuild).toBe(false);
+    superchunk.join(1, [0, 0, 0], meshes(2));
+    superchunk.join(2, [64, 0, 0], meshes(3));
+    superchunk.upload();
+    const grownTo = superchunk.indexCount;
+
+    superchunk.retire(1);
+    superchunk.join(3, [0, 64, 0], meshes(2, 500));
+
+    // Two quads fit exactly where two quads were, and nothing grew.
+    expect(superchunk.rangeOf(3).terrain).toEqual({ start: 0, count: 12 });
+    expect(superchunk.freeBytes).toBe(0);
+    expect(superchunk.indexCount).toBe(grownTo);
   });
 
-  it("stops drawing a retired member at once, and owes a rebuild", () => {
+  it("grows for a member too big for any room it is holding", () => {
+    const superchunk = new Superchunk(CENTER, pair());
+    superchunk.join(1, [0, 0, 0], meshes(2));
+    superchunk.upload();
+    const grownTo = superchunk.indexCount;
+
+    superchunk.retire(1);
+    superchunk.join(2, [64, 0, 0], meshes(5));
+
+    // Five quads do not fit where two were, so they go at the end and the room
+    // stays free for something smaller.
+    expect(superchunk.rangeOf(2).terrain.start).toBe(grownTo);
+    expect(superchunk.indexCount).toBeGreaterThan(grownTo);
+    expect(superchunk.freeBytes).toBeGreaterThan(0);
+  });
+
+  it("keeps what is left of a room a smaller member only half filled", () => {
+    const superchunk = new Superchunk(CENTER, pair());
+    superchunk.join(1, [0, 0, 0], meshes(4));
+    superchunk.upload();
+    const grownTo = superchunk.indexCount;
+
+    superchunk.retire(1);
+    superchunk.join(2, [64, 0, 0], meshes(1));
+
+    // One quad into four quads' room: it takes the front, and three quads'
+    // worth stays free rather than being lost.
+    expect(superchunk.rangeOf(2).terrain).toEqual({ start: 0, count: 6 });
+    expect(superchunk.indexCount).toBe(grownTo);
+    expect(superchunk.freeBytes).toBe(
+      12 * VERTEX_UPLOAD_BYTES + 18 * INDEX_UPLOAD_BYTES,
+    );
+  });
+
+  it("sends only the room it refilled, not the whole of the arrays", () => {
     const superchunk = new Superchunk(CENTER, pair());
     superchunk.join(1, [0, 0, 0], meshes(2));
     superchunk.join(2, [64, 0, 0], meshes(3));
     superchunk.upload();
 
     superchunk.retire(1);
+    const filling = meshes(2, 500);
+    superchunk.join(3, [0, 64, 0], filling);
+    const owed =
+      meshUploadBytes(filling.terrain) + meshUploadBytes(filling.water);
+    expect(superchunk.pendingBytes).toBe(owed);
+    expect(superchunk.upload()).toBe(owed);
 
-    // Nothing draws the retired member's vertices, though they are still in the
-    // arrays until the rebuild — which is the cost ADR 0034's free list is for.
-    expect(superchunk.rangeOf(1).terrain).toEqual({ start: 0, count: 0 });
-    expect(superchunk.holds(1)).toBe(false);
-    expect(superchunk.members.size).toBe(1);
-    expect(superchunk.owesRebuild).toBe(true);
-    // The member that stayed draws exactly what it drew before.
-    expect(superchunk.rangeOf(2).terrain).toEqual({ start: 12, count: 18 });
+    // A slice of the arrays rather than a tail: the eight vertices of the two
+    // quads that were written, where they were written.
+    expect(superchunk.terrain.getAttribute("position")!.updateRange).toEqual({
+      offset: 0,
+      count: 8 * 3,
+    });
+  });
+
+  it("draws a refilled member from the vertices it wrote", () => {
+    const superchunk = new Superchunk(CENTER, pair());
+    superchunk.join(1, [0, 0, 0], meshes(2));
+    superchunk.join(2, [64, 0, 0], meshes(2));
+    superchunk.upload();
+
+    superchunk.retire(1);
+    superchunk.join(3, [0, 0, 128], meshes(2));
+    superchunk.upload();
+
+    // Its indices point at the vertices it wrote, which are the ones the retired
+    // member had — 0..7, not the end of the arrays.
+    const indices = superchunk.terrain.index!.array;
+    const range = superchunk.rangeOf(3).terrain;
+    for (let at = range.start; at < range.start + range.count; at++) {
+      expect(indices[at]).toBeLessThan(8);
+    }
+    // And they are at its own centre, not the retired member's: the mesh's own
+    // z for that vertex, moved by the 128 between the two centres.
+    const positions = superchunk.terrain.getAttribute("position")!;
+    expect(positions.array[2]).toBeCloseTo(meshOf(2).positions[2] + 128);
   });
 
   it("joins a member once, however many times it is offered", () => {

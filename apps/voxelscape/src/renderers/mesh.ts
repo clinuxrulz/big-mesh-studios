@@ -704,22 +704,31 @@ export const buildWaterMesh = (
 const attrWithRange = (
   array: Float32Array | Uint32Array,
   itemSize: number,
-  committed: number,
+  span: Span | undefined,
 ): BufferAttribute => {
-  const total = array.length / itemSize;
-  const a = new BufferAttribute(array, itemSize);
-  if (committed > 0 && total > committed) {
-    a.updateRange = {
-      offset: committed * itemSize,
-      count: (total - committed) * itemSize,
+  const attribute = new BufferAttribute(array, itemSize);
+  if (span !== undefined) {
+    // Counted in numbers here, where the span counts vertices or indices.
+    attribute.updateRange = {
+      offset: span.first * itemSize,
+      count: span.count * itemSize,
     };
-  } else if (total <= committed) {
-    // Nothing to send: the GPU already holds this exact data.
-    a.updateRange = { offset: 0, count: 0 };
   }
-  a.needsUpdate = true;
-  return a;
+  attribute.needsUpdate = true;
+  return attribute;
 };
+
+/** A run of one kind of thing an upload sends: where it starts, and how many. */
+export interface Span {
+  first: number;
+  count: number;
+}
+
+/** What changed since the last upload: a run of vertices, and a run of indices. */
+export interface WrittenSpans {
+  vertices: Span;
+  indices: Span;
+}
 
 /**
  * Applies `mesh`'s arrays to an existing geometry *in place*, replacing
@@ -731,21 +740,20 @@ const attrWithRange = (
  * orphan the old entry in that cache and leak its GPU buffers on every
  * rebuild.
  *
- * `committedVertices` and `committedIndices` name what the GPU already holds
- * from the last upload of this same geometry: 0 uploads everything, and a
- * partial count uploads only the appended slice (the arrays in `mesh` must be
- * that geometry's own, grown at the tail).
+ * `written` names the part of the arrays that changed since the last upload of
+ * this same geometry — a run of vertices and a run of indices, counted in
+ * vertices and indices rather than in numbers. Omitted, the whole of both is
+ * sent, which is what a geometry filled for the first time needs.
  */
 export const setGeometryData = (
   geometry: BufferGeometry,
   mesh: MeshArrays,
-  committedVertices = 0,
-  committedIndices = 0,
+  written?: WrittenSpans,
 ): void => {
   const attr = (name: string, array: Float32Array, itemSize: number): void => {
     geometry.setAttribute(
       name,
-      attrWithRange(array, itemSize, committedVertices),
+      attrWithRange(array, itemSize, written?.vertices),
     );
   };
   attr("position", mesh.positions, 3);
@@ -762,11 +770,7 @@ export const setGeometryData = (
   attr("brightness", mesh.brightness, 1);
   // wrap as a BufferAttribute so `setIndex` keeps the Uint32 type without
   // rescanning the array for the 16-bit cutoff
-  const idx =
-    mesh.indices instanceof Uint32Array
-      ? mesh.indices
-      : new Uint32Array(mesh.indices);
-  geometry.setIndex(attrWithRange(idx, 1, committedIndices));
+  geometry.setIndex(attrWithRange(mesh.indices, 1, written?.indices));
 };
 
 /**

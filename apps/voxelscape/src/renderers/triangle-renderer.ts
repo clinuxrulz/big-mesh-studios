@@ -675,13 +675,13 @@ export class TriangleRenderer {
       onMeshBuilt: (index, terrain, water) => {
         // Cache the per-chunk build so the merger can re-read it, then defer
         // the superchunk upload to the next tick so a burst of results lands
-        // as a single geometry update instead of one per block. A chunk that
-        // was already joined has been replaced, so its superchunk must be
-        // re-joined in full rather than appended to.
+        // as a single geometry update instead of one per block. A chunk that was
+        // already joined has been replaced, so it gives its room in the merged
+        // arrays back and is joined again from this build on the next merge.
         this.chunkMeshes.set(index, { terrain, water });
         const key = this.blockSc.get(index);
         if (key !== undefined) {
-          this.superchunks.get(key)?.replace(index);
+          this.superchunks.get(key)?.retire(index);
           if (!this.heldForGroup(index, key)) {
             this.dirty.add(key);
           }
@@ -817,21 +817,14 @@ export class TriangleRenderer {
     if (members === undefined) {
       return false;
     }
-    const existing = this.superchunks.get(key);
-    // A superchunk owing a rebuild holds vertices no member should be drawing,
-    // and rebuilding means joining every member's mesh into a fresh one — which
-    // only happens here, because the meshes are this renderer's to hold.
-    const wasFull = existing === undefined || existing.owesRebuild;
-    let superchunk: Superchunk;
-    if (wasFull) {
-      probe.count(Counter.fullRejoins);
+    let superchunk = this.superchunks.get(key);
+    // The first merge of a cell is the only one that needs geometry of its own:
+    // a member that leaves, or whose voxels changed, gives its room in these
+    // arrays back, and the next member that fits writes into it.
+    const first = superchunk === undefined;
+    if (superchunk === undefined) {
       superchunk = new Superchunk(center, this.takeGeometryPair());
-      if (existing !== undefined) {
-        this.recycleGeometryPair(existing);
-      }
       this.superchunks.set(key, superchunk);
-    } else {
-      superchunk = existing;
     }
     let appended = false;
     for (const m of members) {
@@ -855,8 +848,7 @@ export class TriangleRenderer {
     const stalled =
       lastUpload !== undefined &&
       this.frame - lastUpload >= MAX_UPLOAD_STALL_FRAMES;
-    const uploadNow =
-      force || wasFull || (appended && missing === 0) || stalled;
+    const uploadNow = force || first || (appended && missing === 0) || stalled;
     if (!uploadNow) {
       if (appended) {
         this.dirty.add(key);
@@ -885,10 +877,9 @@ export class TriangleRenderer {
       return 0;
     }
     const superchunk = this.superchunks.get(key);
-    // A rebuild replaces the merged geometry wholesale, so every member whose
-    // build has landed is owed at whole-mesh size no matter what the old
-    // geometry already held.
-    if (superchunk === undefined || superchunk.owesRebuild) {
+    if (superchunk === undefined) {
+      // Nothing is merged here yet, so every member whose build has landed is
+      // owed at whole-mesh size.
       let bytes = 0;
       for (const member of members) {
         const built = this.chunkMeshes.get(member.index);
@@ -899,8 +890,8 @@ export class TriangleRenderer {
       }
       return bytes;
     }
-    // Otherwise the members not joined yet, plus whatever the superchunk itself
-    // has grown since its last upload.
+    // The members not joined yet, plus what it has written since its last
+    // upload — a freed run, once something fills it, or the tail it grew.
     let bytes = superchunk.pendingBytes;
     for (const member of members) {
       if (superchunk.holds(member.index)) {

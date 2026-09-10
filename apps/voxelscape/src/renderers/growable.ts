@@ -7,6 +7,10 @@
 // A builder is worth reusing. The buffer doubles when it fills, so a builder
 // that has met the largest block a worker will see never grows again, and
 // `clear` empties it for the next block without giving the buffer back.
+//
+// The `writeAt` half is for the other kind of caller: one filling a run that
+// something already left room for — a superchunk writing a member's vertices
+// into the space a retired member freed — where the length does not move.
 
 /**
  * A growable typed array: appends into a buffer that doubles when full, so a
@@ -119,6 +123,36 @@ export class Growable<T extends Float32Array | Uint32Array> {
     this.buf[this.length + 1] = second;
     this.buf[this.length + 2] = third;
     this.length += 3;
+  }
+
+  /**
+   * Writes `values` over what is at `at`, leaving the length alone: the caller
+   * is filling a run something else has already left room for.
+   */
+  writeManyAt(at: number, values: ArrayLike<number>): void {
+    this.buf.set(values, at);
+  }
+
+  /** Writes `values` over what is at `at`, each shifted by `shift`. */
+  writeShiftedAt(at: number, values: ArrayLike<number>, shift: number): void {
+    for (let i = 0; i < values.length; i++) {
+      this.buf[at + i] = values[i] + shift;
+    }
+  }
+
+  /** Writes positions over what is at `at`, shifted per component. */
+  writeOffsetAt(
+    at: number,
+    values: ArrayLike<number>,
+    dx: number,
+    dy: number,
+    dz: number,
+  ): void {
+    for (let i = 0; i < values.length; i += 3) {
+      this.buf[at + i] = values[i] + dx;
+      this.buf[at + i + 1] = values[i + 1] + dy;
+      this.buf[at + i + 2] = values[i + 2] + dz;
+    }
   }
 
   /** Forgets everything written, keeping the buffer for what is written next. */

@@ -9,14 +9,20 @@
 // addressed by a key, and `TriangleRenderer` owns which cells have geometry,
 // which of them are due, and what a frame is allowed to upload.
 //
-// The card's copy is the reason `committed` exists: an upload sends only the
-// tail past what the last one sent, so a superchunk that gained one member pays
-// for that member rather than for itself. A member replaced or retired makes the
-// arrays behind it wrong, and this says so — `owesRebuild` — because rebuilding
-// needs every member's mesh, which the renderer holds and this does not.
+// A retired member's vertices are harmless the moment its run stops being drawn
+// — nothing indexes them — so what retiring has to do is give the space back.
+// The room it leaves is kept as a free run, and the next member that fits writes
+// into it. That is what keeps the arrays from growing for the life of a walk, and
+// it is why nothing here is ever rebuilt from every member: the alternative, and
+// what this replaced, was throwing the arrays away and re-joining all eight,
+// which sent the whole superchunk to the card again — half of every merge on a
+// phone, and the frames it dropped.
+//
+// An upload sends the runs written since the last one, which is a slice in the
+// middle when a freed run was filled and a tail when the arrays grew.
 import { BufferAttribute, BufferGeometry } from "@random-mesh/rmsl/scene";
 import { Growable } from "./growable";
-import { setGeometryData, type MeshArrays } from "./mesh";
+import { setGeometryData, type MeshArrays, type Span } from "./mesh";
 import type { Dim3 } from "../world/level-data";
 
 /**
@@ -76,11 +82,40 @@ const emptyArrays = (): MergedArrays => ({
   brightness: new Growable(Float32Array),
 });
 
-/** How many vertices and indices of one pass the card holds from the last upload. */
-interface Committed {
-  vertices: number;
-  indices: number;
+/**
+ * Room a retired member left: where its vertices and its indices were, and how
+ * many of each. A member joining fits into one only if both of its runs fit.
+ */
+interface FreeRun {
+  vertexFirst: number;
+  vertexCount: number;
+  indexFirst: number;
+  indexCount: number;
 }
+
+/**
+ * What one pass has written since its last upload, as one run of vertices and
+ * one of indices — the union of everything written, so filling a freed run near
+ * the start and appending at the end in the same frame sends both and what lies
+ * between. Nothing written leaves both counts at zero.
+ */
+interface Written {
+  vertexFirst: number;
+  vertexLast: number;
+  indexFirst: number;
+  indexLast: number;
+}
+
+const nothingWritten = (): Written => ({
+  vertexFirst: Infinity,
+  vertexLast: -1,
+  indexFirst: Infinity,
+  indexLast: -1,
+});
+
+/** The span an upload sends for one kind of thing, or undefined for nothing. */
+const spanOf = (first: number, last: number): Span | undefined =>
+  last < first ? undefined : { first, count: last - first + 1 };
 
 /**
  * Appends one member's mesh into a pass at the superchunk's origin: the
@@ -112,11 +147,141 @@ const capacityBytes = (arrays: MergedArrays): number =>
   arrays.indices.capacityBytes +
   arrays.brightness.capacityBytes;
 
-/** Bytes of a pass the card does not hold: everything past the last upload. */
-const tailBytes = (arrays: MergedArrays, committed: Committed): number =>
-  Math.max(0, arrays.positions.count / 3 - committed.vertices) *
-    VERTEX_UPLOAD_BYTES +
-  Math.max(0, arrays.indices.count - committed.indices) * INDEX_UPLOAD_BYTES;
+/** One pass: its arrays, the room retired members left in them, and what it owes. */
+interface Pass {
+  arrays: MergedArrays;
+  free: FreeRun[];
+  written: Written;
+}
+
+const emptyPass = (): Pass => ({
+  arrays: emptyArrays(),
+  free: [],
+  written: nothingWritten(),
+});
+
+/** Bytes of a pass the card does not hold: the runs written since the last upload. */
+const writtenBytes = (pass: Pass): number => {
+  const vertices = spanOf(pass.written.vertexFirst, pass.written.vertexLast);
+  const indices = spanOf(pass.written.indexFirst, pass.written.indexLast);
+  return (
+    (vertices?.count ?? 0) * VERTEX_UPLOAD_BYTES +
+    (indices?.count ?? 0) * INDEX_UPLOAD_BYTES
+  );
+};
+
+/** Widens what a pass owes to cover a run of vertices and a run of indices. */
+const noteWritten = (
+  pass: Pass,
+  vertexFirst: number,
+  vertexCount: number,
+  indexFirst: number,
+  indexCount: number,
+): void => {
+  if (vertexCount > 0) {
+    pass.written.vertexFirst = Math.min(pass.written.vertexFirst, vertexFirst);
+    pass.written.vertexLast = Math.max(
+      pass.written.vertexLast,
+      vertexFirst + vertexCount - 1,
+    );
+  }
+  if (indexCount > 0) {
+    pass.written.indexFirst = Math.min(pass.written.indexFirst, indexFirst);
+    pass.written.indexLast = Math.max(
+      pass.written.indexLast,
+      indexFirst + indexCount - 1,
+    );
+  }
+};
+
+/**
+ * Writes one member's mesh into a pass and answers the run of indices it drew
+ * into: over the first freed run both of its parts fit in, or at the end when
+ * none does. Its vertices are re-origined by `(memberCentre − superchunkCentre)`
+ * and its indices re-based on wherever its vertices landed.
+ */
+const writeMember = (
+  pass: Pass,
+  mesh: MeshArrays,
+  dx: number,
+  dy: number,
+  dz: number,
+): IndexRange => {
+  const vertices = mesh.positions.length / 3;
+  const indices = mesh.indices.length;
+  const fits = pass.free.findIndex(
+    (run) => run.vertexCount >= vertices && run.indexCount >= indices,
+  );
+  if (fits === -1) {
+    const vertexFirst = pass.arrays.positions.count / 3;
+    const indexFirst = pass.arrays.indices.count;
+    appendArrays(pass.arrays, mesh, dx, dy, dz);
+    noteWritten(pass, vertexFirst, vertices, indexFirst, indices);
+    return { start: indexFirst, count: indices };
+  }
+  const run = pass.free[fits];
+  pass.arrays.positions.writeOffsetAt(
+    run.vertexFirst * 3,
+    mesh.positions,
+    dx,
+    dy,
+    dz,
+  );
+  pass.arrays.normals.writeManyAt(run.vertexFirst * 3, mesh.normals);
+  pass.arrays.uvs.writeManyAt(run.vertexFirst * 2, mesh.uvs);
+  pass.arrays.tiles.writeManyAt(run.vertexFirst, mesh.tiles);
+  pass.arrays.brightness.writeManyAt(run.vertexFirst, mesh.brightness);
+  pass.arrays.indices.writeShiftedAt(
+    run.indexFirst,
+    mesh.indices,
+    run.vertexFirst,
+  );
+  noteWritten(pass, run.vertexFirst, vertices, run.indexFirst, indices);
+  // What is left of the run stays free, so a smaller member can still use it.
+  // The leftovers of both parts have to line up for that to be true, which they
+  // do because a member's vertices and indices are written together.
+  const leftVertices = run.vertexCount - vertices;
+  const leftIndices = run.indexCount - indices;
+  if (leftVertices > 0 && leftIndices > 0) {
+    pass.free[fits] = {
+      vertexFirst: run.vertexFirst + vertices,
+      vertexCount: leftVertices,
+      indexFirst: run.indexFirst + indices,
+      indexCount: leftIndices,
+    };
+  } else {
+    pass.free.splice(fits, 1);
+  }
+  return { start: run.indexFirst, count: indices };
+};
+
+/** Keeps the room a member's runs occupied, for the next member that fits. */
+const freeMember = (
+  pass: Pass,
+  range: IndexRange,
+  vertexFirst: number,
+  vertexCount: number,
+): void => {
+  if (range.count === 0 && vertexCount === 0) {
+    return;
+  }
+  pass.free.push({
+    vertexFirst,
+    vertexCount,
+    indexFirst: range.start,
+    indexCount: range.count,
+  });
+};
+
+/** Vertices and indices a pass is holding for nobody. */
+const freeBytes = (pass: Pass): number =>
+  pass.free.reduce(
+    (bytes, run) =>
+      bytes +
+      run.vertexCount * VERTEX_UPLOAD_BYTES +
+      run.indexCount * INDEX_UPLOAD_BYTES,
+    0,
+  );
 
 /** Points a pass's attributes at empty arrays, letting go of what it grew. */
 const releaseArrays = (geometry: BufferGeometry): void => {
@@ -145,13 +310,16 @@ export interface MemberMeshes {
 export class Superchunk {
   /** The members joined into these arrays, by slot. */
   private readonly joined = new Set<number>();
-  private readonly terrainArrays = emptyArrays();
-  private readonly waterArrays = emptyArrays();
+  private readonly terrainPass = emptyPass();
+  private readonly waterPass = emptyPass();
   private readonly terrainRanges = new Map<number, IndexRange>();
   private readonly waterRanges = new Map<number, IndexRange>();
-  private readonly terrainCommitted: Committed = { vertices: 0, indices: 0 };
-  private readonly waterCommitted: Committed = { vertices: 0, indices: 0 };
-  private rebuildOwed = false;
+  /**
+   * Where each member's vertices sit in each pass, which its index run does not
+   * say: the run addresses indices, and freeing a member has to give back both.
+   */
+  private readonly terrainVertices = new Map<number, IndexRange>();
+  private readonly waterVertices = new Map<number, IndexRange>();
 
   /**
    * @param center The superchunk cell's world-space centre, which every member's
@@ -202,53 +370,65 @@ export class Superchunk {
     const dx = center[0] - this.center[0];
     const dy = center[1] - this.center[1];
     const dz = center[2] - this.center[2];
-    const terrainStart = this.terrainArrays.indices.count;
-    appendArrays(this.terrainArrays, meshes.terrain, dx, dy, dz);
-    this.terrainRanges.set(member, {
-      start: terrainStart,
-      count: meshes.terrain.indices.length,
-    });
-    const waterStart = this.waterArrays.indices.count;
-    appendArrays(this.waterArrays, meshes.water, dx, dy, dz);
-    this.waterRanges.set(member, {
-      start: waterStart,
-      count: meshes.water.indices.length,
-    });
+    for (const [pass, mesh, ranges, vertices] of [
+      [
+        this.terrainPass,
+        meshes.terrain,
+        this.terrainRanges,
+        this.terrainVertices,
+      ],
+      [this.waterPass, meshes.water, this.waterRanges, this.waterVertices],
+    ] as const) {
+      const before = pass.arrays.positions.count / 3;
+      const range = writeMember(pass, mesh, dx, dy, dz);
+      ranges.set(member, range);
+      // Where its vertices landed: the run it reused, or the end it grew from.
+      const count = mesh.positions.length / 3;
+      const start =
+        range.count === 0 ? before : this.vertexStartOf(pass, range);
+      vertices.set(member, { start, count });
+    }
     this.joined.add(member);
   }
 
   /**
-   * Says that a joined member's voxels changed, so what is in these arrays for
-   * it is stale. The member stays a member; the arrays owe a rebuild, which
-   * only the renderer can drive because it holds every member's mesh.
+   * Where the vertices of the member drawing `range` start. The first index of
+   * a member's run points at one of its own vertices, and every member's
+   * indices were re-based on the vertex it starts from, so the lowest index in
+   * the run is that vertex.
    */
-  replace(member: number): void {
-    if (this.joined.has(member)) {
-      this.rebuildOwed = true;
+  private vertexStartOf(pass: Pass, range: IndexRange): number {
+    const indices = pass.arrays.indices.array();
+    let lowest = Infinity;
+    for (let at = range.start; at < range.start + range.count; at++) {
+      lowest = Math.min(lowest, indices[at]);
     }
+    return lowest === Infinity ? 0 : lowest;
   }
 
   /**
-   * Says that a member has left this superchunk — the window moved its slot to
-   * another cell. Its run stops being drawn at once, and the arrays owe a
-   * rebuild to be rid of the vertices behind it.
+   * Gives back the room a member was using, because it has left this superchunk
+   * or because its voxels changed and what is here for it is stale. Its run
+   * stops being drawn at once — nothing indexes those vertices any more — and
+   * the room is kept for the next member that fits in it. A member whose voxels
+   * changed is joined again with its new mesh on the merge that follows.
    */
   retire(member: number): void {
     if (!this.joined.delete(member)) {
       return;
     }
-    this.terrainRanges.delete(member);
-    this.waterRanges.delete(member);
-    this.rebuildOwed = true;
-  }
-
-  /**
-   * Whether these arrays hold vertices no member should be drawing — a replaced
-   * or retired member's. Rebuilding means a fresh `Superchunk` joined from every
-   * member the renderer still has a mesh for.
-   */
-  get owesRebuild(): boolean {
-    return this.rebuildOwed;
+    for (const [pass, ranges, vertices] of [
+      [this.terrainPass, this.terrainRanges, this.terrainVertices],
+      [this.waterPass, this.waterRanges, this.waterVertices],
+    ] as const) {
+      const range = ranges.get(member);
+      const vertexRun = vertices.get(member);
+      if (range !== undefined && vertexRun !== undefined) {
+        freeMember(pass, range, vertexRun.start, vertexRun.count);
+      }
+      ranges.delete(member);
+      vertices.delete(member);
+    }
   }
 
   /** Where each pass draws `member` from, or empty ranges for one not held. */
@@ -266,20 +446,28 @@ export class Superchunk {
    * one holding them.
    */
   get pendingBytes(): number {
-    return (
-      tailBytes(this.terrainArrays, this.terrainCommitted) +
-      tailBytes(this.waterArrays, this.waterCommitted)
-    );
+    return writtenBytes(this.terrainPass) + writtenBytes(this.waterPass);
   }
 
   /** Bytes these arrays occupy in main memory, at the capacity they grew to. */
   get bytes(): number {
-    return capacityBytes(this.terrainArrays) + capacityBytes(this.waterArrays);
+    return (
+      capacityBytes(this.terrainPass.arrays) +
+      capacityBytes(this.waterPass.arrays)
+    );
   }
 
-  /** Indices drawn across both passes, which is three per triangle. */
+  /** Of those, the bytes held in runs retired members left and nobody has taken. */
+  get freeBytes(): number {
+    return freeBytes(this.terrainPass) + freeBytes(this.waterPass);
+  }
+
+  /** Indices written across both passes, the runs nobody draws included. */
   get indexCount(): number {
-    return this.terrainArrays.indices.count + this.waterArrays.indices.count;
+    return (
+      this.terrainPass.arrays.indices.count +
+      this.waterPass.arrays.indices.count
+    );
   }
 
   /**
@@ -289,36 +477,34 @@ export class Superchunk {
    */
   upload(): number {
     const sent = this.pendingBytes;
-    setGeometryData(
-      this.pair.terrain,
-      {
-        positions: this.terrainArrays.positions.array(),
-        normals: this.terrainArrays.normals.array(),
-        uvs: this.terrainArrays.uvs.array(),
-        tiles: this.terrainArrays.tiles.array(),
-        brightness: this.terrainArrays.brightness.array(),
-        indices: this.terrainArrays.indices.array(),
-      },
-      this.terrainCommitted.vertices,
-      this.terrainCommitted.indices,
-    );
-    setGeometryData(
-      this.pair.water,
-      {
-        positions: this.waterArrays.positions.array(),
-        normals: this.waterArrays.normals.array(),
-        uvs: this.waterArrays.uvs.array(),
-        tiles: this.waterArrays.tiles.array(),
-        brightness: this.waterArrays.brightness.array(),
-        indices: this.waterArrays.indices.array(),
-      },
-      this.waterCommitted.vertices,
-      this.waterCommitted.indices,
-    );
-    this.terrainCommitted.vertices = this.terrainArrays.positions.count / 3;
-    this.terrainCommitted.indices = this.terrainArrays.indices.count;
-    this.waterCommitted.vertices = this.waterArrays.positions.count / 3;
-    this.waterCommitted.indices = this.waterArrays.indices.count;
+    for (const [pass, geometry] of [
+      [this.terrainPass, this.pair.terrain],
+      [this.waterPass, this.pair.water],
+    ] as const) {
+      const vertices = spanOf(
+        pass.written.vertexFirst,
+        pass.written.vertexLast,
+      );
+      const indices = spanOf(pass.written.indexFirst, pass.written.indexLast);
+      setGeometryData(
+        geometry,
+        {
+          positions: pass.arrays.positions.array(),
+          normals: pass.arrays.normals.array(),
+          uvs: pass.arrays.uvs.array(),
+          tiles: pass.arrays.tiles.array(),
+          brightness: pass.arrays.brightness.array(),
+          indices: pass.arrays.indices.array(),
+        },
+        // Nothing written means nothing to send; an empty span says so, where
+        // leaving it out would send the whole of both arrays again.
+        {
+          vertices: vertices ?? { first: 0, count: 0 },
+          indices: indices ?? { first: 0, count: 0 },
+        },
+      );
+      pass.written = nothingWritten();
+    }
     return sent;
   }
 
