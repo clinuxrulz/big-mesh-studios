@@ -22,6 +22,7 @@ import type { VoxelTileConfig } from "../renderers/atlas";
 import type { BlockMeshes } from "../renderers/mesh";
 import type { WorldWorkerPool } from "./worker-pool";
 import { Counter, Phase, probe } from "../render/perf-probe";
+import { CoordinateMap } from "./coordinate-map";
 
 export interface CellCoord {
   x: number;
@@ -44,18 +45,35 @@ export const sphereCells = (
   yRadius = radius,
 ): CellCoord[] => {
   const out: CellCoord[] = [];
-  const r2 = radius * radius;
-  const ky = radius / yRadius;
   for (let x = -radius; x <= radius; x++) {
     for (let y = -yRadius; y <= yRadius; y++) {
       for (let z = -radius; z <= radius; z++) {
-        if (x * x + z * z + (y * ky) ** 2 <= r2) {
-          out.push({ x: center.x + x, y: center.y + y, z: center.z + z });
+        const cell = { x: center.x + x, y: center.y + y, z: center.z + z };
+        if (cellInSphere(cell, center, radius, yRadius)) {
+          out.push(cell);
         }
       }
     }
   }
   return out;
+};
+
+/**
+ * Whether a cell lies inside a window of these radii centred on `center`: the
+ * same squashed-ball test `sphereCells` builds a window from, asked of one
+ * cell rather than swept over a cube of them.
+ */
+export const cellInSphere = (
+  cell: CellCoord,
+  center: CellCoord,
+  radius: number,
+  yRadius = radius,
+): boolean => {
+  const dx = cell.x - center.x;
+  const dy = cell.y - center.y;
+  const dz = cell.z - center.z;
+  const ky = radius / yRadius;
+  return dx * dx + dz * dz + (dy * ky) ** 2 <= radius * radius;
 };
 
 /** How many cells a window of these `radius` and `yRadius` values holds. */
@@ -182,7 +200,7 @@ export class ChunkSphere {
   readonly query: BlockQuery;
 
   private readonly cells: CellCoord[] = [];
-  private readonly cellIndex = new Map<string, number>();
+  private readonly cellIndex: CoordinateMap<number>;
   /**
    * Whether each slot's voxels are the terrain of the cell it currently
    * stands for. False from the moment a scroll points the slot at an entering
@@ -208,6 +226,9 @@ export class ChunkSphere {
       this.radius,
       this.yRadius,
     );
+    // Room for the whole pool without a rehash: the window holds a fixed
+    // number of cells, and every scroll removes and adds the same count.
+    this.cellIndex = new CoordinateMap<number>(initial.length * 2);
     this.blocks = initial.map((cell) => {
       const center: Dim3 = [
         cell.x * BLOCK_WORLD[0],
@@ -255,7 +276,7 @@ export class ChunkSphere {
    */
   slotAt(worldX: number, worldY: number, worldZ: number): number | undefined {
     const [cx, cy, cz] = chunkCellOf(worldX, worldY, worldZ);
-    const slot = this.cellIndex.get(cellKey({ x: cx, y: cy, z: cz }));
+    const slot = this.cellIndex.get(cx, cy, cz);
     return slot === undefined || !this.filled[slot] ? undefined : slot;
   }
 
@@ -291,7 +312,7 @@ export class ChunkSphere {
     const cells = sphereCells(this.centerCell, this.radius, this.yRadius);
     for (let i = 0; i < this.blocks.length; i++) {
       this.cells[i] = cells[i];
-      this.cellIndex.set(cellKey(cells[i]), i);
+      this.cellIndex.set(cells[i].x, cells[i].y, cells[i].z, i);
       const c: Dim3 = [
         cells[i].x * BLOCK_WORLD[0],
         cells[i].y * BLOCK_WORLD[1],
@@ -363,13 +384,9 @@ export class ChunkSphere {
     ) {
       return;
     }
+    const center = { x: cx, y: cy, z: cz };
     probe.begin(Phase.scrollCells);
-    const next = sphereCells(
-      { x: cx, y: cy, z: cz },
-      this.radius,
-      this.yRadius,
-    );
-    const nextKeys = new Set(next.map(cellKey));
+    const next = sphereCells(center, this.radius, this.yRadius);
     probe.end(Phase.scrollCells);
 
     // A cell that stays in the ball keeps its slot, but the level of detail
@@ -378,14 +395,21 @@ export class ChunkSphere {
     // walks toward sheds its coarse voxels before they come into view.
     const refill: number[] = [];
     probe.begin(Phase.scrollEvict);
-    for (const [key, slot] of this.cellIndex) {
-      if (!nextKeys.has(key)) {
+    // Walked by slot rather than over the index, because removing an entry
+    // from the index rearranges the entries after it to close the gap its
+    // probe run left, which a walk over the index would then read as its own.
+    for (let slot = 0; slot < this.blocks.length; slot++) {
+      const cell = this.cells[slot];
+      if (this.cellIndex.get(cell.x, cell.y, cell.z) !== slot) {
+        continue; // freed by an earlier move and not yet claimed
+      }
+      if (!cellInSphere(cell, center, this.radius, this.yRadius)) {
         this.onBlockRelease?.(slot);
-        this.cellIndex.delete(key);
+        this.cellIndex.delete(cell.x, cell.y, cell.z);
         this.free.push(slot);
         continue;
       }
-      const desiredLod = lodAt(this.cells[slot], { x: cx, y: cy, z: cz });
+      const desiredLod = lodAt(cell, center);
       if (
         desiredLod !== this.lodOf(slot) &&
         desiredLod !== this.blocks[slot].targetLod
@@ -400,8 +424,7 @@ export class ChunkSphere {
     const entering: number[] = [];
     probe.begin(Phase.scrollTeleport);
     for (const cell of next) {
-      const key = cellKey(cell);
-      if (this.cellIndex.has(key)) {
+      if (this.cellIndex.get(cell.x, cell.y, cell.z) !== undefined) {
         continue;
       }
       const slot = this.free.pop();
@@ -409,14 +432,14 @@ export class ChunkSphere {
         throw new Error("[ChunkSphere] window pool exhausted");
       }
       this.cells[slot] = cell;
-      this.cellIndex.set(key, slot);
+      this.cellIndex.set(cell.x, cell.y, cell.z, slot);
       const c: Dim3 = [
         cell.x * BLOCK_WORLD[0],
         cell.y * BLOCK_WORLD[1],
         cell.z * BLOCK_WORLD[2],
       ];
       this.blocks[slot].center = c;
-      this.blocks[slot].targetLod = lodAt(cell, { x: cx, y: cy, z: cz });
+      this.blocks[slot].targetLod = lodAt(cell, center);
       // The slot still holds the cell it left behind, and now stands for this
       // one: until the fill lands it answers for neither, and every query
       // about it is turned away rather than the voxels being zeroed to make
@@ -430,7 +453,7 @@ export class ChunkSphere {
     }
     probe.end(Phase.scrollTeleport);
 
-    this.centerCell = { x: cx, y: cy, z: cz };
+    this.centerCell = center;
 
     const toFill = [...entering, ...refill];
     probe.count(Counter.scrolls);

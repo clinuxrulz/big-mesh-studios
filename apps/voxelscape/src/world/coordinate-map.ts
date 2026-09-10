@@ -76,6 +76,69 @@ export class CoordinateMap<V> {
   }
 
   /**
+   * Removes the entry at a coordinate, and reports whether there was one.
+   * The table never shrinks: the room a removed entry held is reused by the
+   * next entry that probes onto it.
+   */
+  delete(x: number, y: number, z: number): boolean {
+    let hole = this.hash(x, y, z);
+    while (this.occupied[hole] !== 0) {
+      const stride = hole * 3;
+      if (
+        this.keys[stride] === x &&
+        this.keys[stride + 1] === y &&
+        this.keys[stride + 2] === z
+      ) {
+        break;
+      }
+      hole = (hole + 1) & this.mask;
+    }
+    if (this.occupied[hole] === 0) {
+      return false;
+    }
+    this.occupied[hole] = 0;
+    this.values[hole] = undefined;
+    this.count--;
+
+    // A probe run stops at the first empty slot, so emptying one in the middle
+    // of a run would strand every entry behind it. Each entry between the hole
+    // and the end of the run is pulled back into the hole unless the run from
+    // its own hash slot still reaches it where it stands.
+    let scan = (hole + 1) & this.mask;
+    while (this.occupied[scan] !== 0) {
+      const stride = scan * 3;
+      const home = this.hash(
+        this.keys[stride],
+        this.keys[stride + 1],
+        this.keys[stride + 2],
+      );
+      if (!this.probedFrom(home, hole, scan)) {
+        const into = hole * 3;
+        this.keys[into] = this.keys[stride];
+        this.keys[into + 1] = this.keys[stride + 1];
+        this.keys[into + 2] = this.keys[stride + 2];
+        this.values[hole] = this.values[scan];
+        this.occupied[hole] = 1;
+        this.occupied[scan] = 0;
+        this.values[scan] = undefined;
+        hole = scan;
+      }
+      scan = (scan + 1) & this.mask;
+    }
+    return true;
+  }
+
+  /**
+   * Whether an entry sitting at `at`, whose hash slot is `home`, is still
+   * reached by a probe run that would stop at `hole` — which is so when `home`
+   * lies in the slots after `hole` up to and including `at`, counting round
+   * the end of the table.
+   */
+  private probedFrom(home: number, hole: number, at: number): boolean {
+    return hole < at ? home > hole && home <= at : home > hole || home <= at;
+  }
+
+  /**
    * Runs `fn` for every entry. Iteration order is slot order, so it is not
    * insertion order; callers must not depend on one.
    */
