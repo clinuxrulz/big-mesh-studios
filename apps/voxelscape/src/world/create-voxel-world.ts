@@ -27,8 +27,8 @@ import {
 } from "./level-data";
 import { heightAt as terrainHeightAt, type TerrainConfig } from "./noise";
 import { VOXEL_AIR, VOXEL_LAVA, VOXEL_WATER, isFluidId } from "./voxel-store";
+import { Phase, probe } from "../render/perf-probe";
 
-/** Padding added to each mesh's box so adjacent meshes share a thin overlap shell. */
 /** Water absorption used by the water pass and the underwater tint alike. */
 const WATER_EXTINCTION = 0.12;
 
@@ -214,11 +214,15 @@ export const createVoxelWorld = ({
       // slot still reads as its previous cell, so a recycled block (one whose
       // old cell held a lava cave, say) would otherwise answer for the new
       // coordinates with the old cell's terrain until the worker returns.
+      probe.begin(Phase.scrollClear);
       sphere.blocks[i].store.reset();
       sphere.blocks[i].light.skylight.fill(0);
       sphere.blocks[i].light.blocklight.fill(0);
       ready.delete(i);
+      probe.end(Phase.scrollClear);
+      probe.begin(Phase.scrollRegroup);
       renderer.repositionBlock(i, center);
+      probe.end(Phase.scrollRegroup);
     },
     onBlockRelease: (i) => releaseHandler?.(i),
     editLayer,
