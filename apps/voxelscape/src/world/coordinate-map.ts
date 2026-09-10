@@ -79,6 +79,12 @@ export class CoordinateMap<V> {
    * Removes the entry at a coordinate, and reports whether there was one.
    * The table never shrinks: the room a removed entry held is reused by the
    * next entry that probes onto it.
+   *
+   * What a removal costs is the length of the probe run the entry sat in,
+   * which grows as the table fills: around two slots at half full, around
+   * three as it nears the load factor it resizes at, and sharply more past
+   * that. A table removed from often repays being sized well above the number
+   * of entries it holds.
    */
   delete(x: number, y: number, z: number): boolean {
     let hole = this.hash(x, y, z);
