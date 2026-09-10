@@ -77,9 +77,15 @@ const pool = (side: Side | undefined, report: BenchReport): Side => {
   return into;
 };
 
-/** How a change reads as a percentage, signed. */
-const percent = (change: number): string =>
-  `${change >= 0 ? "+" : ""}${(change * 100).toFixed(1)}%`;
+/**
+ * How a change reads as a percentage, signed, or that there is none to state:
+ * a side that never measured this, or a starting value too near the floor of
+ * its unit for a share of it to mean anything.
+ */
+const percent = (change: number | null): string =>
+  change === null
+    ? "n/a"
+    : `${change >= 0 ? "+" : ""}${(change * 100).toFixed(1)}%`;
 
 /** One metric's line: both commits' middles and ranges, and the step between. */
 const line = (metric: MetricComparison): string => {
@@ -117,7 +123,7 @@ export const formatAb = (report: AbReport): string => {
   lines.push("clear of the run-to-run spread:");
   for (const one of clear) {
     lines.push(
-      `  ${one.scenario.padEnd(8)} ${one.metric.name.padEnd(16)} ${show(one.metric.beforeMiddle, one.metric.unit)} → ${show(one.metric.afterMiddle, one.metric.unit)}  ${percent(one.metric.change ?? 0)}`,
+      `  ${one.scenario.padEnd(8)} ${one.metric.name.padEnd(16)} ${show(one.metric.beforeMiddle, one.metric.unit)} → ${show(one.metric.afterMiddle, one.metric.unit)}  ${percent(one.metric.change)}`,
     );
   }
   lines.push(

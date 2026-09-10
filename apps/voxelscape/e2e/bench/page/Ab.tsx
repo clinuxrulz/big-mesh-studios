@@ -19,9 +19,15 @@ const PAD = 5;
 /** Half the narrowest scale a row is drawn to, as a share of what it measures. */
 const NARROWEST = 0.05;
 
-/** How a change reads as a percentage, signed. */
-const percent = (change: number): string =>
-  `${change >= 0 ? "+" : ""}${(change * 100).toFixed(1)}%`;
+/**
+ * How a change reads as a percentage, signed, or that there is none to state:
+ * a side that never measured this, or a starting value too near the floor of
+ * its unit for a share of it to mean anything.
+ */
+const percent = (change: number | null): string =>
+  change === null
+    ? "n/a"
+    : `${change >= 0 ? "+" : ""}${(change * 100).toFixed(1)}%`;
 
 /**
  * A commit, in the colour its marks are drawn in. The comparison names both
@@ -147,14 +153,14 @@ function Scenario(props: {
                 <td>
                   {metric.beforeMeasured
                     ? show(metric.beforeMiddle, metric.unit)
-                    : "not measured"}
+                    : "--"}
                 </td>
                 <td>
                   {metric.afterMeasured
                     ? show(metric.afterMiddle, metric.unit)
-                    : "not measured"}
+                    : "--"}
                 </td>
-                <td>{metric.change === null ? "" : percent(metric.change)}</td>
+                <td>{percent(metric.change)}</td>
                 <td class="plot">
                   <Spread metric={metric} />
                 </td>
@@ -225,7 +231,7 @@ export function Ab(props: { report: AbReport }): JSX.Element {
                   <span class="from">
                     {`${show(one.metric.beforeMiddle, one.metric.unit)} → ${show(one.metric.afterMiddle, one.metric.unit)}`}
                   </span>
-                  <span class="by">{percent(one.metric.change ?? 0)}</span>
+                  <span class="by">{percent(one.metric.change)}</span>
                 </li>
               )}
             </For>
