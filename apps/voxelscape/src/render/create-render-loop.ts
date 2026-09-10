@@ -127,6 +127,10 @@ export const createRenderLoop = ({
     if (!showStats && !probe.armed) {
       beforeRender?.(renderer, camera);
       renderer.render(scene, camera);
+      // Handed over on this path as well as the timed one: whether a frame is
+      // being measured has nothing to do with whether somebody wants a picture
+      // of it, and a world nobody is measuring is the ordinary case.
+      afterRender?.(canvas);
       return false;
     }
     timer ??= createGpuTimer(renderer.gl);
