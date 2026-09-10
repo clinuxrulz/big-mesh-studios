@@ -564,6 +564,18 @@ export class TriangleRenderer {
    * it has anything worth drawing.
    */
   private readonly meshed = new Map<number, boolean>();
+  /**
+   * The runs each slot's meshes were last seated on, which is not what its
+   * superchunk holds for it: a member joins a superchunk's arrays in one frame
+   * and can wait several more for the upload that puts them on the card and
+   * re-seats the meshes. Between the two the superchunk answers for a member
+   * whose meshes still point at the geometry it came from, and drawing that
+   * answer draws one superchunk's vertices out of another's buffer.
+   */
+  private readonly seated = new Map<
+    number,
+    { terrain: IndexRange; water: IndexRange }
+  >();
   private readonly chunkMeshes = new Map<
     number,
     { terrain: MeshArrays; water: MeshArrays }
@@ -808,6 +820,7 @@ export class TriangleRenderer {
       }
     }
     this.contentSlots.delete(slot);
+    this.seated.delete(slot);
     this.slotCenter.delete(slot);
   }
 
@@ -994,6 +1007,10 @@ export class TriangleRenderer {
       this.setSlotRange(this.scChunkWater, m.index, waterRange);
       this.setSlotRange(this.scProbeTerrain, m.index, terrainRange);
       this.setSlotRange(this.scProbeWater, m.index, waterRange);
+      this.seated.set(m.index, {
+        terrain: { start: terrainRange.start, count: terrainRange.count },
+        water: { start: waterRange.start, count: waterRange.count },
+      });
       if (hasTerrain || hasWater) {
         this.contentSlots.add(m.index);
       } else {
@@ -1101,30 +1118,26 @@ export class TriangleRenderer {
   private updateTriCount(): void {
     let tris = 0;
     for (const slot of this.scChunkTerrain.keys()) {
-      tris += this.ownRange(slot, true).count / 3;
+      tris += this.seatedRange(slot, true).count / 3;
     }
     for (const slot of this.scChunkWater.keys()) {
-      tris += this.ownRange(slot, false).count / 3;
+      tris += this.seatedRange(slot, false).count / 3;
     }
     this.totalTriangles = Math.round(tris);
   }
 
   /**
-   * Where one member's own vertices sit in its superchunk's joined geometry,
-   * which is what decides whether it has anything to draw and where its
-   * neighbours' runs begin. A mesh's `drawRange` cannot answer that: it holds
-   * what the mesh draws this frame, which may be several members at once.
+   * The run one member's mesh is seated on: what it has to draw, and where the
+   * runs of the members drawn beside it begin. A mesh's `drawRange` cannot
+   * answer that, because it holds what the mesh draws this frame, which may be
+   * several members at once.
    */
-  private ownRange(slot: number, terrain: boolean): IndexRange {
-    const key = this.blockSc.get(slot);
-    const superchunk =
-      key === undefined ? undefined : this.superchunks.get(key);
-    if (superchunk === undefined) {
+  private seatedRange(slot: number, terrain: boolean): IndexRange {
+    const runs = this.seated.get(slot);
+    if (runs === undefined) {
       return EMPTY_RANGE;
     }
-    return terrain
-      ? superchunk.terrainRangeOf(slot)
-      : superchunk.waterRangeOf(slot);
+    return terrain ? runs.terrain : runs.water;
   }
 
   /**
@@ -1188,13 +1201,14 @@ export class TriangleRenderer {
       }
       order.sort(
         (a, b) =>
-          this.ownRange(a, terrain).start - this.ownRange(b, terrain).start,
+          this.seatedRange(a, terrain).start -
+          this.seatedRange(b, terrain).start,
       );
       let leader = meshes.get(order[0]) as Mesh;
-      let start = this.ownRange(order[0], terrain).start;
-      let count = this.ownRange(order[0], terrain).count;
+      let start = this.seatedRange(order[0], terrain).start;
+      let count = this.seatedRange(order[0], terrain).count;
       for (let at = 1; at < order.length; at++) {
-        const range = this.ownRange(order[at], terrain);
+        const range = this.seatedRange(order[at], terrain);
         if (range.start === start + count) {
           count += range.count;
           (meshes.get(order[at]) as Mesh).visible = false;
@@ -1222,7 +1236,7 @@ export class TriangleRenderer {
     countOccluded: boolean,
   ): boolean {
     const center = this.slotCenter.get(slot);
-    if (center === undefined || this.ownRange(slot, terrain).count <= 0) {
+    if (center === undefined || this.seatedRange(slot, terrain).count <= 0) {
       return false;
     }
     if (!inFrustum(planes, center, BLOCK_HALF)) {
@@ -1401,6 +1415,7 @@ export class TriangleRenderer {
     // once the new data actually arrives
     this.chunkMeshes.delete(index);
     this.meshed.delete(index);
+    this.seated.delete(index);
     this.meshes.invalidate(index);
     // The slot's world and probe meshes still point at the old superchunk's
     // geometry pair, which the next full re-join hands back to the pool for

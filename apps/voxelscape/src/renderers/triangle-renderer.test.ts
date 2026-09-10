@@ -5,7 +5,11 @@ import type { BufferGeometry } from "@random-mesh/rmsl/scene";
 import { scBounds, TriangleRenderer } from "./triangle-renderer";
 import { probeColor } from "./occlusion";
 import type { Superchunk } from "./superchunk";
-import { buildBlockShell, type WorldBlock } from "../world/level-data";
+import {
+  BLOCK_WORLD,
+  buildBlockShell,
+  type WorldBlock,
+} from "../world/level-data";
 import { VOXEL_GRASS } from "../world/voxel-store";
 
 /** A block with a floor of grass across one corner, so it has faces to mesh. */
@@ -303,6 +307,61 @@ describe("the occlusion probe's slot id", () => {
 });
 
 describe("what the renderer says it is holding", () => {
+  it("keeps drawing a chunk whose merge is waiting for a later frame", () => {
+    // Two superchunks change in the same frame and a frame may upload only so
+    // many bytes, so one merges now and the other waits. The waiting one has
+    // given its member's room in the merged arrays back and has not taken new
+    // room yet, while the card still holds the geometry it last uploaded. It
+    // has to go on drawing that until the merge catches up: stopping leaves a
+    // hole where a chunk was, for as many frames as the budget takes to come
+    // round.
+    const near = blockWithFloor();
+    const far = blockWithFloor();
+    const renderer = rendererForBudget(1, near, far);
+    const camera = new PerspectiveCamera(60, 1, 0.1, 4000);
+    camera.position.set(0, 0, 0);
+    camera.lookAt(2000, 0, 0);
+
+    renderer.repositionBlock(0, [0, 0, 0]);
+    renderer.repositionBlock(1, [BLOCK_WORLD[0] * 4, 0, 0]);
+    renderer.onBlockChanged(0);
+    renderer.onBlockChanged(1);
+    renderer.meshNow(0);
+    renderer.meshNow(1);
+    for (let frame = 0; frame < 6; frame++) {
+      renderer.tick(0.016, camera);
+    }
+
+    const meshes = (
+      renderer as unknown as {
+        scChunkTerrain: Map<
+          number,
+          { drawRange: { start: number; count: number }; visible: boolean }
+        >;
+      }
+    ).scChunkTerrain;
+    const onTheCard = { ...meshes.get(1)!.drawRange };
+    expect(onTheCard.count).toBeGreaterThan(0);
+
+    // A checkerboard cannot be merged into one rectangle the way a solid floor
+    // can, so each block's new build is far larger than the room it gave back.
+    for (const block of [near, far]) {
+      for (let x = 0; x < 16; x++) {
+        for (let z = 0; z < 16; z++) {
+          block.store.set(x, 0, z, (x + z) % 2 === 0 ? VOXEL_GRASS : 0);
+        }
+      }
+    }
+    renderer.onBlockChanged(0);
+    renderer.onBlockChanged(1);
+    renderer.meshNow(0);
+    renderer.meshNow(1);
+    renderer.tick(0.016, camera);
+
+    expect(meshes.get(1)!.visible).toBe(true);
+    expect(meshes.get(1)!.drawRange).toEqual(onTheCard);
+  });
+
   it("lets a block's own mesh go once a superchunk has merged it in", () => {
     const renderer = rendererFor(blockWithFloor());
     renderer.repositionBlock(0, [0, 0, 0]);
