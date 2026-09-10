@@ -21,7 +21,7 @@ import type { BorderSizes, FillStoreFn } from "./voxel-store";
 import type { VoxelTileConfig } from "../renderers/atlas";
 import type { BlockMeshes } from "../renderers/mesh";
 import type { WorldWorkerPool } from "./worker-pool";
-import { Counter, probe } from "../render/perf-probe";
+import { Counter, Phase, probe } from "../render/perf-probe";
 
 export interface CellCoord {
   x: number;
@@ -339,18 +339,21 @@ export class ChunkSphere {
     ) {
       return;
     }
+    probe.begin(Phase.scrollCells);
     const next = sphereCells(
       { x: cx, y: cy, z: cz },
       this.radius,
       this.yRadius,
     );
     const nextKeys = new Set(next.map(cellKey));
+    probe.end(Phase.scrollCells);
 
     // A cell that stays in the ball keeps its slot, but the level of detail
     // it was generated at was chosen for the old distance; one whose ring
     // changed is refilled in place at the new LOD, so a cell the player
     // walks toward sheds its coarse voxels before they come into view.
     const refill: number[] = [];
+    probe.begin(Phase.scrollEvict);
     for (const [key, slot] of this.cellIndex) {
       if (!nextKeys.has(key)) {
         this.onBlockRelease?.(slot);
@@ -368,8 +371,10 @@ export class ChunkSphere {
         this.blocks[slot].targetLod = desiredLod;
       }
     }
+    probe.end(Phase.scrollEvict);
 
     const entering: number[] = [];
+    probe.begin(Phase.scrollTeleport);
     for (const cell of next) {
       const key = cellKey(cell);
       if (this.cellIndex.has(key)) {
@@ -394,6 +399,7 @@ export class ChunkSphere {
       this.onBlockReposition(slot, c);
       entering.push(slot);
     }
+    probe.end(Phase.scrollTeleport);
 
     this.centerCell = { x: cx, y: cy, z: cz };
 
@@ -407,10 +413,13 @@ export class ChunkSphere {
     // (which also decides what the no-worker path fills first), and the
     // player's position as the worker scheduler's focus, so the terrain being
     // walked toward streams before the shoreline that is not being walked.
+    probe.begin(Phase.scrollOrder);
     const order = toFill.sort(
       (a, b) =>
         this.distanceSquared(a, x, y, z) - this.distanceSquared(b, x, y, z),
     );
+    probe.end(Phase.scrollOrder);
+    probe.begin(Phase.scrollRequest);
     this.fillClient.requestFill(
       order,
       order.map((index) => this.blocks[index].center),
@@ -418,6 +427,7 @@ export class ChunkSphere {
       order.map((index) => borderSizesOf(this.cells[index], this.centerCell)),
       [x, y, z],
     );
+    probe.end(Phase.scrollRequest);
   }
 
   dispose(): void {

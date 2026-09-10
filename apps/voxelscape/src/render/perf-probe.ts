@@ -1,20 +1,42 @@
 /**
  * The stretches of one frame the probe times separately. The order is the
- * order they run in, and the numbers index every per-phase array here.
+ * order they run in, and the numbers index every per-phase array here. A
+ * stretch can sit inside another and be timed under both: the five `scroll`
+ * stretches divide the window's move between them, and `advance`, `occlusion`
+ * and `draw` are the three every other stretch falls inside.
  */
 export const Phase = {
   player: 0,
   scroll: 1,
-  flow: 2,
-  multiplayer: 3,
-  monsters: 4,
-  environment: 5,
-  meshDrain: 6,
-  merge: 7,
-  rendererTick: 8,
-  advance: 9,
-  occlusion: 10,
-  draw: 11,
+  /** The cells the window will hold once it has moved, and the keys they are looked up by. */
+  scrollCells: 2,
+  /**
+   * Releasing the slots whose cells the move leaves behind, and marking those
+   * that crossed a level-of-detail ring to be filled again where they stand.
+   */
+  scrollEvict: 3,
+  /**
+   * Teleporting a freed slot onto each entering cell: clearing the voxels and
+   * light it held, and unseating its geometry from the superchunk that drew it.
+   */
+  scrollTeleport: 4,
+  /** Ordering the cells about to be streamed so the player's own comes first. */
+  scrollOrder: 5,
+  /**
+   * The level of detail and the six neighbouring voxel sizes each entering cell
+   * is asked for, and handing that batch to the fill client.
+   */
+  scrollRequest: 6,
+  flow: 7,
+  multiplayer: 8,
+  monsters: 9,
+  environment: 10,
+  meshDrain: 11,
+  merge: 12,
+  rendererTick: 13,
+  advance: 14,
+  occlusion: 15,
+  draw: 16,
 } as const;
 
 /** Each phase's name, at the index that phase is timed under. */
