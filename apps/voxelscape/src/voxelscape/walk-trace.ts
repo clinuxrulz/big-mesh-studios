@@ -98,13 +98,16 @@ export class WalkTraceRecorder {
    * read once here rather than at the end, so a trace says what was set when
    * the walk began even if it was changed along the way.
    */
-  start(name: string): void {
+  start(name: string): Record<string, unknown> {
     this.name = name;
     this.startedAt = performance.now();
     this.startedOn = new Date().toISOString();
     this.marks = [];
     this.setup = this.source.setup();
     this.probe.arm(TRACE_FRAMES);
+    // Handed back so a caller can say what it is recording without reading the
+    // world a second time and risking a different answer.
+    return this.setup;
   }
 
   /**
@@ -166,3 +169,29 @@ export class WalkTraceRecorder {
     };
   }
 }
+
+/** One setting written out, however deeply the setup nested it. */
+const settingText = (value: unknown): string => {
+  if (value === undefined || value === null) {
+    return "unset";
+  }
+  if (Array.isArray(value)) {
+    return value.join(", ");
+  }
+  if (typeof value === "object") {
+    return Object.entries(value)
+      .map(([name, held]) => `${name} ${settingText(held)}`)
+      .join(", ");
+  }
+  return String(value);
+};
+
+/**
+ * The setup as lines to read, one a setting. Walks whatever the snapshot holds
+ * rather than naming the settings it expects, so a setting added to a trace is
+ * a setting the trace also says out loud — nothing can be recorded quietly.
+ */
+export const describeSetup = (setup: Record<string, unknown>): string =>
+  Object.entries(setup)
+    .map(([name, held]) => `${name}: ${settingText(held)}`)
+    .join("\n");

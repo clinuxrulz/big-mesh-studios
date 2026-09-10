@@ -5,7 +5,7 @@ import {
   Vector3,
 } from "@random-mesh/rmsl/scene";
 import { createSignal, type Accessor } from "solid-js";
-import { WalkTraceRecorder } from "./walk-trace";
+import { describeSetup, WalkTraceRecorder } from "./walk-trace";
 import { isEditableTarget } from "../utils";
 import { AtprotoController } from "../atproto/atproto-controller";
 import {
@@ -856,8 +856,14 @@ export const createVoxelscape = ({
       if (walkTrace.recording) {
         return "a walk is already being traced; /trace:stop writes it";
       }
-      walkTrace.start(name);
-      return `tracing "${name}" — /trace:mark what you see, /trace:stop to write it`;
+      const setup = walkTrace.start(name);
+      // Said out loud as well as written down: the console then carries what
+      // the world was set to, beside whatever is typed next.
+      return [
+        `tracing "${name}"`,
+        describeSetup(setup),
+        "/trace:mark what you see, /trace:stop to write it",
+      ].join("\n");
     },
     traceMark: (note) => {
       if (!walkTrace.recording) {

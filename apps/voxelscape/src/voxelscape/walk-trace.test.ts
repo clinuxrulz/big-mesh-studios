@@ -1,6 +1,10 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
-import { WalkTraceRecorder, type WalkTraceSource } from "./walk-trace";
+import {
+  describeSetup,
+  WalkTraceRecorder,
+  type WalkTraceSource,
+} from "./walk-trace";
 import type { PerfDrain, PerfProbeApi } from "../render/perf-probe";
 
 const EMPTY_DRAIN: PerfDrain = {
@@ -131,5 +135,41 @@ describe("recording a walk", () => {
     trace.start("second");
     expect(trace.marked).toBe(0);
     expect(trace.stop()?.marks).toEqual([]);
+  });
+});
+
+describe("saying what a trace started with", () => {
+  it("hands the setup back, so what is said is what is stored", () => {
+    const { probe } = fakeProbe();
+    const trace = new WalkTraceRecorder(probe, source());
+    const said = trace.start("a walk");
+    expect(said).toEqual(trace.stop()?.setup);
+  });
+
+  it("names every setting it was given, however deeply nested", () => {
+    const text = describeSetup({
+      cores: 8,
+      window: { chunkRadius: 4, lodBands: { full: 3, coarse: 4 } },
+      spawn: [0, 40, 0],
+    });
+    expect(text).toContain("cores: 8");
+    expect(text).toContain("chunkRadius 4");
+    // Nested two deep, and still said rather than printed as [object Object].
+    expect(text).toContain("full 3");
+    expect(text).toContain("spawn: 0, 40, 0");
+    expect(text).not.toContain("[object");
+  });
+
+  it("says a setting is unset rather than leaving a gap", () => {
+    expect(describeSetup({ viewport: undefined })).toBe("viewport: unset");
+  });
+
+  it("leaves nothing out, so nothing is recorded quietly", () => {
+    const setup = { a: 1, b: 2, c: 3, d: 4 };
+    const text = describeSetup(setup);
+    for (const name of Object.keys(setup)) {
+      expect(text).toContain(`${name}:`);
+    }
+    expect(text.split("\n")).toHaveLength(Object.keys(setup).length);
   });
 });
