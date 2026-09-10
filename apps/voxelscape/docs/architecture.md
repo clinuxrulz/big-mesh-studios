@@ -1,15 +1,15 @@
 # What voxelscape is made of
 
-Drawn from the imports under `src` at 862c3e6 by `pnpm architecture`.
+Drawn from the imports under `src` at 61f30fc by `pnpm architecture`.
 Nothing here is written by hand: change the code and run it again.
 
 ```mermaid
 graph TD
   shell["shell<br/>5 files · 1387 lines"]
-  voxelscape["voxelscape<br/>2 files · 1113 lines"]
-  world["world<br/>23 files · 5897 lines"]
-  renderers["renderers<br/>12 files · 4207 lines"]
-  render["render<br/>4 files · 1004 lines"]
+  voxelscape["voxelscape<br/>2 files · 1125 lines"]
+  world["world<br/>23 files · 6019 lines"]
+  renderers["renderers<br/>13 files · 4674 lines"]
+  render["render<br/>4 files · 1120 lines"]
   player["player<br/>15 files · 3207 lines"]
   monsters["monsters<br/>6 files · 1638 lines"]
   multiplayer["multiplayer<br/>13 files · 3109 lines"]
@@ -72,10 +72,10 @@ graph TD
 | area          | what it is for                                                         | files | lines |
 | ------------- | ---------------------------------------------------------------------- | ----- | ----- |
 | `shell`       | the page, the console, and what wires a world into them                | 5     | 1387  |
-| `voxelscape`  | one world: its frame, and every part below it                          | 2     | 1113  |
-| `world`       | voxels, light, the streaming window, and the workers that fill it      | 23    | 5897  |
-| `renderers`   | turning voxels into geometry, and drawing it                           | 12    | 4207  |
-| `render`      | the frame loop, the resolution scaler, and the probe that times them   | 4     | 1004  |
+| `voxelscape`  | one world: its frame, and every part below it                          | 2     | 1125  |
+| `world`       | voxels, light, the streaming window, and the workers that fill it      | 23    | 6019  |
+| `renderers`   | turning voxels into geometry, and drawing it                           | 13    | 4674  |
+| `render`      | the frame loop, the resolution scaler, and the probe that times them   | 4     | 1120  |
 | `player`      | the body, its input, its tools and what they do to the world           | 15    | 3207  |
 | `monsters`    | what wanders the world and fights the player                           | 6     | 1638  |
 | `multiplayer` | other players, over a peer connection                                  | 13    | 3109  |

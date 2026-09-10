@@ -17,6 +17,7 @@
 // and compared, and `--check` fails on the difference.
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
+import { format, resolveConfig } from "prettier";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -549,9 +550,19 @@ export const problemsWith = (drawing: string, held: string): string[] => {
   return problems;
 };
 
-const main = (): void => {
+/**
+ * The drawing as Prettier would write it, which is how it is held on disk. The
+ * repository formats everything it holds, so a drawing written any other way is
+ * reformatted the next time the formatter runs and stops matching what this
+ * draws — leaving `--check` failing until somebody redraws it, which puts it
+ * straight back. Formatting here is what keeps the two agreeing.
+ */
+const formatted = async (drawing: string): Promise<string> =>
+  format(drawing, { ...(await resolveConfig(DRAWING)), filepath: DRAWING });
+
+const main = async (): Promise<void> => {
   const checking = process.argv.includes("--check");
-  const drawing = drawingOf();
+  const drawing = await formatted(drawingOf());
   if (!checking) {
     writeFileSync(DRAWING, drawing);
     console.log(
@@ -584,5 +595,8 @@ if (
   process.argv[1] !== undefined &&
   process.argv[1].endsWith("voxel-rendering.ts")
 ) {
-  main();
+  main().catch((error: unknown) => {
+    console.error(error);
+    process.exit(1);
+  });
 }

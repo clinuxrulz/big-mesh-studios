@@ -42,6 +42,7 @@ catalog:
   "fast-png": "^8.0.0"
   "jsdom": "^30.0.1"
   "jszip": "^3.10.1"
+  "prettier": "^3.9.6"
   "solid-js": "2.0.0-beta.29"
   "three": "^0.183.2"
   "typescript": "^5.7.2"

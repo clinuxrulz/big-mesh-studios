@@ -55,6 +55,7 @@
     "esbuild": "catalog:",
     "jsdom": "catalog:",
     "playwright": "^1.62.1",
+    "prettier": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plugin-solid": "catalog:",

@@ -18,6 +18,7 @@
 // it on purpose.
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { format, resolveConfig } from "prettier";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -328,11 +329,21 @@ export const drawingOf = (modules: Module[], edges: Edge[]): string => {
   return lines.join("\n");
 };
 
-const main = (): void => {
+/**
+ * The drawing as Prettier would write it, which is how it is held on disk. The
+ * repository formats everything it holds, so a drawing written any other way is
+ * reformatted the next time the formatter runs and stops matching what this
+ * draws — leaving `--check` failing until somebody redraws it, which puts it
+ * straight back. Formatting here is what keeps the two agreeing.
+ */
+const formatted = async (drawing: string): Promise<string> =>
+  format(drawing, { ...(await resolveConfig(DRAWING)), filepath: DRAWING });
+
+const main = async (): Promise<void> => {
   const checking = process.argv.includes("--check");
   const modules = readModules();
   const edges = edgesOf(modules);
-  const drawing = drawingOf(modules, edges);
+  const drawing = await formatted(drawingOf(modules, edges));
   const unruled = unruledEdges(edges);
 
   if (!checking) {
@@ -393,5 +404,8 @@ if (
   process.argv[1] !== undefined &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
-  main();
+  main().catch((error: unknown) => {
+    console.error(error);
+    process.exit(1);
+  });
 }
