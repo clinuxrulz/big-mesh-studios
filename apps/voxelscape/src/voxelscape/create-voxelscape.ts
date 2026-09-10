@@ -859,6 +859,8 @@ export const createVoxelscape = ({
     probe.gauge(Field.triangles, renderer.triangleCount);
     probe.gauge(Field.occluded, renderer.occlusions);
     probe.gauge(Field.visible, renderer.lastVisibleCount);
+    probe.gauge(Field.drawnMeshes, renderer.lastDrawnMeshes);
+    probe.gauge(Field.coalescedMeshes, renderer.lastCoalescedMeshes);
     probe.gauge(Field.meshPending, renderer.meshPendingCount);
     probe.gauge(Field.meshInFlight, renderer.meshInFlightCount);
     probe.gauge(Field.dirtySuperchunks, renderer.dirtySuperchunkCount);

@@ -173,7 +173,9 @@ export const formatScenario = (
   lines.push(
     `  culling  ${Math.round(run.culling.occluded)} superchunks hidden, ` +
       `${Math.round(run.culling.visible)} drawn — what the occlusion pass buys ` +
-      `for what it costs the card above`,
+      `for what it costs the card above · ` +
+      `${Math.round(run.culling.drawnMeshes)} meshes drawn, a call each ` +
+      `(${Math.round(run.culling.coalescedMeshes)} if unbroken runs drew as one)`,
   );
   const phases = busyPhases(run)
     .map(([name, mean, max]) => `${name} ${micro(mean)}/${micro(max)}`)

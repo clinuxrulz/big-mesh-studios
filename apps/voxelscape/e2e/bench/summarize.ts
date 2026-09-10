@@ -79,7 +79,12 @@ export interface RunSummary {
   };
   triangles: { median: number; max: number };
   /** What the occlusion pass hid against what it left to draw. */
-  culling: { occluded: number; visible: number };
+  culling: {
+    occluded: number;
+    visible: number;
+    drawnMeshes: number;
+    coalescedMeshes: number;
+  };
   heap: { startBytes: number; endBytes: number; maxBytes: number };
   /** Bytes of voxels, light and geometry the world holds, counted rather than sampled. */
   resident: {
@@ -286,6 +291,8 @@ export const summarize = (drain: PerfDrain): RunSummary => {
     culling: {
       occluded: spreadOf(columnFor(drain, "occluded")).median,
       visible: spreadOf(columnFor(drain, "visible")).median,
+      drawnMeshes: spreadOf(columnFor(drain, "drawnMeshes")).median,
+      coalescedMeshes: spreadOf(columnFor(drain, "coalescedMeshes")).median,
     },
     heap: {
       startBytes: heap[0] ?? 0,

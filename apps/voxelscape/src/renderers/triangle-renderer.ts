@@ -648,6 +648,10 @@ export class TriangleRenderer {
   private lastNearExempt = 0;
   /** Content slots the last query actually saw, left visible. */
   private lastSaw = 0;
+  /** Chunk meshes left visible by the last `applyVisibility`, so one draw call each. */
+  private drawnMeshes = 0;
+  /** What those would come to if each unbroken run of one superchunk's visible members drew as one. */
+  private coalescedMeshes = 0;
   // Fullscreen underwater tint (the water pass tints the view
   // in-shader instead). Drawn last with depth-testing off so it washes the
   // whole view when the camera dips below the sea.
@@ -1085,12 +1089,59 @@ export class TriangleRenderer {
     this.lastTimedOut = 0;
     this.lastNearExempt = 0;
     this.lastSaw = 0;
+    this.drawnMeshes = 0;
     for (const [slot, mesh] of this.scChunkTerrain) {
       mesh.visible = this.chunkVisible(slot, mesh, planes, playerKey, true);
+      if (mesh.visible) {
+        this.drawnMeshes++;
+      }
     }
     for (const [slot, mesh] of this.scChunkWater) {
       mesh.visible = this.chunkVisible(slot, mesh, planes, playerKey, false);
+      if (mesh.visible) {
+        this.drawnMeshes++;
+      }
     }
+    if (probe.armed) {
+      this.coalescedMeshes =
+        this.runsOf(this.scChunkTerrain) + this.runsOf(this.scChunkWater);
+    }
+  }
+
+  /**
+   * How few draw calls one kind of mesh would take if every visible run of a
+   * superchunk's geometry were drawn as one: the visible members grouped by
+   * superchunk, ordered by where their vertices sit, and counted as one for
+   * each stretch of them that is unbroken.
+   */
+  private runsOf(meshes: Map<number, Mesh>): number {
+    const byKey = new Map<string, { start: number; count: number }[]>();
+    for (const [slot, mesh] of meshes) {
+      if (!mesh.visible) {
+        continue;
+      }
+      const key = this.blockSc.get(slot);
+      if (key === undefined) {
+        continue;
+      }
+      const held = byKey.get(key);
+      if (held === undefined) {
+        byKey.set(key, [mesh.drawRange]);
+      } else {
+        held.push(mesh.drawRange);
+      }
+    }
+    let runs = 0;
+    for (const ranges of byKey.values()) {
+      ranges.sort((a, b) => a.start - b.start);
+      runs++;
+      for (let at = 1; at < ranges.length; at++) {
+        if (ranges[at].start !== ranges[at - 1].start + ranges[at - 1].count) {
+          runs++;
+        }
+      }
+    }
+    return runs;
   }
 
   /** Whether one chunk mesh draws this frame, counting what the occlusion hides. */
@@ -1668,6 +1719,19 @@ export class TriangleRenderer {
     this.lastQueryFrame = Number.NEGATIVE_INFINITY;
     this.lastQueryPosition = null;
     this.lastQueryForward = null;
+  }
+
+  /**
+   * Chunk meshes the last visibility pass left drawing, which is what the
+   * world pass costs in draw calls: a bind and a set of uniform uploads each.
+   */
+  get lastDrawnMeshes(): number {
+    return this.drawnMeshes;
+  }
+
+  /** What `lastDrawnMeshes` would be if each unbroken run drew as one call. */
+  get lastCoalescedMeshes(): number {
+    return this.coalescedMeshes;
   }
 
   /** How many chunks the last probe query saw (the set it found visible). */

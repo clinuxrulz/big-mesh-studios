@@ -77,6 +77,10 @@ export const COUNTER_NAMES = /* @__PURE__ */ Object.keys(
  * The values the probe records once per frame, each one a column of the frame
  * ring. The per-phase slices follow them, so a row is `FIELD_NAMES.length +
  * PHASE_NAMES.length` numbers wide.
+ *
+ * A value's number is its column, and the keys are written in that order: a
+ * reader looks a column up by its position among the names, so a key added out
+ * of order would name one column and be written into another.
  */
 export const Field = {
   /** Milliseconds between this frame's animation callback and the one before. */
@@ -95,49 +99,53 @@ export const Field = {
   occluded: 6,
   /** Superchunks that survived to be drawn. */
   visible: 7,
+  /** Chunk meshes drawn this frame, one draw call each. */
+  drawnMeshes: 8,
+  /** What that would be if each unbroken run of a superchunk's visible members drew as one. */
+  coalescedMeshes: 9,
   /** Blocks waiting for terrain data. */
-  fillPending: 8,
+  fillPending: 10,
   /** Blocks whose terrain data a worker is generating. */
-  fillInFlight: 9,
+  fillInFlight: 11,
   /** Blocks waiting for geometry. */
-  meshPending: 10,
+  meshPending: 12,
   /** Blocks whose geometry a worker is building. */
-  meshInFlight: 11,
+  meshInFlight: 13,
   /** Superchunks whose merged geometry is out of date. */
-  dirtySuperchunks: 12,
+  dirtySuperchunks: 14,
   /**
    * The JavaScript heap in bytes, sampled about once a second. What the browser
    * reports here counts the storage behind typed arrays as well as the objects
    * around them, so the voxels and geometry below are inside this number rather
    * than beside it.
    */
-  heapBytes: 13,
+  heapBytes: 15,
   /**
    * Bytes the world holds in main memory — voxels, light and geometry —
    * counted rather than sampled, so it is the same number on every machine
    * and the one a memory ceiling is measured against.
    */
-  residentBytes: 14,
+  residentBytes: 16,
   /** Of those, the bytes held as voxels and the light shadowing them. */
-  voxelBytes: 15,
+  voxelBytes: 17,
   /** Of those, the bytes held as the superchunks' merged geometry. */
-  mergedGeometryBytes: 16,
+  mergedGeometryBytes: 18,
   /**
    * Of those, the bytes held as the per-block meshes the merge reads from,
    * which is a second copy of every block already merged.
    */
-  blockGeometryBytes: 17,
+  blockGeometryBytes: 19,
   /** Milliseconds the graphics card spent on the occlusion pass, from its own `GpuTimer`. */
-  gpuOcclusionMs: 18,
+  gpuOcclusionMs: 20,
   /**
    * Whether the block the player stands in has its terrain, as 1 or 0. The
    * world holds the player still while it is 0, so a run of zeroes is the
    * player having outrun what the workers could stream.
    */
-  cellReady: 19,
-  playerX: 20,
-  playerY: 21,
-  playerZ: 22,
+  cellReady: 21,
+  playerX: 22,
+  playerY: 23,
+  playerZ: 24,
 } as const;
 
 /** Each per-frame value's name, at the column it is recorded in. */
