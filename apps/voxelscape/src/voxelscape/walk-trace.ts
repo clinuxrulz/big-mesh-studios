@@ -103,7 +103,7 @@ export class WalkTraceRecorder {
     this.startedAt = performance.now();
     this.startedOn = new Date().toISOString();
     this.marks = [];
-    this.setup = this.source.setup();
+    this.setup = jsonSafe(this.source.setup()) as Record<string, unknown>;
     this.probe.arm(TRACE_FRAMES);
     // Handed back so a caller can say what it is recording without reading the
     // world a second time and risking a different answer.
@@ -169,6 +169,28 @@ export class WalkTraceRecorder {
     };
   }
 }
+
+/**
+ * A setting as JSON can carry it. `JSON.stringify` writes an infinity as
+ * `null`, which is how a window with its levels of detail turned off — bands
+ * that reach everywhere — came out of a trace indistinguishable from one whose
+ * bands were never set. Written as its own name instead, so a reader can tell
+ * "off" from "unsaid".
+ */
+const jsonSafe = (value: unknown): unknown => {
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    return value > 0 ? "Infinity" : "-Infinity";
+  }
+  if (Array.isArray(value)) {
+    return value.map(jsonSafe);
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([name, held]) => [name, jsonSafe(held)]),
+    );
+  }
+  return value;
+};
 
 /** One setting written out, however deeply the setup nested it. */
 const settingText = (value: unknown): string => {

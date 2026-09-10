@@ -173,3 +173,23 @@ describe("saying what a trace started with", () => {
     expect(text.split("\n")).toHaveLength(Object.keys(setup).length);
   });
 });
+
+describe("what JSON can carry", () => {
+  it("keeps an infinity readable, so off is not mistaken for unsaid", () => {
+    const { probe } = fakeProbe();
+    const trace = new WalkTraceRecorder(probe, {
+      setup: () => ({
+        window: { lodBands: { full: Infinity, coarse: Infinity } },
+      }),
+      pose: () => ({ position: [0, 0, 0], facing: [0, 0, -1] }),
+    });
+    trace.start("a walk");
+    const written = trace.stop();
+    const carried = JSON.parse(JSON.stringify(written)) as {
+      setup: { window: { lodBands: { full: unknown } } };
+    };
+    // Left a number, JSON.stringify writes this as null and a reader cannot
+    // tell a window with its levels of detail off from one that never said.
+    expect(carried.setup.window.lodBands.full).toBe("Infinity");
+  });
+});
