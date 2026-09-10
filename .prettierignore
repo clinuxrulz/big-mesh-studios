@@ -1,5 +1,6 @@
 pnpm-lock.yaml
 pnpm-workspace.yaml
 dist
+dist-bench
 dist-lib
 .ssr
