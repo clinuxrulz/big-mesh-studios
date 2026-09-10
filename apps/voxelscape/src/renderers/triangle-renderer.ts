@@ -440,11 +440,6 @@ export const superchunkCellOf = (center: Dim3): [number, number, number] => [
 const scKey = (c: [number, number, number]): string =>
   `${c[0]},${c[1]},${c[2]}`;
 
-const scCenterOf = (key: string): Dim3 => {
-  const [x, y, z] = key.split(",").map(Number);
-  return [x * SUPERCHUNK_WORLD, y * SUPERCHUNK_WORLD, z * SUPERCHUNK_WORLD];
-};
-
 /**
  * The world-space box a superchunk's merged geometry actually spans, for the
  * frustum test. Its two block centroids sit one `BLOCK_WORLD` apart, so the
@@ -454,13 +449,14 @@ const scCenterOf = (key: string): Dim3 => {
  * every axis. A box centred on the superchunk itself is a block-half short of
  * the far edge, which hid that sliver while it was still on screen.
  */
-export const scBounds = (key: string): { center: Dim3; half: number } => {
-  const [x, y, z] = scCenterOf(key);
-  return {
-    center: [x + BLOCK_HALF, y + BLOCK_HALF, z + BLOCK_HALF],
-    half: SUPERCHUNK_HALF,
-  };
-};
+export const scBounds = (cell: Dim3): { center: Dim3; half: number } => ({
+  center: [
+    cell[0] * SUPERCHUNK_WORLD + BLOCK_HALF,
+    cell[1] * SUPERCHUNK_WORLD + BLOCK_HALF,
+    cell[2] * SUPERCHUNK_WORLD + BLOCK_HALF,
+  ],
+  half: SUPERCHUNK_HALF,
+});
 
 /** Bytes one block's built mesh occupies before it is merged. */
 const meshArraysResidentBytes = (arrays: MeshArrays): number =>
@@ -622,6 +618,8 @@ export class TriangleRenderer {
    */
   private readonly probeDebugMaterial = new OcclusionDebugMaterial();
   private readonly occlusionScene = new Scene();
+  /** The superchunk cell each key names, kept as its three numbers so nothing reads them back out of the key. */
+  private readonly scCell = new Map<string, Dim3>();
   private readonly scProbeTerrain = new Map<number, Mesh>();
   private readonly scProbeWater = new Map<number, Mesh>();
   private occlusionTarget: WebGLRenderTarget | null = null;
@@ -715,15 +713,17 @@ export class TriangleRenderer {
   }
 
   /** Opens a superchunk's member list, once. The slot meshes appear at upload. */
-  private ensureSuperchunk(key: string): void {
+  private ensureSuperchunk(key: string, cell: Dim3): void {
     if (this.scMembers.has(key)) {
       return;
     }
     this.scMembers.set(key, []);
+    this.scCell.set(key, cell);
   }
 
   /** Removes a superchunk's meshes and its member slots' chunks once its last member leaves. */
   private removeSuperchunk(key: string): void {
+    this.scCell.delete(key);
     const members = this.scMembers.get(key);
     if (members !== undefined) {
       for (const m of members) {
@@ -821,11 +821,16 @@ export class TriangleRenderer {
    * @returns Whether the merged geometry was uploaded.
    */
   private rebuildSuperchunk(key: string, force = false): boolean {
-    const center = scCenterOf(key);
     const members = this.scMembers.get(key);
-    if (members === undefined) {
+    const cell = this.scCell.get(key);
+    if (members === undefined || cell === undefined) {
       return false;
     }
+    const center: Dim3 = [
+      cell[0] * SUPERCHUNK_WORLD,
+      cell[1] * SUPERCHUNK_WORLD,
+      cell[2] * SUPERCHUNK_WORLD,
+    ];
     let superchunk = this.superchunks.get(key);
     // The first merge of a cell is the only one that needs geometry of its own:
     // a member that leaves, or whose voxels changed, gives its room in these
@@ -1113,17 +1118,17 @@ export class TriangleRenderer {
    * turns onto is shown the same frame rather than rebuilt; the degree of
    * hiding here only decides what is drawn, never what the window holds.
    */
-  private applyVisibility(planes: FrustumPlane[], playerKey: string): void {
+  private applyVisibility(planes: FrustumPlane[], playerCell: Dim3): void {
     this.occludedCount = 0;
     this.lastTimedOut = 0;
     this.lastNearExempt = 0;
     this.lastSaw = 0;
     this.drawnMeshes = 0;
     for (const [slot, mesh] of this.scChunkTerrain) {
-      mesh.visible = this.chunkVisible(slot, true, planes, playerKey, true);
+      mesh.visible = this.chunkVisible(slot, true, planes, playerCell, true);
     }
     for (const [slot, mesh] of this.scChunkWater) {
-      mesh.visible = this.chunkVisible(slot, false, planes, playerKey, false);
+      mesh.visible = this.chunkVisible(slot, false, planes, playerCell, false);
     }
     this.drawRuns(this.scChunkTerrain, true);
     this.drawRuns(this.scChunkWater, false);
@@ -1196,7 +1201,7 @@ export class TriangleRenderer {
     slot: number,
     terrain: boolean,
     planes: FrustumPlane[],
-    playerKey: string,
+    playerCell: Dim3,
     countOccluded: boolean,
   ): boolean {
     const center = this.slotCenter.get(slot);
@@ -1219,26 +1224,25 @@ export class TriangleRenderer {
     // and the probe cannot see the view from inside) or when the last query
     // actually saw it; anything else the query looked at but found covered is
     // skipped this frame.
-    if (!this.slotHiddenByOcclusion(slot, playerKey)) {
-      if (!this.lastQueryTested.has(slot)) {
-        this.lastTimedOut++;
-      } else if (
-        isNearCell(
-          this.blockSc.get(slot) ?? "",
-          playerKey,
-          OCCLUSION_NEAR_CELLS,
-        )
-      ) {
-        this.lastNearExempt++;
-      } else {
-        this.lastSaw++;
-      }
+    // The same three questions `slotHiddenByOcclusion` asks, asked once each:
+    // a chunk that was never measured needs no near test, and one that is near
+    // needs no look at what the query saw.
+    if (!this.lastQueryTested.has(slot)) {
+      this.lastTimedOut++;
       return true;
     }
-    if (countOccluded) {
-      this.occludedCount++;
+    if (this.slotIsNear(slot, playerCell)) {
+      this.lastNearExempt++;
+      return true;
     }
-    return false;
+    if (this.lastVisible !== null && !this.lastVisible.has(slot)) {
+      if (countOccluded) {
+        this.occludedCount++;
+      }
+      return false;
+    }
+    this.lastSaw++;
+    return true;
   }
 
   /**
@@ -1251,13 +1255,23 @@ export class TriangleRenderer {
    * chunk the culler hides from drawing is also a chunk whose freshly-built
    * geometry the merge stage may safely leave unbuilt.
    */
-  private slotHiddenByOcclusion(slot: number, playerKey: string): boolean {
+  /**
+   * Whether a slot's superchunk sits on or beside the player's own, which
+   * exempts it from the occlusion pass.
+   */
+  private slotIsNear(slot: number, playerCell: Dim3): boolean {
+    const key = this.blockSc.get(slot);
+    const cell = key === undefined ? undefined : this.scCell.get(key);
+    return (
+      cell !== undefined && isNearCell(cell, playerCell, OCCLUSION_NEAR_CELLS)
+    );
+  }
+
+  private slotHiddenByOcclusion(slot: number, playerCell: Dim3): boolean {
     if (!this.lastQueryTested.has(slot)) {
       return false;
     }
-    if (
-      isNearCell(this.blockSc.get(slot) ?? "", playerKey, OCCLUSION_NEAR_CELLS)
-    ) {
+    if (this.slotIsNear(slot, playerCell)) {
       return false;
     }
     return this.lastVisible !== null && !this.lastVisible.has(slot);
@@ -1273,11 +1287,11 @@ export class TriangleRenderer {
    * meshes land, so a scroll's whole occluded shell defers from its first
    * chunk, not only once it has merged once.
    */
-  private scOccluded(key: string, playerKey: string): boolean {
+  private scOccluded(key: string, playerCell: Dim3): boolean {
     const mergedSlots = this.superchunks.get(key)?.members;
     if (mergedSlots !== undefined && mergedSlots.size > 0) {
       for (const slot of mergedSlots as Set<number>) {
-        if (!this.slotHiddenByOcclusion(slot, playerKey)) {
+        if (!this.slotHiddenByOcclusion(slot, playerCell)) {
           return false;
         }
       }
@@ -1300,7 +1314,7 @@ export class TriangleRenderer {
         continue;
       }
       sawContent = true;
-      if (!this.slotHiddenByOcclusion(m.index, playerKey)) {
+      if (!this.slotHiddenByOcclusion(m.index, playerCell)) {
         return false;
       }
     }
@@ -1366,7 +1380,8 @@ export class TriangleRenderer {
   }
 
   repositionBlock(index: number, center: Dim3): void {
-    const newKey = scKey(superchunkCellOf(center));
+    const newCell = superchunkCellOf(center);
+    const newKey = scKey(newCell);
     const oldKey = this.blockSc.get(index);
     // the slot now holds a different cell's terrain: drop the stale build and
     // any queue for it, but don't queue a rebuild — `onBlockChanged` does that
@@ -1408,7 +1423,7 @@ export class TriangleRenderer {
         this.dirty.add(oldKey);
       }
     }
-    this.ensureSuperchunk(newKey);
+    this.ensureSuperchunk(newKey, newCell);
     this.blockSc.set(index, newKey);
     this.scMembers.get(newKey)!.push({ index, center });
   }
@@ -1532,13 +1547,11 @@ export class TriangleRenderer {
       .copy(camera.projectionMatrix)
       .multiply(camera.matrixWorldInverse);
     const planes = frustumPlanes(viewProjection);
-    const playerKey = scKey(
-      superchunkCellOf([
-        camera.position.x,
-        camera.position.y,
-        camera.position.z,
-      ]),
-    );
+    const playerCell = superchunkCellOf([
+      camera.position.x,
+      camera.position.y,
+      camera.position.z,
+    ]);
     // Of the superchunks the gates above leave, merge and upload a frame's
     // byte budget at a time: the burst of a scroll or the initial load can
     // settle several superchunks on one frame, and each full join's first
@@ -1549,7 +1562,11 @@ export class TriangleRenderer {
     // still merges that frame — it is the only thing the frame could spend.
     const due: Array<{ key: string; d2: number; bytes: number }> = [];
     for (const key of dirty) {
-      const { center, half } = scBounds(key);
+      const cell = this.scCell.get(key);
+      if (cell === undefined) {
+        continue;
+      }
+      const { center, half } = scBounds(cell);
       if (!inFrustum(planes, center, half)) {
         this.dirty.add(key);
         continue;
@@ -1562,7 +1579,7 @@ export class TriangleRenderer {
       // and rebuilds the frame a query or camera move re-exposes a member.
       // A superchunk with any member on screen or unmeasured still merges, so
       // nothing the player could see waits on the culler.
-      if (this.scOccluded(key, playerKey)) {
+      if (this.scOccluded(key, playerCell)) {
         this.dirty.add(key);
         continue;
       }
@@ -1592,7 +1609,7 @@ export class TriangleRenderer {
     probe.end(Phase.merge);
     // Hide what the camera is not looking at, now that this frame's rebuilds
     // have decided which superchunks have geometry.
-    this.applyVisibility(planes, playerKey);
+    this.applyVisibility(planes, playerCell);
     // fullscreen underwater tint when the camera dips below the sea
     if (this.seaLevel !== undefined) {
       const depth = this.seaLevel - camera.position.y;

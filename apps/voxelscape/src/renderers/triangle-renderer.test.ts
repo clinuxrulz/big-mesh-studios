@@ -151,10 +151,10 @@ describe("TriangleRenderer", () => {
     // and a block-half plus a superchunk beyond it. A box centred on the
     // superchunk itself misses that far block-half, hiding it while it was
     // still on screen — the vanish this culling took for a frustum bug.
-    const cellZero = scBounds("0,0,0");
+    const cellZero = scBounds([0, 0, 0]);
     expect(cellZero.half).toBe(128);
     expect(cellZero.center).toEqual([64, 64, 64]);
-    expect(scBounds("1,-1,2").center).toEqual([320, -192, 576]);
+    expect(scBounds([1, -1, 2]).center).toEqual([320, -192, 576]);
   });
 
   it("holds a superchunk back until every block of one edit has landed", () => {

@@ -115,20 +115,19 @@ export const queryIsDue = (
  * superchunk cell, in every axis. The camera can be inside or beside a chunk
  * whose surroundings the probe cannot see, so everything on the player's cell
  * and its immediate neighbours is trusted without a query.
+ *
+ * Both cells arrive as their three numbers: this is asked about chunks of the
+ * window on every frame, often enough that reading the numbers out of the
+ * key naming their superchunk cost more than the comparison does.
  */
 export const isNearCell = (
-  key: string,
-  playerKey: string,
+  cell: Readonly<[number, number, number]>,
+  playerCell: Readonly<[number, number, number]>,
   radiusCells: number,
-): boolean => {
-  const [x, y, z] = key.split(",").map(Number);
-  const [px, py, pz] = playerKey.split(",").map(Number);
-  return (
-    Math.abs(x - px) <= radiusCells &&
-    Math.abs(y - py) <= radiusCells &&
-    Math.abs(z - pz) <= radiusCells
-  );
-};
+): boolean =>
+  Math.abs(cell[0] - playerCell[0]) <= radiusCells &&
+  Math.abs(cell[1] - playerCell[1]) <= radiusCells &&
+  Math.abs(cell[2] - playerCell[2]) <= radiusCells;
 
 /** The render-target side a flat pass of `displayPixels` should use. */
 export const targetSizeFor = (displayPixels: number): number =>

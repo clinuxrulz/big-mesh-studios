@@ -109,19 +109,19 @@ describe("queryIsDue", () => {
 
 describe("isNearCell", () => {
   it("includes the player's own cell and its immediate neighbours", () => {
-    expect(isNearCell("2,8,-4", "2,8,-4", 1)).toBe(true);
-    expect(isNearCell("3,8,-4", "2,8,-4", 1)).toBe(true);
-    expect(isNearCell("2,9,-5", "2,8,-4", 1)).toBe(true);
+    expect(isNearCell([2, 8, -4], [2, 8, -4], 1)).toBe(true);
+    expect(isNearCell([3, 8, -4], [2, 8, -4], 1)).toBe(true);
+    expect(isNearCell([2, 9, -5], [2, 8, -4], 1)).toBe(true);
   });
 
   it("excludes cells beyond the radius on any axis", () => {
-    expect(isNearCell("4,8,-4", "2,8,-4", 1)).toBe(false);
-    expect(isNearCell("2,10,-4", "2,8,-4", 1)).toBe(false);
+    expect(isNearCell([4, 8, -4], [2, 8, -4], 1)).toBe(false);
+    expect(isNearCell([2, 10, -4], [2, 8, -4], 1)).toBe(false);
   });
 
   it("handles negative coordinates on both sides of zero", () => {
-    expect(isNearCell("-1,-1,-1", "0,0,0", 1)).toBe(true);
-    expect(isNearCell("-2,0,0", "0,0,0", 1)).toBe(false);
+    expect(isNearCell([-1, -1, -1], [0, 0, 0], 1)).toBe(true);
+    expect(isNearCell([-2, 0, 0], [0, 0, 0], 1)).toBe(false);
   });
 });
 
