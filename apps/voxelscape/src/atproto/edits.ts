@@ -46,6 +46,14 @@ export type EditChunkRecord = {
   chunk: EditChunkCoord;
   /** Terrain seed the world was generated with, for reproducible base terrain. */
   seed: number | null;
+  /**
+   * The place this chunk belongs to — an `at://` address, a demo's synthetic
+   * id, or `null` for the default world — so a `multi:edit` place's other
+   * players can find exactly the edits made to it, rather than every edit
+   * this account has ever made anywhere. Absent on a record written before
+   * this existed, which reads the same as `null`: the default world.
+   */
+  place?: string | null;
   createdAt: string;
   edits: EditChunkEdit[];
 };
@@ -88,6 +96,7 @@ export const recordVoxel = (
 export const groupEditsByChunk = (
   entries: Array<{ w: WorldVoxel; edit: VoxelEdit }>,
   seed: number | null,
+  place: string | null,
   createdAt: string,
 ): Map<string, EditChunkRecord> => {
   const groups = new Map<string, EditChunkRecord>();
@@ -100,6 +109,7 @@ export const groupEditsByChunk = (
         $type: EDIT_COLLECTION,
         chunk: c,
         seed,
+        place,
         createdAt,
         edits: [],
       };
@@ -117,15 +127,22 @@ export const groupEditsByChunk = (
   return groups;
 };
 
+/** Stable short hash of a string, for embedding a place's address in a record key. */
+const hashPlace = (s: string): string => {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = (Math.imul(h, 31) + s.charCodeAt(i)) | 0;
+  }
+  return (h >>> 0).toString(36);
+};
+
 /**
- * A valid atproto record key for a chunk: readable from the chunk coordinates,
- * unique per upload (timestamp plus random suffix), and free of characters the
- * atproto rkey grammar forbids ('+' and other punctuation are avoided).
+ * A valid atproto record key for a chunk: deterministic from the place and
+ * chunk coordinates, so re-uploading the same chunk overwrites the record
+ * already there instead of leaving an earlier upload behind it.
  */
-export const makeRkey = (c: EditChunkCoord): string =>
-  `e${Math.abs(c.x)}_${Math.abs(c.y)}_${Math.abs(c.z)}_${Date.now().toString(
-    36,
-  )}${Math.random().toString(36).replace(".", "").slice(0, 6)}`;
+export const makeRkey = (place: string | null, c: EditChunkCoord): string =>
+  `e_${hashPlace(place ?? "default")}_${c.x}_${c.y}_${c.z}`;
 
 /**
  * Flattens records from a repo back into overlay snapshot entries ready to

@@ -35,6 +35,7 @@ describe("a place project", () => {
       seed: 77,
       spawn: [0, 0, 0],
       scripts: [MAIN_SCRIPT_FILE],
+      mode: "solo:edit",
     });
     expect(fresh.scripts[MAIN_SCRIPT_FILE]).toBe(STARTER_SCRIPT);
     expect(fresh.models).toEqual({});

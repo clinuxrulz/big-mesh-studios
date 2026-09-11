@@ -92,6 +92,12 @@ export interface MultiplayerParams {
   getDid: () => string | null;
   /** Terrain seed, written into presence records so peers sanity-check the world. */
   seed: number | null;
+  /**
+   * What place this session is in — an `at://` address, a demo's synthetic
+   * id, or `null` for the default world — written into presence and used to
+   * keep peer selection from crossing between places.
+   */
+  scope: string | null;
   /** The player's current pose, asked each publish/selection/send pass. */
   getPose: () => Pose;
   /**
@@ -151,6 +157,7 @@ export class MultiplayerController {
   private readonly getRepoClient: () => AtprotoRepoClient | undefined;
   private readonly getDid: () => string | null;
   private readonly seed: number | null;
+  private readonly scope: string | null;
   private readonly getPose: () => Pose;
   private readonly createSignaling: SignalingFactory;
   private readonly relay: string;
@@ -227,6 +234,7 @@ export class MultiplayerController {
     this.getRepoClient = params.getRepoClient;
     this.getDid = params.getDid;
     this.seed = params.seed;
+    this.scope = params.scope;
     this.getPose = params.getPose;
     this.createSignaling = params.createSignaling;
     this.relay = params.relay ?? DEFAULT_RELAY;
@@ -520,7 +528,9 @@ export class MultiplayerController {
     lines.push(
       `did: ${this.getDid() ?? "none"}  joinCode: ${
         this.joinCode ?? "none"
-      }  relay: ${this.relay}  seed: ${this.seed ?? "none"}`,
+      }  relay: ${this.relay}  seed: ${this.seed ?? "none"}  scope: ${
+        this.scope ?? "none"
+      }`,
     );
 
     const discovery = this.lastDiscovery;
@@ -631,6 +641,7 @@ export class MultiplayerController {
           pose.y,
           pose.z,
           this.seed,
+          this.scope,
           now,
           this.joinCode,
         ) as unknown as {
@@ -760,6 +771,7 @@ export class MultiplayerController {
       selfDid: this.getDid() ?? "",
       selfX: pose.x,
       selfZ: pose.z,
+      selfScope: this.scope,
       roster: this.roster,
       nowMs: now,
       previous: this.selection?.links ?? new Map(),

@@ -65,6 +65,12 @@ export interface VoxelWorldConfig {
   /** Where the player starts, in world units. The window fills outward from here. */
   spawn: Dim3;
   /**
+   * What this world is, for keying its local edit overlay apart from every
+   * other world's in the same browser: a place's `at://` address, a demo's
+   * synthetic id, or omitted for the default world.
+   */
+  placeUri?: string;
+  /**
    * Called each time one of the window's blocks becomes visible at startup,
    * with the running totals rather than a change to them. Never called before
    * this function returns: the spawn block's terrain is generated during
@@ -193,6 +199,7 @@ export const createVoxelWorld = ({
   customVoxelTiles,
   structures,
   spawn,
+  placeUri,
   onInitialDraw,
   createWorker,
 }: VoxelWorldConfig): VoxelWorld => {
@@ -210,7 +217,7 @@ export const createVoxelWorld = ({
    */
 
   const editLayer = new EditLayer();
-  const editPersistence = createEditPersistence(editLayer);
+  const editPersistence = createEditPersistence(editLayer, placeUri ?? null);
   /** Callbacks run whenever a block's fill lands; the flow sim wakes through these. */
   const filledListeners: Array<(index: number) => void> = [];
   /**

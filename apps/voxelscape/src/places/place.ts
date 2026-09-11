@@ -32,6 +32,22 @@ export const MAX_MODEL_FILE = 256;
 export type PlaceSpawn = [number, number, number];
 
 /**
+ * How a place handles other players and their edits: `solo`/`solo:edit` never
+ * start multiplayer, `multi`/`multi:edit` do; the `:edit` half decides whether
+ * anyone can change blocks at all, and if so whether those edits stay private
+ * to whoever made them or become part of what every later visitor sees.
+ */
+export type PlaceMode = "solo" | "solo:edit" | "multi" | "multi:edit";
+
+/** Every value `PlaceMode` may hold, for validating one read from a manifest or record. */
+export const PLACE_MODES: readonly PlaceMode[] = [
+  "solo",
+  "solo:edit",
+  "multi",
+  "multi:edit",
+];
+
+/**
  * The top of a place zip: the world the scripts run on and the files that run.
  * The scripts are named here but not described — what a script file may hold is
  * the script runtime's vocabulary, added when that arrives.
@@ -47,6 +63,8 @@ export type PlaceManifest = {
   scripts?: string[];
   /** The rm-stacker model files in the zip, named relative to its root. */
   models?: string[];
+  /** How this place handles other players and their edits; unset on a place published before this existed. */
+  mode?: PlaceMode;
 };
 
 /**
@@ -62,6 +80,8 @@ export type PlaceRecord = {
   createdAt: string;
   /** The place zip, byte for byte. */
   file: LexBlob;
+  /** How this place handles other players and their edits; unset on a place published before this existed. */
+  mode?: PlaceMode;
 };
 
 /** A place record as it was found, with where it was found. */
@@ -85,6 +105,10 @@ const isSpawn = (v: unknown): v is PlaceSpawn => {
 
 const isShortName = (v: unknown): boolean =>
   typeof v === "string" && v.length >= 1 && v.length <= MAX_PLACE_NAME;
+
+/** Whether `v` is a valid `PlaceMode`, or absent — either is fine on a manifest or record. */
+const isPlaceMode = (v: unknown): v is PlaceMode | undefined =>
+  v === undefined || PLACE_MODES.includes(v as PlaceMode);
 
 const isBlob = (v: unknown): v is LexBlob => {
   if (typeof v !== "object" || v === null) {
@@ -116,6 +140,9 @@ export const isPlaceManifest = (v: unknown): v is PlaceManifest => {
     return false;
   }
   if (!isSpawn(r.spawn)) {
+    return false;
+  }
+  if (!isPlaceMode(r.mode)) {
     return false;
   }
   return (
@@ -168,7 +195,8 @@ export const isPlaceRecord = (v: unknown): v is PlaceRecord => {
     Number.isFinite(r.seed) &&
     isSpawn(r.spawn) &&
     typeof r.createdAt === "string" &&
-    isBlob(r.file)
+    isBlob(r.file) &&
+    isPlaceMode(r.mode)
   );
 };
 
@@ -204,6 +232,7 @@ export const makePlaceRecord = (
   spawn: manifest.spawn,
   createdAt,
   file,
+  ...(manifest.mode !== undefined ? { mode: manifest.mode } : {}),
 });
 
 /** The `at://` address a published place is joined by. */

@@ -11,11 +11,18 @@ import { makePresence } from "./presence";
 
 const SELF = "did:plc:self";
 
-const at = (did: string, x: number, z: number, t = 100): RosterEntry => ({
+const at = (
+  did: string,
+  x: number,
+  z: number,
+  t = 100,
+  scope: string | null = null,
+): RosterEntry => ({
   did,
   x,
   y: 0,
   z,
+  scope,
   updatedAt: t,
 });
 
@@ -26,10 +33,10 @@ const dids = (s: ClusterSelection): string[] => s.target;
 describe("rosterFromPresences", () => {
   it("maps presence records to roster entries", () => {
     const entries = rosterFromPresences([
-      { did: "did:plc:a", record: makePresence(1, 2, 3, null, 50) },
+      { did: "did:plc:a", record: makePresence(1, 2, 3, null, null, 50) },
     ]);
     expect(entries).toEqual([
-      { did: "did:plc:a", x: 1, y: 2, z: 3, updatedAt: 50 },
+      { did: "did:plc:a", x: 1, y: 2, z: 3, scope: null, updatedAt: 50 },
     ]);
   });
 });
@@ -46,6 +53,7 @@ describe("selectNeighbors", () => {
       selfDid: SELF,
       selfX: 0,
       selfZ: 0,
+      selfScope: null,
       roster,
       nowMs: 200,
       previous: empty(),
@@ -64,11 +72,46 @@ describe("selectNeighbors", () => {
     expect(sel.links.get("did:plc:near")).toBe(-1);
   });
 
+  it("never selects a peer from a different place, however close", () => {
+    const roster = [
+      at("did:plc:same-place", 1, 0, 100, "place-a"),
+      at("did:plc:other-place", 2, 0, 100, "place-b"),
+    ];
+    const sel = selectNeighbors({
+      selfDid: SELF,
+      selfX: 0,
+      selfZ: 0,
+      selfScope: "place-a",
+      roster,
+      nowMs: 200,
+      previous: empty(),
+    });
+    expect(dids(sel)).toEqual(["did:plc:same-place"]);
+  });
+
+  it("keeps the default world's unscoped pool separate from every named place", () => {
+    const roster = [
+      at("did:plc:default-world", 1, 0, 100, null),
+      at("did:plc:a-place", 2, 0, 100, "place-a"),
+    ];
+    const sel = selectNeighbors({
+      selfDid: SELF,
+      selfX: 0,
+      selfZ: 0,
+      selfScope: null,
+      roster,
+      nowMs: 200,
+      previous: empty(),
+    });
+    expect(dids(sel)).toEqual(["did:plc:default-world"]);
+  });
+
   it("ignores stale presence beyond the TTL", () => {
     const sel = selectNeighbors({
       selfDid: SELF,
       selfX: 0,
       selfZ: 0,
+      selfScope: null,
       roster: [at("did:plc:stale", 1, 0, 0)],
       nowMs: CLUSTER_DEFAULTS.ttlMs + 1,
       previous: empty(),
@@ -84,6 +127,7 @@ describe("selectNeighbors", () => {
       selfDid: SELF,
       selfX: 0,
       selfZ: 0,
+      selfScope: null,
       roster,
       nowMs: 200,
       previous: empty(),
@@ -102,6 +146,7 @@ describe("selectNeighbors", () => {
       selfDid: SELF,
       selfX: 0,
       selfZ: 0,
+      selfScope: null,
       roster,
       nowMs: 200,
       previous: empty(),
@@ -116,6 +161,7 @@ describe("selectNeighbors", () => {
       selfDid: SELF,
       selfX: 0,
       selfZ: 0,
+      selfScope: null,
       roster: moved,
       nowMs: 300,
       previous: first.links,
@@ -130,6 +176,7 @@ describe("selectNeighbors", () => {
       selfDid: SELF,
       selfX: 0,
       selfZ: 0,
+      selfScope: null,
       roster,
       nowMs: 200,
       previous: empty(),
@@ -144,6 +191,7 @@ describe("selectNeighbors", () => {
       selfDid: SELF,
       selfX: 0,
       selfZ: 0,
+      selfScope: null,
       roster: after,
       nowMs: 300,
       previous: first.links,
@@ -156,6 +204,7 @@ describe("selectNeighbors", () => {
       selfDid: SELF,
       selfX: 0,
       selfZ: 0,
+      selfScope: null,
       roster: after,
       nowMs: 300 + CLUSTER_DEFAULTS.hysteresisMs + 1,
       previous: during.links,
@@ -170,6 +219,7 @@ describe("selectNeighbors", () => {
       selfDid: SELF,
       selfX: 0,
       selfZ: 0,
+      selfScope: null,
       roster,
       nowMs: 200,
       previous: empty(),
@@ -178,6 +228,7 @@ describe("selectNeighbors", () => {
       selfDid: SELF,
       selfX: 0,
       selfZ: 0,
+      selfScope: null,
       roster: [],
       nowMs: 300,
       previous: first.links,
@@ -188,6 +239,7 @@ describe("selectNeighbors", () => {
       selfDid: SELF,
       selfX: 0,
       selfZ: 0,
+      selfScope: null,
       roster: [],
       nowMs: 300 + CLUSTER_DEFAULTS.hysteresisMs + 1,
       previous: during.links,
@@ -202,6 +254,7 @@ describe("selectNeighbors", () => {
       selfDid: SELF,
       selfX: 0,
       selfZ: 0,
+      selfScope: null,
       roster,
       nowMs: 200,
       previous: empty(),
@@ -210,6 +263,7 @@ describe("selectNeighbors", () => {
       selfDid: SELF,
       selfX: 0,
       selfZ: 0,
+      selfScope: null,
       roster,
       nowMs: 300,
       previous: first.links,

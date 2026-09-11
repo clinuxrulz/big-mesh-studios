@@ -15,9 +15,13 @@ import type { MultiplayerController } from "./multiplayer/multiplayer-controller
 import type { PlayerHealth } from "./player/health";
 import type { AdaptiveResolution } from "./render/adaptive";
 import type { PlaceLibrary, PlacePublisher } from "./atproto/places";
-import { parsePlaceAtUri } from "./places/place";
+import { PLACE_MODES, parsePlaceAtUri } from "./places/place";
 import { BUILTIN_DEMOS, builtinDemo, loadBuiltinDemo } from "./places/demos";
-import { emptyPlaceProject, writePlaceZip } from "./places/project";
+import {
+  emptyPlaceProject,
+  readPlaceProject,
+  writePlaceZip,
+} from "./places/project";
 
 /**
  * Declares every debug console command as a single object literal, keyed by
@@ -165,6 +169,8 @@ export interface CommandsParams {
   placePublisher: PlacePublisher;
   /** The seed a freshly created place starts from: the world being played. */
   defaultSeed: number;
+  /** This world's own place address, for `/place:mode`; omitted outside a published place. */
+  placeUri?: string;
   /** Moves the address bar to a different place or demo, for `/place:join` and `/place:demo`. */
   navigate: (to: string) => void;
   /** Opens whether the place script editor is showing, and reports the flip. */
@@ -282,6 +288,7 @@ export const createCommands = ({
   places,
   placePublisher,
   defaultSeed,
+  placeUri,
   navigate,
   togglePlaceEditor,
   script,
@@ -815,16 +822,22 @@ export const createCommands = ({
       run: () => togglePlaceEditor(),
     },
     "/place:create": {
-      description:
-        "publish a new, empty place under your account, seeded from the world being played, and join it",
-      args: "<name>",
+      description: `publish a new, empty place under your account, seeded from the world being played, and join it — modes: ${PLACE_MODES.join(", ")} (default solo:edit)`,
+      args: "<name> [mode]",
       run: async (rest) => {
-        const name = rest.join(" ").trim();
+        const last = rest[rest.length - 1];
+        const mode = PLACE_MODES.find((candidate) => candidate === last);
+        const name = (mode === undefined ? rest : rest.slice(0, -1))
+          .join(" ")
+          .trim();
         if (name === "") {
-          return "usage: /place:create <name>";
+          return `usage: /place:create <name> [${PLACE_MODES.join("|")}]`;
         }
         const project = emptyPlaceProject(defaultSeed);
         project.manifest.name = name;
+        if (mode !== undefined) {
+          project.manifest.mode = mode;
+        }
         try {
           const atUri = await placePublisher.publish(
             await writePlaceZip(project),
@@ -838,6 +851,37 @@ export const createCommands = ({
           return `created "${name}" — joining its world`;
         } catch (err) {
           return `create failed: ${describeError(err)}`;
+        }
+      },
+    },
+    "/place:mode": {
+      description: `sets this place's mode — modes: ${PLACE_MODES.join(", ")}. Only the place's owner may change it.`,
+      args: "<mode>",
+      run: async (rest) => {
+        const mode = PLACE_MODES.find((candidate) => candidate === rest[0]);
+        if (mode === undefined) {
+          return `usage: /place:mode <mode>  (mode is one of ${PLACE_MODES.join(", ")})`;
+        }
+        if (placeUri === undefined || parsePlaceAtUri(placeUri) === null) {
+          return "this isn't a published place — there's no mode to set";
+        }
+        if (atproto.did === null) {
+          return "sign in first — use /account:login";
+        }
+        try {
+          const place = await places.recordAtUri(placeUri);
+          // Republishing under this account's own DID is the only way this
+          // app ever writes a place record, so this check is what actually
+          // stops anyone but the place's owner from changing its mode.
+          if (place.repo !== atproto.did) {
+            return "only this place's owner can change its mode";
+          }
+          const project = await readPlaceProject(await places.file(place));
+          project.manifest.mode = mode;
+          await placePublisher.publish(await writePlaceZip(project));
+          return `"${place.record.name}" is now ${mode}`;
+        } catch (err) {
+          return `could not set mode: ${describeError(err)}`;
         }
       },
     },

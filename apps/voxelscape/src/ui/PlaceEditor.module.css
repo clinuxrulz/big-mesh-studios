@@ -54,7 +54,8 @@
 }
 
 .text,
-.number {
+.number,
+.select {
   min-width: 120px;
   padding: 3px 6px;
   background: rgba(255, 255, 255, 0.08);
@@ -67,7 +68,8 @@
 }
 
 .text:focus,
-.number:focus {
+.number:focus,
+.select:focus {
   outline: none;
   border-color: #6fcf97;
 }

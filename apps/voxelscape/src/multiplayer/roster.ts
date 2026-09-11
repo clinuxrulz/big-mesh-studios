@@ -15,6 +15,8 @@ export interface RosterEntry {
   x: number;
   y: number;
   z: number;
+  /** What place this player is in, as their presence declared it. */
+  scope: string | null;
   /** The player's signaling join code, if their presence carried one. */
   joinCode?: string;
   /** Milliseconds since epoch. */
@@ -30,6 +32,7 @@ export const rosterFromPresences = (
     x: record.x,
     y: record.y,
     z: record.z,
+    scope: record.scope ?? null,
     ...(record.joinCode !== undefined ? { joinCode: record.joinCode } : {}),
     updatedAt: record.updatedAt,
   }));
@@ -59,6 +62,8 @@ export interface ClusterInput {
   selfDid: string;
   selfX: number;
   selfZ: number;
+  /** What place this player is in; only roster entries in the same place are selected. */
+  selfScope: string | null;
   roster: RosterEntry[];
   /** Milliseconds since epoch. */
   nowMs: number;
@@ -88,10 +93,15 @@ export interface ClusterSelection {
 
 export const selectNeighbors = (input: ClusterInput): ClusterSelection => {
   const opts: ClusterOptions = { ...CLUSTER_DEFAULTS, ...input.options };
-  const { selfDid, selfX, selfZ, roster, nowMs, previous } = input;
+  const { selfDid, selfX, selfZ, selfScope, roster, nowMs, previous } = input;
 
   const ranked = roster
-    .filter((e) => e.did !== selfDid && nowMs - e.updatedAt <= opts.ttlMs)
+    .filter(
+      (e) =>
+        e.did !== selfDid &&
+        e.scope === selfScope &&
+        nowMs - e.updatedAt <= opts.ttlMs,
+    )
     .map((e) => ({ e, dist2: (e.x - selfX) ** 2 + (e.z - selfZ) ** 2 }))
     .filter(({ dist2 }) => dist2 <= opts.maxDistance ** 2)
     .sort(

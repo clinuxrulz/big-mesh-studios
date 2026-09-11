@@ -27,7 +27,12 @@ import {
   writePlaceZip,
   type PlaceProject,
 } from "../places/project";
-import type { PlaceManifest, PublishedPlace } from "../places/place";
+import {
+  PLACE_MODES,
+  type PlaceManifest,
+  type PlaceMode,
+  type PublishedPlace,
+} from "../places/place";
 import styles from "./PlaceEditor.module.css";
 
 /** One persistence handle for the whole app, so a debounced save outlives a close. */
@@ -403,6 +408,22 @@ export const PlaceEditor: Component = () => {
                   value={project()!.manifest.spawn.join(", ")}
                   onInput={(e) => onSpawn(e.currentTarget.value)}
                 />
+              </label>
+              <label class={styles.field}>
+                mode
+                <select
+                  class={styles.select}
+                  value={project()!.manifest.mode ?? "solo:edit"}
+                  onChange={(e) =>
+                    patchManifest({
+                      mode: e.currentTarget.value as PlaceMode,
+                    })
+                  }
+                >
+                  <For each={PLACE_MODES}>
+                    {(mode) => <option value={mode}>{mode}</option>}
+                  </For>
+                </select>
               </label>
             </div>
             <div class={styles.actions}>

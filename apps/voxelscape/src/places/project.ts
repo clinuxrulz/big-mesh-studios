@@ -69,13 +69,18 @@ export interface PlaceProject {
   models: Record<string, Uint8Array>;
 }
 
-/** A new place project, seeded and starting from a one-file starter script. */
+/**
+ * A new place project, seeded and starting from a one-file starter script. It
+ * starts in `solo:edit` — a private build, safe to publish before deciding
+ * whether to open it up to other players.
+ */
 export const emptyPlaceProject = (seed: number): PlaceProject => ({
   manifest: {
     name: "",
     seed,
     spawn: [0, 0, 0],
     scripts: [MAIN_SCRIPT_FILE],
+    mode: "solo:edit",
   },
   scripts: { [MAIN_SCRIPT_FILE]: STARTER_SCRIPT },
   models: {},

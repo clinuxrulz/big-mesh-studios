@@ -21,6 +21,7 @@ import {
 } from "@big-mesh-studios/atproto/session";
 import { createBrowserSessionStore } from "@big-mesh-studios/atproto/session-store";
 import type { EditLayer } from "../world/edit-layer";
+import { fetchSharedEditRecords } from "./constellation";
 import {
   EDIT_COLLECTION,
   groupEditsByChunk,
@@ -47,6 +48,8 @@ export type AtpStatus = SessionStatus;
 export class AtprotoController {
   private readonly layer: EditLayer;
   private readonly seed: number | null;
+  private readonly place: string | null;
+  private readonly editScope: "self" | "everyone";
   private readonly onMerged: (changed: number) => void;
   private readonly handleInput: () => string;
   private readonly identity: IdentityLookup;
@@ -58,6 +61,14 @@ export class AtprotoController {
   constructor(params: {
     layer: EditLayer;
     seed: number | null;
+    /** What place this world is; `null` for the default world. */
+    place: string | null;
+    /**
+     * Whether an `/account:sync` merges only the signed-in account's own edit
+     * records (`"self"`) or every account's edit records for `place` too
+     * (`"everyone"`, found via Constellation) — a `multi:edit` place's choice.
+     */
+    editScope: "self" | "everyone";
     /** Supplies the login handle when `/account:login` has no argument. */
     getHandle: () => string;
     /**
@@ -77,6 +88,8 @@ export class AtprotoController {
   }) {
     this.layer = params.layer;
     this.seed = params.seed;
+    this.place = params.place;
+    this.editScope = params.editScope;
     this.handleInput = params.getHandle;
     this.onMerged = params.onMerged ?? (() => {});
     this.identity = createIdentityLookup();
@@ -219,6 +232,7 @@ export class AtprotoController {
         .snapshot()
         .filter(({ edit }) => edit.updatedAt > this.lastUploadAt),
       this.seed,
+      this.place,
       new Date().toISOString(),
     );
     for (const record of groups.values()) {
@@ -226,7 +240,7 @@ export class AtprotoController {
         await client.putRecord({
           repo,
           collection: EDIT_COLLECTION,
-          rkey: makeRkey(record.chunk),
+          rkey: makeRkey(this.place, record.chunk),
           record,
         });
       } catch (err) {
@@ -251,10 +265,22 @@ export class AtprotoController {
     )
       .map(({ value }) => value as EditChunkRecord)
       .filter((value) => value?.$type === EDIT_COLLECTION);
-    const changed = mergeIntoLayer(this.layer, recordsToEntries(fetched));
+
+    // A `multi:edit` place's shared edits live in every account that made
+    // one, not just this one — Constellation finds exactly those, without
+    // walking every account's edits to every place they've ever touched.
+    const shared =
+      this.editScope === "everyone" && this.place !== null
+        ? await fetchSharedEditRecords(this.place, repo)
+        : [];
+
+    const changed = mergeIntoLayer(
+      this.layer,
+      recordsToEntries([...fetched, ...shared]),
+    );
     this.onMerged(changed);
     messages.push(
-      `fetched ${fetched.length} remote record(s), ${changed} voxel(s) updated`,
+      `fetched ${fetched.length + shared.length} remote record(s), ${changed} voxel(s) updated`,
     );
     return messages.join(", ");
   }

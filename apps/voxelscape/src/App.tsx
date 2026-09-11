@@ -12,6 +12,7 @@ import { useNavigate, useParams } from "@solidjs/router";
 import styles from "./App.module.css";
 import { createPlaceLibrary } from "./atproto/places";
 import { builtinDemo, loadBuiltinDemo } from "./places/demos";
+import { placeAtUri, type PlaceMode } from "./places/place";
 import { readPlaceProject, type PlaceProject } from "./places/project";
 import { compilePlacePlan, planRegionAround } from "./places/plan";
 import { DEFAULT_TERRAIN, type TerrainConfig } from "./world/noise";
@@ -52,6 +53,18 @@ interface LaunchConfig {
   structures?: StructurePlan;
   /** The place's scripts to run from boot; omitted for the default world. */
   place?: PlaceBoot;
+  /**
+   * How this place handles other players and their edits; omitted for the
+   * default world and for a place published before modes existed, both of
+   * which keep today's behaviour rather than being migrated onto one.
+   */
+  mode?: PlaceMode;
+  /**
+   * What this world is, for scoping multiplayer and edits to it: a place's
+   * `at://` address, a demo's own synthetic `demo:<id>`, or omitted for the
+   * default world (which stays in the one unscoped pool it always has).
+   */
+  placeUri?: string;
   /** One line about how this world was chosen, toasted once it exists. */
   notice?: string;
 }
@@ -71,6 +84,8 @@ const World: Component<{
     spawn: props.launch.spawn,
     structures: props.launch.structures,
     place: props.launch.place,
+    mode: props.launch.mode,
+    placeUri: props.launch.placeUri,
     chunkRadius: radiusInUrl(),
     antialias: antialiasInUrl(),
     navigate: props.navigate,
@@ -249,17 +264,23 @@ const App: Component<{}> = () => {
 
   /**
    * Builds the world a place project describes: its terrain seed, spawn, the
-   * structure plan its script compiles, and the scripts themselves.
+   * structure plan its script compiles, and the scripts themselves. `placeUri`
+   * identifies the place itself (an `at://` address, or a demo's synthetic
+   * one) for scoping multiplayer and edits to it, distinct from the terrain
+   * seed a script or a coincidence could share with an unrelated place.
    */
   const buildLaunch = async (
     project: PlaceProject,
     source: string,
+    placeUri: string,
   ): Promise<LaunchConfig> => {
     const entry = project.manifest.scripts?.[0];
     if (entry === undefined) {
       return {
         terrain: { ...DEFAULT_TERRAIN, seed: project.manifest.seed },
         spawn: project.manifest.spawn,
+        mode: project.manifest.mode,
+        placeUri,
         notice: `${source} names no scripts — playing its terrain`,
       };
     }
@@ -287,6 +308,8 @@ const App: Component<{}> = () => {
         seed: project.manifest.seed,
         models: project.models,
       },
+      mode: project.manifest.mode,
+      placeUri,
       notice: `${source}${planNote}`,
     };
   };
@@ -326,6 +349,7 @@ const App: Component<{}> = () => {
             const config = await buildLaunch(
               await loadBuiltinDemo(demo),
               `playing the demo "${demo.name}"`,
+              `demo:${demo.id}`,
             );
             if (current) {
               setLaunch(config);
@@ -358,6 +382,7 @@ const App: Component<{}> = () => {
           const config = await buildLaunch(
             await readPlaceProject(await places.file(place)),
             `joined "${place.record.name}" — playing its world`,
+            placeAtUri(place.repo, place.rkey),
           );
           if (current) {
             setLaunch(config);

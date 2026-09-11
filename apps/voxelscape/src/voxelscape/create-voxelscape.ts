@@ -19,6 +19,7 @@ import {
 } from "../atproto/models";
 import { createPlaceLibrary, createPlacePublisher } from "../atproto/places";
 import type { PlaceLibrary, PlacePublisher } from "../atproto/places";
+import type { PlaceMode } from "../places/place";
 import type { ScriptConsole } from "../places/script-console";
 import { VoxelFigures } from "../places/voxel-figures";
 import { createEndingLog, endingLogKey } from "../places/ending-log";
@@ -146,6 +147,19 @@ export interface VoxelscapeConfig {
   structures?: StructurePlan;
   /** The place whose scripts this world runs from boot, if it is a published one. */
   place?: PlaceBoot;
+  /**
+   * How this place handles other players and their edits; omitted for the
+   * default world and for a place published before modes existed, both of
+   * which keep multiplayer unscoped and edits self-only rather than being
+   * migrated onto one of the four named modes.
+   */
+  mode?: PlaceMode;
+  /**
+   * What this world is, for scoping multiplayer and edits to it: a place's
+   * `at://` address, a demo's synthetic `demo:<id>`, or omitted for the
+   * default world.
+   */
+  placeUri?: string;
   /** When true, only surface voxels are written into each block's GPU chunks instead of the full solid volume. */
   /** Where the player starts, in world units; the spawn height is the terrain surface there. */
   spawn?: Dim3;
@@ -311,6 +325,8 @@ export const createVoxelscape = ({
   customVoxelTiles,
   structures,
   place,
+  mode,
+  placeUri,
   spawn = [0, 0, 0],
   modelAccount = WORLD_MODEL_ACCOUNT,
   debugPerf: initialDebugPerf = __PERF__ &&
@@ -323,6 +339,20 @@ export const createVoxelscape = ({
   onNotice,
   player,
 }: VoxelscapeConfig = {}): Voxelscape => {
+  /**
+   * Whether this place starts multiplayer at all, whether anyone can edit its
+   * blocks, and — if so — whose edits become durable: `undefined` covers both
+   * the default world and a place published before modes existed, and keeps
+   * exactly today's behaviour (multiplayer unscoped, edits self-only) rather
+   * than being migrated onto one of the four named modes.
+   */
+  const multiplayerAllowed =
+    mode === undefined || mode === "multi" || mode === "multi:edit";
+  const editingAllowed =
+    mode === undefined || mode === "solo:edit" || mode === "multi:edit";
+  const editScope: "self" | "everyone" =
+    mode === "multi:edit" ? "everyone" : "self";
+
   const [editStatus, setEditStatus] = createSignal("");
   const [target, setTarget] = createSignal<Target | null>(null);
   const [npcAim, setNpcAim] = createSignal<{
@@ -402,6 +432,7 @@ export const createVoxelscape = ({
     customVoxelTiles,
     structures,
     spawn,
+    placeUri,
     onInitialDraw: setLoading,
   });
 
@@ -615,6 +646,17 @@ export const createVoxelscape = ({
     terrain,
   });
 
+  /**
+   * Applies whether editing is allowed right now: closed outright by mode, or
+   * open but waiting on the sign-in a `multi:edit` place needs before anyone's
+   * edits would have anywhere durable and shared to go.
+   */
+  const updateEditingEnabled = (): void => {
+    editing.setEnabled(
+      editingAllowed && (editScope !== "everyone" || atproto.did !== null),
+    );
+  };
+
   const toolContext: ToolContext = {
     editing,
     look: () => avatar.look(),
@@ -644,6 +686,8 @@ export const createVoxelscape = ({
   const atproto = new AtprotoController({
     layer: world.editLayer,
     seed: terrain.seed,
+    place: placeUri ?? null,
+    editScope,
     getHandle: () => "",
     onMerged: (changed) => {
       if (changed > 0) {
@@ -652,8 +696,15 @@ export const createVoxelscape = ({
       }
     },
     onConnected: (did) => {
-      void multiplayer.start();
+      if (multiplayerAllowed) {
+        void multiplayer.start();
+      }
       monsterSync.start();
+      updateEditingEnabled();
+      // Fires both for a fresh /account:login and for a restored session on
+      // every place this account opens signed in, so edits merge in without
+      // waiting for the player to remember /account:sync.
+      void atproto.sync();
       // Their own cube wears the face peers see, which is how they check it.
       void atproto
         .resolvePicture(did)
@@ -669,13 +720,16 @@ export const createVoxelscape = ({
     onSignedOut: () => {
       void multiplayer.stop();
       monsterSync.stop();
+      updateEditingEnabled();
     },
   });
+  updateEditingEnabled();
 
   const multiplayer = new MultiplayerController({
     getRepoClient: () => atproto.repoClient,
     getDid: () => atproto.did,
     seed: terrain.seed,
+    scope: placeUri ?? null,
     getPose: () => ({
       x: avatar.player.position.x,
       y: avatar.player.position.y,
@@ -1135,6 +1189,7 @@ export const createVoxelscape = ({
     places: placeLibrary,
     placePublisher,
     defaultSeed: terrain.seed,
+    placeUri,
     navigate,
     togglePlaceEditor: () => {
       const next = !placeEditorOpen();

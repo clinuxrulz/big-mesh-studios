@@ -38,6 +38,7 @@ export interface PlayerSimParams {
   y?: number;
   z?: number;
   seed?: number | null;
+  scope?: string | null;
   clusterOptions?: Partial<ClusterOptions>;
 }
 
@@ -60,6 +61,7 @@ export const createPlayerSim = (params: PlayerSimParams): PlayerSim => {
     getRepoClient: () => repoClient,
     getDid: () => params.did,
     seed: params.seed ?? null,
+    scope: params.scope ?? null,
     getPose: () => pose,
     createSignaling: params.signaling.createSignaling,
     fetchDirectory: (collection) =>

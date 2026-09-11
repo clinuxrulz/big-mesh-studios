@@ -40,6 +40,7 @@ describe("edit chunk mapping", () => {
       $type: EDIT_COLLECTION,
       chunk: { x: 2, y: -1, z: 0 },
       seed: null,
+      place: null,
       createdAt: "2026-01-01T00:00:00Z",
       edits: [{ x: 5, y: 10, z: 20, id: VOXEL_GRASS }],
     };
@@ -61,12 +62,16 @@ describe("groupEditsByChunk", () => {
     const groups = groupEditsByChunk(
       layer.snapshot(),
       54321,
+      "at://did:plc:abc/app.bms.voxelscape.place/myplace",
       "2026-05-05T00:00:00Z",
     );
     expect(groups.size).toBe(2);
     const first = groups.get(chunkKey({ x: 0, y: 0, z: 0 }))!;
     expect(first.$type).toBe(EDIT_COLLECTION);
     expect(first.seed).toBe(54321);
+    expect(first.place).toBe(
+      "at://did:plc:abc/app.bms.voxelscape.place/myplace",
+    );
     expect(first.createdAt).toBe("2026-05-05T00:00:00Z");
     expect(first.edits).toContainEqual({
       x: 1,
@@ -91,6 +96,7 @@ describe("groupEditsByChunk", () => {
     ]);
     const groups = groupEditsByChunk(
       layer.snapshot(),
+      null,
       null,
       "2026-01-01T00:00:00Z",
     );
@@ -119,6 +125,7 @@ describe("groupEditsByChunk", () => {
     const groups = groupEditsByChunk(
       layer.snapshot(),
       null,
+      null,
       "2026-01-01T00:00:00Z",
     );
     const rec = groups.get(chunkKey({ x: 0, y: 0, z: 0 }))!;
@@ -127,14 +134,37 @@ describe("groupEditsByChunk", () => {
 });
 
 describe("makeRkey", () => {
-  it("produces distinct, grammar-safe keys", () => {
-    const a = makeRkey({ x: 3, y: -2, z: 1 });
-    const b = makeRkey({ x: 3, y: -2, z: 1 });
-    expect(a).not.toBe(b);
+  it("is grammar-safe and deterministic for the same place and chunk", () => {
+    const a = makeRkey("at://did:plc:abc/app.bms.voxelscape.place/x", {
+      x: 3,
+      y: -2,
+      z: 1,
+    });
+    const b = makeRkey("at://did:plc:abc/app.bms.voxelscape.place/x", {
+      x: 3,
+      y: -2,
+      z: 1,
+    });
+    expect(a).toBe(b);
     for (const key of [a, b]) {
       expect(key).toMatch(/^[a-zA-Z0-9._~:-]+$/);
       expect(key.endsWith(".")).toBe(false);
     }
+  });
+
+  it("differs by place and by chunk, so re-uploading the same chunk overwrites in place", () => {
+    const chunk = { x: 3, y: -2, z: 1 };
+    const here = makeRkey("at://did:plc:abc/app.bms.voxelscape.place/x", chunk);
+    const there = makeRkey(
+      "at://did:plc:abc/app.bms.voxelscape.place/y",
+      chunk,
+    );
+    const elsewhere = makeRkey("at://did:plc:abc/app.bms.voxelscape.place/x", {
+      ...chunk,
+      x: 4,
+    });
+    expect(here).not.toBe(there);
+    expect(here).not.toBe(elsewhere);
   });
 });
 
@@ -144,6 +174,7 @@ describe("recordsToEntries + mergeIntoLayer", () => {
       $type: EDIT_COLLECTION,
       chunk: { x: 0, y: 0, z: 0 },
       seed: 1,
+      place: null,
       createdAt: "2026-01-01T00:00:00.000Z",
       edits: [
         { x: 0, y: 0, z: 0, id: VOXEL_GRASS },
@@ -192,6 +223,7 @@ describe("recordsToEntries + mergeIntoLayer", () => {
       $type: EDIT_COLLECTION,
       chunk: { x: 0, y: 0, z: 0 },
       seed: 1,
+      place: null,
       // createdAt is much older than the per-edit ts, to prove ts wins.
       createdAt: "2020-01-01T00:00:00.000Z",
       edits: [{ x: 0, y: 0, z: 0, id: VOXEL_GRASS, ts: 2_000_000_000_000 }],
@@ -205,5 +237,23 @@ describe("recordsToEntries + mergeIntoLayer", () => {
     expect(entries[0].edit.updatedAt).toBe(
       Date.parse("2026-01-01T00:00:00.000Z"),
     );
+  });
+
+  it("flattens a record written before `place` existed", () => {
+    const legacy: EditChunkRecord = {
+      $type: EDIT_COLLECTION,
+      chunk: { x: 0, y: 0, z: 0 },
+      seed: 1,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      edits: [{ x: 0, y: 0, z: 0, id: VOXEL_GRASS }],
+    };
+    const entries = recordsToEntries([legacy]);
+    expect(entries).toContainEqual({
+      w: [0, 0, 0],
+      edit: {
+        id: VOXEL_GRASS,
+        updatedAt: Date.parse("2026-01-01T00:00:00.000Z"),
+      },
+    });
   });
 });

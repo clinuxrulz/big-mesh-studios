@@ -92,6 +92,8 @@ export class EditingController {
   private readonly getPlayerVoxels: () => WorldVoxel[] | null;
   private readonly onVoxelWritten: (w: WorldVoxel, id: number) => void;
   private readonly terrain?: TerrainConfig;
+  /** Whether breaking, placing, scooping, or pouring is allowed right now. */
+  private enabled = true;
 
   constructor(params: EditingControllerParams) {
     this.blocks = params.blocks;
@@ -104,6 +106,15 @@ export class EditingController {
     this.getPlayerVoxels = params.getPlayerVoxels;
     this.onVoxelWritten = params.onVoxelWritten ?? (() => {});
     this.terrain = params.terrain;
+  }
+
+  /**
+   * Turns editing on or off, for a place whose mode forbids it outright or
+   * requires a sign-in `multi:edit` doesn't currently have. Every other
+   * method (picking a target, reading a voxel) still works either way.
+   */
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
   }
 
   /** Recomputes the voxel under the crosshair from the current camera look. */
@@ -120,6 +131,9 @@ export class EditingController {
    * broken — no target, or a voxel that yields nothing.
    */
   breakBlock(target: WorldVoxel | null): string | null {
+    if (!this.enabled) {
+      return "this place doesn't allow editing";
+    }
     if (target === null) {
       return null;
     }
@@ -152,6 +166,9 @@ export class EditingController {
     target: WorldVoxel | null,
     place: WorldVoxel | null,
   ): string {
+    if (!this.enabled) {
+      return "this place doesn't allow editing";
+    }
     if (this.inventory.count(item) < 1) {
       return `no ${ITEMS[item].name.toLowerCase()} to place — break some first`;
     }
@@ -214,7 +231,7 @@ export class EditingController {
    * @returns True when a source was removed.
    */
   scoop(target: WorldVoxel | null): boolean {
-    if (!this.isScoopable(target)) {
+    if (!this.enabled || !this.isScoopable(target)) {
       return false;
     }
     this.applyEdit(target as WorldVoxel, VOXEL_AIR);
@@ -230,6 +247,9 @@ export class EditingController {
    * @returns True when a source was placed.
    */
   pourFluid(kind: "water" | "lava", place: WorldVoxel | null): boolean {
+    if (!this.enabled) {
+      return false;
+    }
     if (place === null || findBlockIndex(this.blocks, place) < 0) {
       return false;
     }
