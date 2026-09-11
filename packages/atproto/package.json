@@ -13,7 +13,9 @@
   "exports": {
     "./handles": "./src/handles.ts",
     "./identity": "./src/identity.ts",
+    "./migration": "./src/migration.ts",
     "./oauth": "./src/oauth.ts",
+    "./password-session": "./src/password-session.ts",
     "./profile": "./src/profile.ts",
     "./repo-client": "./src/repo-client.ts",
     "./session": "./src/session.ts",
@@ -21,16 +23,19 @@
   },
   "scripts": {
     "check-types": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "pds-cli": "node --experimental-transform-types src/pds-cli.ts"
   },
   "dependencies": {
     "@atcute/client": "catalog:",
     "@atcute/identity-resolver": "catalog:",
     "@atcute/lexicons": "catalog:",
-    "@atcute/oauth-browser-client": "catalog:"
+    "@atcute/oauth-browser-client": "catalog:",
+    "@standard-schema/spec": "catalog:"
   },
   "devDependencies": {
     "@atcute/atproto": "catalog:",
+    "@types/node": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

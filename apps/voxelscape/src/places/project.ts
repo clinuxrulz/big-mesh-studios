@@ -4,12 +4,12 @@
 // read back, and a publish happens, all through the same manifest + scripts
 // shape — so nothing outside this module needs to know how the two relate.
 import JSZip from "jszip";
-import { readPlaceZip } from "./package";
+import { readPlaceZip } from "./package.ts";
 import {
   PLACE_MANIFEST_FILE,
   PLACE_MIME_TYPE,
   type PlaceManifest,
-} from "./place";
+} from "./place.ts";
 
 /** The script file a freshly created place starts with. */
 export const MAIN_SCRIPT_FILE = "main.ts";

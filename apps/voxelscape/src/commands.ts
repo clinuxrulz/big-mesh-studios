@@ -169,8 +169,11 @@ export interface CommandsParams {
   placePublisher: PlacePublisher;
   /** The seed a freshly created place starts from: the world being played. */
   defaultSeed: number;
-  /** This world's own place address, for `/place:mode`; omitted outside a published place. */
-  placeUri?: string;
+  /**
+   * This world's own address, for `/place:mode`: a published place's `at://`
+   * address, or the default world's own fixed address.
+   */
+  placeUri: string;
   /** Moves the address bar to a different place or demo, for `/place:join` and `/place:demo`. */
   navigate: (to: string) => void;
   /** Opens whether the place script editor is showing, and reports the flip. */
@@ -862,7 +865,7 @@ export const createCommands = ({
         if (mode === undefined) {
           return `usage: /place:mode <mode>  (mode is one of ${PLACE_MODES.join(", ")})`;
         }
-        if (placeUri === undefined || parsePlaceAtUri(placeUri) === null) {
+        if (parsePlaceAtUri(placeUri) === null) {
           return "this isn't a published place — there's no mode to set";
         }
         if (atproto.did === null) {

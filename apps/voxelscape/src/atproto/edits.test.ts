@@ -9,12 +9,16 @@ import {
   parseChunkKey,
   groupEditsByChunk,
   makeRkey,
+  parseEditChunkRecord,
   recordVoxel,
   recordsToEntries,
   mergeIntoLayer,
   type EditChunkRecord,
 } from "./edits";
+import { DEFAULT_WORLD_URL } from "../places/place";
 import { VOXEL_GRASS, VOXEL_DIRT } from "../world/voxel-store";
+
+const PLACE = "at://did:plc:abc/app.bms.voxelscape.place/myplace";
 
 const layerWith = (
   entries: Array<[[number, number, number], number, number]>,
@@ -38,9 +42,10 @@ describe("edit chunk mapping", () => {
   it("reassembles record-local edits back to world voxels", () => {
     const record: EditChunkRecord = {
       $type: EDIT_COLLECTION,
+      version: 1,
       chunk: { x: 2, y: -1, z: 0 },
       seed: null,
-      place: null,
+      place: PLACE,
       createdAt: "2026-01-01T00:00:00Z",
       edits: [{ x: 5, y: 10, z: 20, id: VOXEL_GRASS }],
     };
@@ -62,16 +67,15 @@ describe("groupEditsByChunk", () => {
     const groups = groupEditsByChunk(
       layer.snapshot(),
       54321,
-      "at://did:plc:abc/app.bms.voxelscape.place/myplace",
+      PLACE,
       "2026-05-05T00:00:00Z",
     );
     expect(groups.size).toBe(2);
     const first = groups.get(chunkKey({ x: 0, y: 0, z: 0 }))!;
     expect(first.$type).toBe(EDIT_COLLECTION);
+    expect(first.version).toBe(1);
     expect(first.seed).toBe(54321);
-    expect(first.place).toBe(
-      "at://did:plc:abc/app.bms.voxelscape.place/myplace",
-    );
+    expect(first.place).toBe(PLACE);
     expect(first.createdAt).toBe("2026-05-05T00:00:00Z");
     expect(first.edits).toContainEqual({
       x: 1,
@@ -97,7 +101,7 @@ describe("groupEditsByChunk", () => {
     const groups = groupEditsByChunk(
       layer.snapshot(),
       null,
-      null,
+      PLACE,
       "2026-01-01T00:00:00Z",
     );
     const rec = groups.get(chunkKey({ x: 0, y: 0, z: 0 }))!;
@@ -125,7 +129,7 @@ describe("groupEditsByChunk", () => {
     const groups = groupEditsByChunk(
       layer.snapshot(),
       null,
-      null,
+      PLACE,
       "2026-01-01T00:00:00Z",
     );
     const rec = groups.get(chunkKey({ x: 0, y: 0, z: 0 }))!;
@@ -172,9 +176,10 @@ describe("recordsToEntries + mergeIntoLayer", () => {
   const records: EditChunkRecord[] = [
     {
       $type: EDIT_COLLECTION,
+      version: 1,
       chunk: { x: 0, y: 0, z: 0 },
       seed: 1,
-      place: null,
+      place: PLACE,
       createdAt: "2026-01-01T00:00:00.000Z",
       edits: [
         { x: 0, y: 0, z: 0, id: VOXEL_GRASS },
@@ -221,9 +226,10 @@ describe("recordsToEntries + mergeIntoLayer", () => {
   it("prefers a record's per-edit ts over the record createdAt", () => {
     const withTs: EditChunkRecord = {
       $type: EDIT_COLLECTION,
+      version: 1,
       chunk: { x: 0, y: 0, z: 0 },
       seed: 1,
-      place: null,
+      place: PLACE,
       // createdAt is much older than the per-edit ts, to prove ts wins.
       createdAt: "2020-01-01T00:00:00.000Z",
       edits: [{ x: 0, y: 0, z: 0, id: VOXEL_GRASS, ts: 2_000_000_000_000 }],
@@ -238,22 +244,39 @@ describe("recordsToEntries + mergeIntoLayer", () => {
       Date.parse("2026-01-01T00:00:00.000Z"),
     );
   });
+});
 
-  it("flattens a record written before `place` existed", () => {
-    const legacy: EditChunkRecord = {
+describe("parseEditChunkRecord", () => {
+  it("upgrades a record written before `version` or `place` existed to the default world", () => {
+    const legacy = {
       $type: EDIT_COLLECTION,
       chunk: { x: 0, y: 0, z: 0 },
       seed: 1,
       createdAt: "2026-01-01T00:00:00.000Z",
       edits: [{ x: 0, y: 0, z: 0, id: VOXEL_GRASS }],
     };
-    const entries = recordsToEntries([legacy]);
-    expect(entries).toContainEqual({
-      w: [0, 0, 0],
-      edit: {
-        id: VOXEL_GRASS,
-        updatedAt: Date.parse("2026-01-01T00:00:00.000Z"),
-      },
+    expect(parseEditChunkRecord(legacy)).toEqual({
+      ...legacy,
+      version: 1,
+      place: DEFAULT_WORLD_URL,
     });
+  });
+
+  it("reads a current-shape record as itself", () => {
+    const current: EditChunkRecord = {
+      $type: EDIT_COLLECTION,
+      version: 1,
+      chunk: { x: 0, y: 0, z: 0 },
+      seed: 1,
+      place: PLACE,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      edits: [{ x: 0, y: 0, z: 0, id: VOXEL_GRASS }],
+    };
+    expect(parseEditChunkRecord(current)).toEqual(current);
+  });
+
+  it("rejects a value that isn't an edit chunk record at all", () => {
+    expect(parseEditChunkRecord(null)).toBeNull();
+    expect(parseEditChunkRecord({ $type: "something.else" })).toBeNull();
   });
 });

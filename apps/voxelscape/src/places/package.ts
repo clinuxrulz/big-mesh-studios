@@ -8,7 +8,7 @@ import {
   isPlaceManifest,
   PLACE_MANIFEST_FILE,
   type PlaceManifest,
-} from "./place";
+} from "./place.ts";
 
 /**
  * Reads and validates the manifest at the root of `blob`.

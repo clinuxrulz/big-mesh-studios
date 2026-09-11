@@ -93,11 +93,11 @@ export interface MultiplayerParams {
   /** Terrain seed, written into presence records so peers sanity-check the world. */
   seed: number | null;
   /**
-   * What place this session is in — an `at://` address, a demo's synthetic
-   * id, or `null` for the default world — written into presence and used to
-   * keep peer selection from crossing between places.
+   * What place this session is in: a published place's `at://` address, or
+   * the default world's own fixed address — written into presence and used
+   * to keep peer selection from crossing between places.
    */
-  scope: string | null;
+  scope: string;
   /** The player's current pose, asked each publish/selection/send pass. */
   getPose: () => Pose;
   /**
@@ -157,7 +157,7 @@ export class MultiplayerController {
   private readonly getRepoClient: () => AtprotoRepoClient | undefined;
   private readonly getDid: () => string | null;
   private readonly seed: number | null;
-  private readonly scope: string | null;
+  private readonly scope: string;
   private readonly getPose: () => Pose;
   private readonly createSignaling: SignalingFactory;
   private readonly relay: string;
@@ -528,9 +528,7 @@ export class MultiplayerController {
     lines.push(
       `did: ${this.getDid() ?? "none"}  joinCode: ${
         this.joinCode ?? "none"
-      }  relay: ${this.relay}  seed: ${this.seed ?? "none"}  scope: ${
-        this.scope ?? "none"
-      }`,
+      }  relay: ${this.relay}  seed: ${this.seed ?? "none"}  scope: ${this.scope}`,
     );
 
     const discovery = this.lastDiscovery;

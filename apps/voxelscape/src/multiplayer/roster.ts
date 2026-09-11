@@ -16,7 +16,7 @@ export interface RosterEntry {
   y: number;
   z: number;
   /** What place this player is in, as their presence declared it. */
-  scope: string | null;
+  scope: string;
   /** The player's signaling join code, if their presence carried one. */
   joinCode?: string;
   /** Milliseconds since epoch. */
@@ -32,7 +32,7 @@ export const rosterFromPresences = (
     x: record.x,
     y: record.y,
     z: record.z,
-    scope: record.scope ?? null,
+    scope: record.scope,
     ...(record.joinCode !== undefined ? { joinCode: record.joinCode } : {}),
     updatedAt: record.updatedAt,
   }));
@@ -63,7 +63,7 @@ export interface ClusterInput {
   selfX: number;
   selfZ: number;
   /** What place this player is in; only roster entries in the same place are selected. */
-  selfScope: string | null;
+  selfScope: string;
   roster: RosterEntry[];
   /** Milliseconds since epoch. */
   nowMs: number;

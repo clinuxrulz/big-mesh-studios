@@ -23,7 +23,7 @@ import {
   createHandleResolver,
   pdsEndpoint,
 } from "@big-mesh-studios/atproto/identity";
-import { readPlaceZip } from "../places/package";
+import { readPlaceZip } from "../places/package.ts";
 import {
   isPlaceRecord,
   makePlaceRecord,
@@ -34,7 +34,7 @@ import {
   PLACE_MIME_TYPE,
   type PlaceRecord,
   type PublishedPlace,
-} from "../places/place";
+} from "../places/place.ts";
 import { blobUrl } from "@big-mesh-studios/stacker/lexicon";
 
 /** Where an account's place records are: which account a name means, which server holds it. */

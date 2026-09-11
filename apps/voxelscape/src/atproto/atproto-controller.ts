@@ -9,7 +9,6 @@ import {
   createIdentityLookup,
   type IdentityLookup,
 } from "@big-mesh-studios/atproto/identity";
-import { listAllRecords } from "@big-mesh-studios/atproto/repo-client";
 import type {
   AtprotoBlobClient,
   AtprotoRepoClient,
@@ -21,14 +20,13 @@ import {
 } from "@big-mesh-studios/atproto/session";
 import { createBrowserSessionStore } from "@big-mesh-studios/atproto/session-store";
 import type { EditLayer } from "../world/edit-layer";
-import { fetchSharedEditRecords } from "./constellation";
+import { fetchPlaceEditRecords } from "./constellation";
 import {
   EDIT_COLLECTION,
   groupEditsByChunk,
   makeRkey,
   mergeIntoLayer,
   recordsToEntries,
-  type EditChunkRecord,
 } from "./edits";
 import * as oauth from "./oauth";
 
@@ -48,7 +46,7 @@ export type AtpStatus = SessionStatus;
 export class AtprotoController {
   private readonly layer: EditLayer;
   private readonly seed: number | null;
-  private readonly place: string | null;
+  private readonly place: string;
   private readonly editScope: "self" | "everyone";
   private readonly onMerged: (changed: number) => void;
   private readonly handleInput: () => string;
@@ -61,8 +59,8 @@ export class AtprotoController {
   constructor(params: {
     layer: EditLayer;
     seed: number | null;
-    /** What place this world is; `null` for the default world. */
-    place: string | null;
+    /** What place this world is: a published place's `at://` address, or the default world's own fixed address. */
+    place: string;
     /**
      * Whether an `/account:sync` merges only the signed-in account's own edit
      * records (`"self"`) or every account's edit records for `place` too
@@ -219,69 +217,72 @@ export class AtprotoController {
     }
   }
 
+  /**
+   * Uploading is the one half of a sync that genuinely needs an account —
+   * it writes into that account's own repo. Reading is public: a `place`'s
+   * `multi:edit` records are found through Constellation and fetched
+   * straight from their owners' repos, neither of which needs a session.
+   * Only `self` scope needs to know who "self" is, so that half of a read
+   * still waits on being signed in.
+   */
   private async runSync(): Promise<string> {
     const client = this.session.repoClient;
     const repo = this.session.state.did;
-    if (client === undefined || repo === null) {
-      return "not connected — use /account:login first";
-    }
     const messages: string[] = [];
 
-    const groups = groupEditsByChunk(
-      this.layer
-        .snapshot()
-        .filter(({ edit }) => edit.updatedAt > this.lastUploadAt),
-      this.seed,
-      this.place,
-      new Date().toISOString(),
-    );
-    for (const record of groups.values()) {
-      try {
-        await client.putRecord({
-          repo,
-          collection: EDIT_COLLECTION,
-          rkey: makeRkey(this.place, record.chunk),
-          record,
-        });
-      } catch (err) {
-        return `account error: ${err instanceof Error ? err.message : String(err)}`;
+    if (client !== undefined && repo !== null) {
+      const groups = groupEditsByChunk(
+        this.layer
+          .snapshot()
+          .filter(({ edit }) => edit.updatedAt > this.lastUploadAt),
+        this.seed,
+        this.place,
+        new Date().toISOString(),
+      );
+      for (const record of groups.values()) {
+        try {
+          await client.putRecord({
+            repo,
+            collection: EDIT_COLLECTION,
+            rkey: makeRkey(this.place, record.chunk),
+            record,
+          });
+        } catch (err) {
+          return `account error: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      }
+      if (groups.size > 0) {
+        this.lastUploadAt = Date.now();
+        try {
+          localStorage.setItem(
+            "bms.atproto.lastUploadAt",
+            String(this.lastUploadAt),
+          );
+        } catch {
+          // persistence is best-effort; a resync only re-uploads records
+        }
+        messages.push(`uploaded ${groups.size} edit chunk(s)`);
       }
     }
-    if (groups.size > 0) {
-      this.lastUploadAt = Date.now();
-      try {
-        localStorage.setItem(
-          "bms.atproto.lastUploadAt",
-          String(this.lastUploadAt),
-        );
-      } catch {
-        // persistence is best-effort; a resync only re-uploads records
-      }
-      messages.push(`uploaded ${groups.size} edit chunk(s)`);
+
+    // `dids` narrows a fetch to one account for `self` scope, which only
+    // makes sense once that account is known; `null` skips the fetch
+    // entirely rather than asking for "every account" when what was meant
+    // was "whichever one is signed in, once it is".
+    const dids =
+      this.editScope === "self" ? (repo !== null ? [repo] : null) : undefined;
+    if (dids !== null) {
+      const fetched = await fetchPlaceEditRecords(this.place, dids);
+      const changed = mergeIntoLayer(this.layer, recordsToEntries(fetched));
+      this.onMerged(changed);
+      messages.push(
+        `fetched ${fetched.length} remote record(s), ${changed} voxel(s) updated`,
+      );
     }
 
-    const fetched = (
-      await listAllRecords(client, { repo, collection: EDIT_COLLECTION })
-    )
-      .map(({ value }) => value as EditChunkRecord)
-      .filter((value) => value?.$type === EDIT_COLLECTION);
-
-    // A `multi:edit` place's shared edits live in every account that made
-    // one, not just this one — Constellation finds exactly those, without
-    // walking every account's edits to every place they've ever touched.
-    const shared =
-      this.editScope === "everyone" && this.place !== null
-        ? await fetchSharedEditRecords(this.place, repo)
-        : [];
-
-    const changed = mergeIntoLayer(
-      this.layer,
-      recordsToEntries([...fetched, ...shared]),
-    );
-    this.onMerged(changed);
-    messages.push(
-      `fetched ${fetched.length + shared.length} remote record(s), ${changed} voxel(s) updated`,
-    );
+    if (messages.length === 0) {
+      return "not connected — sign in to save or share edits here; this place's shared edits still merge in on their own";
+    }
     return messages.join(", ");
   }
 

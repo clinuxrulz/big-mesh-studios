@@ -3,6 +3,9 @@
 // as one custom record in the user's repo. Chunking by absolute voxel (not by
 // which ring block held them) keeps a record addressable by location, so any
 // client can resolve it onto its own regenerated terrain.
+import * as lex from "@atcute/lexicons/validations";
+import { versionedRecord } from "@big-mesh-studios/atproto/migration";
+import { DEFAULT_WORLD_URL } from "../places/place";
 import type { WorldVoxel, VoxelEdit } from "../world/edit-layer";
 
 // `mergeIntoLayer` moved into `edit-layer.ts` with the overlay it operates on,
@@ -15,48 +18,78 @@ export const EDIT_CHUNK_DIM = 32;
 /** The atproto record collection for edit chunks. */
 export const EDIT_COLLECTION = "app.bms.voxelscape.edit";
 
-export interface EditChunkCoord {
-  x: number;
-  y: number;
-  z: number;
-}
+const EditChunkCoordSchema = lex.object({
+  x: lex.integer(),
+  y: lex.integer(),
+  z: lex.integer(),
+});
+export type EditChunkCoord = lex.InferOutput<typeof EditChunkCoordSchema>;
 
+const EditChunkEditSchema = lex.object({
+  x: lex.integer(),
+  y: lex.integer(),
+  z: lex.integer(),
+  id: lex.integer(),
+  // Milliseconds since epoch when the edit was made, matching the WebRTC
+  // optimistic path's `EditItem`. Absent on a record written before this
+  // field existed, whose entries fall back to the record's `createdAt`.
+  ts: lex.optional(lex.integer()),
+});
 /** One edit inside a chunk record: the voxel's new id plus when it was made. */
-export type EditChunkEdit = {
-  x: number;
-  y: number;
-  z: number;
-  id: number;
-  /**
-   * Milliseconds since epoch when the edit was made (per-edit, matching the
-   * WebRTC optimistic path's `EditItem`). Absent on records written before
-   * this field existed, whose entries fall back to the record's `createdAt`.
-   */
-  ts?: number;
-};
+export type EditChunkEdit = lex.InferOutput<typeof EditChunkEditSchema>;
 
 /**
- * One edit record: a sparse list of voxel ids inside one 32³ chunk. Declared
- * as a type alias rather than an interface so it stays assignable to the
- * `Record<string, unknown>` an atproto record body is typed as — TypeScript
- * infers an implicit index signature for the one and not the other.
+ * An edit-chunk record's shape before it carried a `version` or a `place` of
+ * its own — every world was implicitly the default world back then, since
+ * places didn't yet have an identity to belong to.
  */
-export type EditChunkRecord = {
-  $type: typeof EDIT_COLLECTION;
-  chunk: EditChunkCoord;
-  /** Terrain seed the world was generated with, for reproducible base terrain. */
-  seed: number | null;
-  /**
-   * The place this chunk belongs to — an `at://` address, a demo's synthetic
-   * id, or `null` for the default world — so a `multi:edit` place's other
-   * players can find exactly the edits made to it, rather than every edit
-   * this account has ever made anywhere. Absent on a record written before
-   * this existed, which reads the same as `null`: the default world.
-   */
-  place?: string | null;
-  createdAt: string;
-  edits: EditChunkEdit[];
-};
+const EditChunkRecordV0Schema = lex.object({
+  $type: lex.literal(EDIT_COLLECTION),
+  chunk: EditChunkCoordSchema,
+  seed: lex.nullable(lex.integer()),
+  place: lex.optional(lex.nullable(lex.genericUriString())),
+  createdAt: lex.datetimeString(),
+  edits: lex.array(EditChunkEditSchema),
+});
+
+const EditChunkRecordV1Schema = lex.object({
+  $type: lex.literal(EDIT_COLLECTION),
+  version: lex.literal(1),
+  chunk: EditChunkCoordSchema,
+  seed: lex.nullable(lex.integer()),
+  place: lex.genericUriString(),
+  createdAt: lex.datetimeString(),
+  edits: lex.array(EditChunkEditSchema),
+});
+
+/**
+ * One edit record, at the shape every record is written as today: a sparse
+ * list of voxel ids inside one 32³ chunk of a named place. `place` is always
+ * a real, link-shaped address — the default world's own fixed one, or a
+ * published place's `at://` address — never absent, so a backlink index can
+ * always find every account's edits to it.
+ */
+export type EditChunkRecord = lex.InferOutput<typeof EditChunkRecordV1Schema>;
+
+/**
+ * Every shape this record has ever been written in, and how each becomes the
+ * next. A record with no `place` of its own belonged to the default world,
+ * since that was the only world there was before places existed.
+ */
+const editChunkRecordMigration = versionedRecord(
+  EditChunkRecordV0Schema,
+).upgradesTo(EditChunkRecordV1Schema, (v0): EditChunkRecord => ({
+  ...v0,
+  version: 1,
+  place: v0.place ?? DEFAULT_WORLD_URL,
+}));
+
+/**
+ * Reads `value` as an edit-chunk record at whichever version it was written,
+ * upgraded to the shape every caller wants. Null when it isn't one.
+ */
+export const parseEditChunkRecord = (value: unknown): EditChunkRecord | null =>
+  editChunkRecordMigration.parse(value);
 
 export const chunkOf = (w: WorldVoxel): EditChunkCoord => ({
   x: Math.floor(w[0] / EDIT_CHUNK_DIM),
@@ -96,7 +129,7 @@ export const recordVoxel = (
 export const groupEditsByChunk = (
   entries: Array<{ w: WorldVoxel; edit: VoxelEdit }>,
   seed: number | null,
-  place: string | null,
+  place: string,
   createdAt: string,
 ): Map<string, EditChunkRecord> => {
   const groups = new Map<string, EditChunkRecord>();
@@ -107,9 +140,14 @@ export const groupEditsByChunk = (
     if (record === undefined) {
       record = {
         $type: EDIT_COLLECTION,
+        version: 1,
         chunk: c,
         seed,
-        place,
+        // Every caller passes either the default world's fixed address or a
+        // published place's own `at://` address, both genuinely link-shaped
+        // — the schema's stricter type just isn't provable from a plain
+        // `string` parameter.
+        place: place as EditChunkRecord["place"],
         createdAt,
         edits: [],
       };
@@ -141,8 +179,8 @@ const hashPlace = (s: string): string => {
  * chunk coordinates, so re-uploading the same chunk overwrites the record
  * already there instead of leaving an earlier upload behind it.
  */
-export const makeRkey = (place: string | null, c: EditChunkCoord): string =>
-  `e_${hashPlace(place ?? "default")}_${c.x}_${c.y}_${c.z}`;
+export const makeRkey = (place: string, c: EditChunkCoord): string =>
+  `e_${hashPlace(place)}_${c.x}_${c.y}_${c.z}`;
 
 /**
  * Flattens records from a repo back into overlay snapshot entries ready to

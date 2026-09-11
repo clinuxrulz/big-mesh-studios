@@ -4,3 +4,4 @@ dist
 dist-bench
 dist-lib
 .ssr
+**/.session.json

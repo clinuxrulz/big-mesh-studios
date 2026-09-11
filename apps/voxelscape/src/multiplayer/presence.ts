@@ -28,13 +28,11 @@ export interface PresenceRecord {
   /** Terrain seed the world was generated with; peers sanity-check they share the same world. */
   seed: number | null;
   /**
-   * What place this player is in — an `at://` address, a demo's synthetic
-   * id, or `null` for the default world — so peer selection can keep two
+   * What place this player is in: a published place's `at://` address, or
+   * the default world's own fixed address — so peer selection can keep two
    * different places apart even when their coordinates happen to coincide.
-   * Absent on a record written before this existed, which reads the same as
-   * `null`: the default world's own pool.
    */
-  scope?: string | null;
+  scope: string;
   /**
    * This player's signaling-server join code (the PeerJS id); peers connect
    * to them by it. Absent until this session's signaling has registered.
@@ -49,7 +47,7 @@ export const makePresence = (
   y: number,
   z: number,
   seed: number | null,
-  scope: string | null,
+  scope: string,
   updatedAt: number,
   joinCode?: string,
 ): PresenceRecord => ({
@@ -74,9 +72,7 @@ export const isPresenceRecord = (v: unknown): v is PresenceRecord => {
     typeof r.y === "number" &&
     typeof r.z === "number" &&
     (r.seed === null || typeof r.seed === "number") &&
-    (r.scope === undefined ||
-      r.scope === null ||
-      typeof r.scope === "string") &&
+    typeof r.scope === "string" &&
     (r.joinCode === undefined || typeof r.joinCode === "string") &&
     typeof r.updatedAt === "number"
   );

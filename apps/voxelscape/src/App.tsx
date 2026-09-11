@@ -12,7 +12,7 @@ import { useNavigate, useParams } from "@solidjs/router";
 import styles from "./App.module.css";
 import { createPlaceLibrary } from "./atproto/places";
 import { builtinDemo, loadBuiltinDemo } from "./places/demos";
-import { placeAtUri, type PlaceMode } from "./places/place";
+import { DEFAULT_WORLD_URL, placeAtUri, type PlaceMode } from "./places/place";
 import { readPlaceProject, type PlaceProject } from "./places/project";
 import { compilePlacePlan, planRegionAround } from "./places/plan";
 import { DEFAULT_TERRAIN, type TerrainConfig } from "./world/noise";
@@ -41,28 +41,40 @@ import {
 const NOTICE_SECONDS = 6;
 
 /**
- * How the world is built this session: a published place's world when the
- * address bar named one, and the default world otherwise.
+ * The account and place name that plays at the site's own root address —
+ * so what the default world is, and who it's owned by, is a place like any
+ * other rather than terrain baked into the app itself.
+ */
+const HOME_PLACE_HANDLE = "bigmesh.eurosky.social";
+const HOME_PLACE_NAME = "home";
+
+/**
+ * How the world is built this session: always a published place's world —
+ * the address bar's own, or `HOME_PLACE_HANDLE`/`HOME_PLACE_NAME`'s when the
+ * address bar names none — except when that place can't be reached, which
+ * falls back to a procedural world with every field below left unset.
  */
 interface LaunchConfig {
-  /** A place's terrain seed; omitted for the default world. */
+  /** A place's terrain seed; omitted only on the fallback procedural world. */
   terrain?: TerrainConfig;
-  /** A place's spawn point; omitted for the default world. */
+  /** A place's spawn point; omitted only on the fallback procedural world. */
   spawn?: Dim3;
   /** The structures a place's script asks the filler to stamp into every chunk. */
   structures?: StructurePlan;
-  /** The place's scripts to run from boot; omitted for the default world. */
+  /** The place's scripts to run from boot; omitted only on the fallback procedural world. */
   place?: PlaceBoot;
   /**
-   * How this place handles other players and their edits; omitted for the
-   * default world and for a place published before modes existed, both of
-   * which keep today's behaviour rather than being migrated onto one.
+   * How this place handles other players and their edits; omitted on the
+   * fallback procedural world and for a place published before modes
+   * existed, both of which keep today's behaviour rather than being
+   * migrated onto one.
    */
   mode?: PlaceMode;
   /**
    * What this world is, for scoping multiplayer and edits to it: a place's
-   * `at://` address, a demo's own synthetic `demo:<id>`, or omitted for the
-   * default world (which stays in the one unscoped pool it always has).
+   * `at://` address, a demo's own synthetic address, or omitted only on the
+   * fallback procedural world (which stays in the one unscoped pool it
+   * always has).
    */
   placeUri?: string;
   /** One line about how this world was chosen, toasted once it exists. */
@@ -349,7 +361,7 @@ const App: Component<{}> = () => {
             const config = await buildLaunch(
               await loadBuiltinDemo(demo),
               `playing the demo "${demo.name}"`,
-              `demo:${demo.id}`,
+              `${DEFAULT_WORLD_URL}#/demos/${demo.id}`,
             );
             if (current) {
               setLaunch(config);
@@ -365,17 +377,18 @@ const App: Component<{}> = () => {
           return;
         }
 
-        if (handle === undefined || worldName === undefined) {
-          if (current) {
-            setLaunch({});
-          }
-          return;
-        }
+        // No address bar params names the site's own home place, not a
+        // hardcoded procedural world — so root, `/:handle/:worldName`, and
+        // `/demos/:id` all boot through the same place-fetching path.
+        const [joinHandle, joinName] =
+          handle === undefined || worldName === undefined
+            ? [HOME_PLACE_HANDLE, HOME_PLACE_NAME]
+            : [handle, worldName];
         if (current) {
-          setJoiningLine(`joining ${handle}/${worldName}…`);
+          setJoiningLine(`joining ${joinHandle}/${joinName}…`);
         }
         try {
-          const place = await places.find(handle, worldName);
+          const place = await places.find(joinHandle, joinName);
           if (current) {
             setJoiningLine("opening the place's scripts…");
           }
@@ -392,7 +405,10 @@ const App: Component<{}> = () => {
           if (current) {
             setJoiningLine(`could not join — ${detail}`);
             setLaunch({
-              notice: `could not join ${handle}/${worldName} (${detail}) — playing this world instead`,
+              notice:
+                handle === undefined || worldName === undefined
+                  ? `could not load the default world (${detail}) — playing a procedural one instead`
+                  : `could not join ${handle}/${worldName} (${detail}) — playing this world instead`,
             });
           }
         }

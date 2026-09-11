@@ -5,13 +5,13 @@
 // way wherever they are asked, so a stranger's handle is held to exactly the
 // standard your own was when you typed it.
 import type { Did, Handle } from "@atcute/lexicons";
-import { confirmHandle } from "./handles";
+import { confirmHandle } from "./handles.ts";
 import {
   PROFILE_COLLECTION,
   PROFILE_RKEY,
   pictureBlobCid,
   pictureBlobUrl,
-} from "./profile";
+} from "./profile.ts";
 import {
   CompositeDidDocumentResolver,
   CompositeHandleResolver,

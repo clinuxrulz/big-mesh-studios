@@ -19,7 +19,7 @@ import {
 } from "../atproto/models";
 import { createPlaceLibrary, createPlacePublisher } from "../atproto/places";
 import type { PlaceLibrary, PlacePublisher } from "../atproto/places";
-import type { PlaceMode } from "../places/place";
+import { DEFAULT_WORLD_URL, type PlaceMode } from "../places/place";
 import type { ScriptConsole } from "../places/script-console";
 import { VoxelFigures } from "../places/voxel-figures";
 import { createEndingLog, endingLogKey } from "../places/ending-log";
@@ -326,7 +326,7 @@ export const createVoxelscape = ({
   structures,
   place,
   mode,
-  placeUri,
+  placeUri = DEFAULT_WORLD_URL,
   spawn = [0, 0, 0],
   modelAccount = WORLD_MODEL_ACCOUNT,
   debugPerf: initialDebugPerf = __PERF__ &&
@@ -686,7 +686,7 @@ export const createVoxelscape = ({
   const atproto = new AtprotoController({
     layer: world.editLayer,
     seed: terrain.seed,
-    place: placeUri ?? null,
+    place: placeUri,
     editScope,
     getHandle: () => "",
     onMerged: (changed) => {
@@ -701,9 +701,9 @@ export const createVoxelscape = ({
       }
       monsterSync.start();
       updateEditingEnabled();
-      // Fires both for a fresh /account:login and for a restored session on
-      // every place this account opens signed in, so edits merge in without
-      // waiting for the player to remember /account:sync.
+      // Signing in unlocks the upload and self-scoped-read halves of a sync
+      // that don't run without an account; the shared-read half already ran
+      // once at boot below, and runs again here too, harmlessly.
       void atproto.sync();
       // Their own cube wears the face peers see, which is how they check it.
       void atproto
@@ -724,12 +724,16 @@ export const createVoxelscape = ({
     },
   });
   updateEditingEnabled();
+  // A `multi:edit` place's shared edits are public reads, needing no account,
+  // so this runs before anyone has signed in rather than waiting for
+  // `/account:sync` or a connected session to remember to ask for them.
+  void atproto.sync();
 
   const multiplayer = new MultiplayerController({
     getRepoClient: () => atproto.repoClient,
     getDid: () => atproto.did,
     seed: terrain.seed,
-    scope: placeUri ?? null,
+    scope: placeUri,
     getPose: () => ({
       x: avatar.player.position.x,
       y: avatar.player.position.y,
