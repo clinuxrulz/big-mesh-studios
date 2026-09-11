@@ -4,6 +4,7 @@
     "jsxImportSource": "@solidjs/web",
     "target": "ESNext",
     "allowSyntheticDefaultImports": true,
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "isolatedModules": true,
     "module": "ESNext",
