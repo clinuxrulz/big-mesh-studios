@@ -28,7 +28,10 @@ export type EffectTag =
   | "time"
   | "timer"
   | "player-place"
-  | "player-face";
+  | "player-face"
+  | "player-speed"
+  | "player-jump"
+  | "explosion";
 
 /** The furthest an NPC or prop may stand from the origin, in world units. */
 export const MAX_NPC_COORD = 1_000_000;
@@ -69,6 +72,10 @@ export const MAX_ENDING_TEXT = 1_000;
 export const MAX_NARRATION = 500;
 /** The furthest ahead, in milliseconds, a timer may be set. */
 export const MAX_TIMER_MS = 86_400_000;
+/** The largest multiplier a script may apply to a player's move speed or jump. */
+export const MAX_PLAYER_MULTIPLIER = 100;
+/** The widest an explosion may read, in world units. */
+export const MAX_EXPLOSION_RADIUS = 64;
 
 export type ParsedEffect =
   | {
@@ -206,6 +213,35 @@ export type ParsedEffect =
         /** The world point the player is turned to look at, in world units. */
         x: number;
         z: number;
+      };
+    }
+  | {
+      tag: "player-speed";
+      payload: {
+        player: string;
+        /** What to multiply the player's walk speed by; 0.01 is a crawl. */
+        multiplier: number;
+      };
+    }
+  | {
+      tag: "player-jump";
+      payload: {
+        player: string;
+        /** What to multiply the player's jump speed by. */
+        multiplier: number;
+      };
+    }
+  | {
+      tag: "explosion";
+      payload: {
+        id: string;
+        /** The blast's centre, in world units; the host grounds it. */
+        x: number;
+        z: number;
+        /** The centre height in world units; defaults to the ground. */
+        y?: number;
+        /** How wide the blast reads, in world units; defaults to 4. */
+        radius?: number;
       };
     };
 
@@ -362,6 +398,27 @@ const isPayload = (tag: EffectTag, value: unknown): boolean => {
       );
     case "player-face":
       return isPlayer(p.player) && isCoord(p.x) && isCoord(p.z);
+    case "player-speed":
+    case "player-jump":
+      return (
+        isPlayer(p.player) &&
+        typeof p.multiplier === "number" &&
+        Number.isFinite(p.multiplier) &&
+        p.multiplier > 0 &&
+        p.multiplier <= MAX_PLAYER_MULTIPLIER
+      );
+    case "explosion":
+      return (
+        isShort(p.id, 64) &&
+        isCoord(p.x) &&
+        isCoord(p.z) &&
+        (p.y === undefined || isCoord(p.y)) &&
+        (p.radius === undefined ||
+          (typeof p.radius === "number" &&
+            Number.isFinite(p.radius) &&
+            p.radius > 0 &&
+            p.radius <= MAX_EXPLOSION_RADIUS))
+      );
   }
 };
 

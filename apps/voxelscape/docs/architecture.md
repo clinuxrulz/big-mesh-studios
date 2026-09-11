@@ -1,22 +1,22 @@
 # What voxelscape is made of
 
-Drawn from the imports under `src` at 0b06bf0 by `pnpm architecture`.
+Drawn from the imports under `src` at 1d18928 by `pnpm architecture`.
 Nothing here is written by hand: change the code and run it again.
 
 ```mermaid
 graph TD
-  shell["shell<br/>5 files · 1545 lines"]
-  voxelscape["voxelscape<br/>3 files · 1470 lines"]
-  world["world<br/>23 files · 6238 lines"]
-  renderers["renderers<br/>13 files · 4720 lines"]
-  render["render<br/>4 files · 1129 lines"]
-  player["player<br/>15 files · 3207 lines"]
+  shell["shell<br/>6 files · 1830 lines"]
+  voxelscape["voxelscape<br/>3 files · 2037 lines"]
+  world["world<br/>26 files · 6684 lines"]
+  renderers["renderers<br/>15 files · 5424 lines"]
+  render["render<br/>4 files · 1133 lines"]
+  player["player<br/>16 files · 3318 lines"]
   monsters["monsters<br/>6 files · 1638 lines"]
   multiplayer["multiplayer<br/>13 files · 3109 lines"]
-  places["places<br/>15 files · 2307 lines"]
-  environment["environment<br/>6 files · 1796 lines"]
+  places["places<br/>21 files · 6223 lines"]
+  environment["environment<br/>6 files · 1798 lines"]
   atproto["atproto<br/>8 files · 1303 lines"]
-  ui["ui<br/>13 files · 1749 lines"]
+  ui["ui<br/>13 files · 1894 lines"]
   atproto --> monsters
   atproto --> places
   atproto --> world
@@ -71,18 +71,18 @@ graph TD
 
 | area          | what it is for                                                         | files | lines |
 | ------------- | ---------------------------------------------------------------------- | ----- | ----- |
-| `shell`       | the page, the console, and what wires a world into them                | 5     | 1545  |
-| `voxelscape`  | one world: its frame, and every part below it                          | 3     | 1470  |
-| `world`       | voxels, light, the streaming window, and the workers that fill it      | 23    | 6238  |
-| `renderers`   | turning voxels into geometry, and drawing it                           | 13    | 4720  |
-| `render`      | the frame loop, the resolution scaler, and the probe that times them   | 4     | 1129  |
-| `player`      | the body, its input, its tools and what they do to the world           | 15    | 3207  |
+| `shell`       | the page, the console, and what wires a world into them                | 6     | 1830  |
+| `voxelscape`  | one world: its frame, and every part below it                          | 3     | 2037  |
+| `world`       | voxels, light, the streaming window, and the workers that fill it      | 26    | 6684  |
+| `renderers`   | turning voxels into geometry, and drawing it                           | 15    | 5424  |
+| `render`      | the frame loop, the resolution scaler, and the probe that times them   | 4     | 1133  |
+| `player`      | the body, its input, its tools and what they do to the world           | 16    | 3318  |
 | `monsters`    | what wanders the world and fights the player                           | 6     | 1638  |
 | `multiplayer` | other players, over a peer connection                                  | 13    | 3109  |
-| `places`      | a published place: its script, its people, and the sandbox they run in | 15    | 2307  |
-| `environment` | the sky, the clock, the weather and the sound                          | 6     | 1796  |
+| `places`      | a published place: its script, its people, and the sandbox they run in | 21    | 6223  |
+| `environment` | the sky, the clock, the weather and the sound                          | 6     | 1798  |
 | `atproto`     | being signed in, and reading and writing published records             | 8     | 1303  |
-| `ui`          | what is drawn over the world in the page                               | 13    | 1749  |
+| `ui`          | what is drawn over the world in the page                               | 13    | 1894  |
 
 ## What reaches into what
 
@@ -99,7 +99,7 @@ graph TD
 | `multiplayer` | `player`      | 1                |
 | `places`      | `environment` | 1                |
 | `places`      | `monsters`    | 1                |
-| `places`      | `world`       | 1                |
+| `places`      | `world`       | 4                |
 | `player`      | `environment` | 1                |
 | `player`      | `monsters`    | 2                |
 | `player`      | `renderers`   | 1                |
@@ -107,7 +107,7 @@ graph TD
 | `player`      | `world`       | 7                |
 | `renderers`   | `environment` | 1                |
 | `renderers`   | `render`      | 2                |
-| `renderers`   | `world`       | 5                |
+| `renderers`   | `world`       | 7                |
 | `shell`       | `atproto`     | 4                |
 | `shell`       | `environment` | 2                |
 | `shell`       | `monsters`    | 1                |

@@ -124,6 +124,23 @@ describe("effect parsing", () => {
     expect(
       parseEffect(effect("player-face", { player: "", x: 1, z: 2 })),
     ).not.toBeNull();
+    expect(
+      parseEffect(effect("player-speed", { player: "", multiplier: 2 })),
+    ).toEqual({ tag: "player-speed", payload: { player: "", multiplier: 2 } });
+    expect(
+      parseEffect(effect("player-jump", { player: "", multiplier: 0.5 })),
+    ).toEqual({ tag: "player-jump", payload: { player: "", multiplier: 0.5 } });
+    expect(
+      parseEffect(
+        effect("explosion", { id: "boom", x: 10, z: 18, y: 62, radius: 6 }),
+      ),
+    ).toEqual({
+      tag: "explosion",
+      payload: { id: "boom", x: 10, z: 18, y: 62, radius: 6 },
+    });
+    expect(
+      parseEffect(effect("explosion", { id: "boom", x: 10, z: 18 })),
+    ).not.toBeNull();
     expect(parseEffect(effect("time", { seconds: 100 }))).not.toBeNull();
     expect(parseEffect(effect("time", { speed: 0 }))).not.toBeNull();
     expect(parseEffect(effect("time", { clear: true }))).not.toBeNull();
@@ -160,6 +177,16 @@ describe("effect parsing", () => {
       ["player-place", { player: "", x: 1 }],
       ["player-place", { player: "", x: 1, z: 2, yaw: "n" }],
       ["player-face", { player: "", x: 1 }],
+      ["player-speed", { player: "", multiplier: 0 }],
+      ["player-speed", { player: "", multiplier: 101 }],
+      ["player-speed", { player: "", multiplier: "2" }],
+      ["player-speed", { player: "" }],
+      ["player-jump", { player: "", multiplier: -1 }],
+      ["explosion", { id: "", x: 0, z: 0 }],
+      ["explosion", { id: "boom", x: 0 }],
+      ["explosion", { id: "boom", x: 0, z: 0, radius: 0 }],
+      ["explosion", { id: "boom", x: 0, z: 0, radius: 65 }],
+      ["explosion", { id: "boom", x: 0, z: 0, y: "up" }],
       ["prop", { id: "fridge", x: 0, z: 0 }],
       ["prop", { id: "fridge", model: "fridge.zip", x: 0, z: 0, height: 0 }],
       ["prop", { id: "fridge", model: "fridge.zip", x: 0, z: 0, yaw: "n" }],

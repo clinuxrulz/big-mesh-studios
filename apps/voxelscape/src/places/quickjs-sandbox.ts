@@ -59,6 +59,7 @@ class QuickJSSandbox implements ScriptSandbox {
     now: () => number;
     random: () => number;
     timeLimitMs: number;
+    endings?: () => string[];
   }) {
     this.runtime = params.runtime;
     this.context = params.context;
@@ -174,7 +175,7 @@ class QuickJSSandbox implements ScriptSandbox {
    */
   private installEngine(
     context: QuickJSContext,
-    time: { now: () => number },
+    time: { now: () => number; endings?: () => string[] },
   ): void {
     const engine = context.newObject();
     const bind = (
@@ -197,6 +198,9 @@ class QuickJSSandbox implements ScriptSandbox {
       return context.undefined;
     });
     bind("now", () => context.newNumber(time.now()));
+    bind("endings", () =>
+      context.newString(JSON.stringify(time.endings?.() ?? [])),
+    );
     // The block ids a plan or effect may name, keyed by the names the starter
     // script's own `engine` type declares, so a creator never hard-codes one.
     const blocks = context.newObject();
@@ -355,6 +359,8 @@ export const createQuickJSSandbox = async (params: {
   seed: number;
   /** The shared clock `Date.now` and `engine.now` answer from. */
   now: () => number;
+  /** The ending titles the place has already reached, read back by the script. */
+  endings?: () => string[];
   /** Longest one step may run before it is interrupted, in milliseconds. */
   timeLimitMs?: number;
   /** Most memory one interpreter may allocate, in bytes. */
@@ -374,5 +380,6 @@ export const createQuickJSSandbox = async (params: {
     now: params.now,
     random,
     timeLimitMs: params.timeLimitMs ?? 250,
+    endings: params.endings,
   });
 };

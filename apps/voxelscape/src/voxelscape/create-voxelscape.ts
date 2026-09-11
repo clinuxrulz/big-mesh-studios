@@ -21,7 +21,9 @@ import { createPlaceLibrary, createPlacePublisher } from "../atproto/places";
 import type { PlaceLibrary, PlacePublisher } from "../atproto/places";
 import type { ScriptConsole } from "../places/script-console";
 import { VoxelFigures } from "../places/voxel-figures";
+import { createEndingLog, endingLogKey } from "../places/ending-log";
 import { FireFigures } from "../renderers/fire-figures";
+import { ExplosionFigures } from "../renderers/explosion-figures";
 import { FireEmbers } from "../world/fire-ember";
 import { pickFigure, type AimTarget } from "../places/figure-pick";
 import type { DialogState } from "../places/script-host";
@@ -49,7 +51,11 @@ import { Hand } from "../player/hand";
 import { PlayerHealth } from "../player/health";
 import { Inventory } from "../player/inventory";
 import { ITEM_ORDER, ITEMS, type ItemId } from "../player/items";
-import type { Player, PlayerConfig } from "../player/player";
+import {
+  DEFAULT_PLAYER_CONFIG,
+  type Player,
+  type PlayerConfig,
+} from "../player/player";
 import { loadSpriteModel } from "../player/sprite-model";
 import type { Target, Tool, ToolContext } from "../player/tools/tool";
 import { BucketTool } from "../player/tools/bucket-tool";
@@ -495,6 +501,13 @@ export const createVoxelscape = ({
   // has placed and wearing the bundled model their id names. Nothing draws
   // until /script:demo loads a script that places them.
   let scriptConsole: ScriptConsole | null = null;
+  // The endings this place's game has already reached, kept in the page's own
+  // storage so a collecting game remembers them across a restart. A world with
+  // no place has no game to remember.
+  const endingLog =
+    place === undefined
+      ? null
+      : createEndingLog(endingLogKey(place.seed, place.entry));
   const npcFigures = new VoxelFigures({
     getFigures: () => scriptConsole?.npcs() ?? [],
     modelFor: (id) => {
@@ -519,6 +532,11 @@ export const createVoxelscape = ({
   // A scripted fire is its own particle flame, drawn from the same billboard
   // shader the bomb-bloom demo uses, with its ember kindled into the floor.
   const fireFigures = new FireFigures(() => scriptConsole?.fires() ?? []);
+  // A scripted blast is its own radial particle burst, drawn while its host
+  // record is fresh.
+  const explosionFigures = new ExplosionFigures(
+    () => scriptConsole?.explosions() ?? [],
+  );
   // The embers the fires kindle, kept so a restart can put the floor back.
   const fireEmbers = new FireEmbers(world.blocks, (indices) =>
     world.renderer.onBlocksChanged(indices),
@@ -747,6 +765,9 @@ export const createVoxelscape = ({
         onEnding: (player, state) => {
           if (player === "") {
             setEnding(state);
+            if (state !== null) {
+              endingLog?.record(state.title);
+            }
           }
         },
         onRestart: () => restartPlace(),
@@ -794,9 +815,23 @@ export const createVoxelscape = ({
           );
           avatar.place();
         },
+        onPlayerSpeed: (player, multiplier) => {
+          if (player !== "") {
+            return;
+          }
+          avatar.player.config.speed = DEFAULT_PLAYER_CONFIG.speed * multiplier;
+        },
+        onPlayerJump: (player, multiplier) => {
+          if (player !== "") {
+            return;
+          }
+          avatar.player.config.jumpSpeed =
+            DEFAULT_PLAYER_CONFIG.jumpSpeed * multiplier;
+        },
         onFire: (fire) => {
           fireEmbers.seed(fire);
         },
+        endings: () => endingLog?.seen() ?? [],
       });
     }
     return scriptConsole;
@@ -991,6 +1026,7 @@ export const createVoxelscape = ({
     npcFigures.group,
     propFigures.group,
     fireFigures.group,
+    explosionFigures.group,
     world.water,
     environment.weatherEffects,
     world.underwaterTint,
@@ -1524,6 +1560,7 @@ export const createVoxelscape = ({
       npcFigures.tick(dt);
       propFigures.tick(dt);
       fireFigures.tick(dt);
+      explosionFigures.tick(dt);
       probe.end(Phase.monsters);
       setScriptItem(scriptConsole?.heldItem() ?? null);
       // The script's zones are checked against where the player stands, so a
@@ -1675,6 +1712,7 @@ export const createVoxelscape = ({
       npcFigures.clear();
       propFigures.clear();
       fireFigures.clear();
+      explosionFigures.clear();
       monsterSync.dispose();
       hand.dispose();
       input.dispose();

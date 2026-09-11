@@ -14,6 +14,13 @@ import { bundlePlaceProject } from "./bundle";
 import type { ScriptSandbox } from "./sandbox";
 import type { ScriptEventPayload } from "./events";
 
+/**
+ * How long, in milliseconds on the shared clock, a blast stays in the host's
+ * list. A renderer needs it only long enough to start its burst, so an older
+ * one is dropped rather than kept for the life of a run.
+ */
+const EXPLOSION_MEMORY_MS = 5_000;
+
 /** One scripted NPC: where it stands, how it faces, and what it is called. */
 export interface ScriptedNpc {
   id: string;
@@ -49,6 +56,11 @@ export interface ScriptedProp {
 // host need not know where it is kept.
 import type { ScriptedFire } from "../world/fire-ember";
 export type { ScriptedFire };
+
+// The blast record, kept in the world area beside the blaze record and
+// re-exported for the same reason.
+import type { ScriptedExplosion } from "../world/explosion-blast";
+export type { ScriptedExplosion };
 
 /** One named box a script watches the players move through. */
 export interface ScriptZone {
@@ -102,8 +114,16 @@ export interface ScriptHostParams {
   ) => void;
   /** Called when the script turns a player to look at a world point. */
   onPlayerFace?: (player: string, at: { x: number; z: number }) => void;
+  /** Called when the script scales a player's walk speed. */
+  onPlayerSpeed?: (player: string, multiplier: number) => void;
+  /** Called when the script scales a player's jump. */
+  onPlayerJump?: (player: string, multiplier: number) => void;
   /** Called when the script lights a fire; the world seeds its ember light. */
   onFire?: (fire: ScriptedFire) => void;
+  /** Called when the script sets off a blast; the world draws the burst. */
+  onExplosion?: (explosion: ScriptedExplosion) => void;
+  /** The ending titles the place has already reached, read back by a collecting game. */
+  endings?: () => string[];
 }
 
 /**
@@ -143,7 +163,10 @@ export class ScriptHost {
     player: string,
     at: { x: number; z: number },
   ) => void;
+  private readonly onPlayerSpeed?: (player: string, multiplier: number) => void;
+  private readonly onPlayerJump?: (player: string, multiplier: number) => void;
   private readonly onFire?: (fire: ScriptedFire) => void;
+  private readonly onExplosion?: (explosion: ScriptedExplosion) => void;
 
   /** The items this place's script defines and the local player carries. */
   readonly inventory = new ScriptInventory();
@@ -152,6 +175,7 @@ export class ScriptHost {
   private readonly npcs = new Map<string, ScriptedNpc>();
   private readonly props = new Map<string, ScriptedProp>();
   private readonly fires = new Map<string, ScriptedFire>();
+  private readonly explosions = new Map<string, ScriptedExplosion>();
   private readonly zones = new Map<string, ScriptZone>();
   /** Which zones each player currently stands in, keyed by player. */
   private readonly playerZones = new Map<string, Set<string>>();
@@ -176,10 +200,14 @@ export class ScriptHost {
     this.onNarrate = params.onNarrate;
     this.onPlayerPlace = params.onPlayerPlace;
     this.onPlayerFace = params.onPlayerFace;
+    this.onPlayerSpeed = params.onPlayerSpeed;
+    this.onPlayerJump = params.onPlayerJump;
     this.onFire = params.onFire;
+    this.onExplosion = params.onExplosion;
     this.ready = createQuickJSSandbox({
       seed: params.seed,
       now: params.now,
+      endings: params.endings,
     });
   }
 
@@ -211,6 +239,16 @@ export class ScriptHost {
   /** The blaze with `id`, or null when the script has not lit one. */
   fire(id: string): ScriptedFire | null {
     return this.fires.get(id) ?? null;
+  }
+
+  /** Every blast the script has set off that the world may still be drawing. */
+  get explosionList(): ScriptedExplosion[] {
+    return [...this.explosions.values()];
+  }
+
+  /** The blast with `id`, or null when the script has not set one off. */
+  explosion(id: string): ScriptedExplosion | null {
+    return this.explosions.get(id) ?? null;
   }
 
   /** The dialog `player` is in, or null when they are not talking. */
@@ -359,7 +397,7 @@ export class ScriptHost {
 
   /** One line about the script and what it has created, for a debug console. */
   describe(): string {
-    return `script: ${this.loaded ? "loaded" : "not loaded"} · ${this.npcs.size} NPC(s), ${this.props.size} prop(s), ${this.fires.size} fire(s), ${this.dialogs.size} dialog(s)${
+    return `script: ${this.loaded ? "loaded" : "not loaded"} · ${this.npcs.size} NPC(s), ${this.props.size} prop(s), ${this.fires.size} fire(s), ${this.explosions.size} blast(s), ${this.dialogs.size} dialog(s)${
       this.problem === undefined ? "" : ` — ${this.problem}`
     }`;
   }
@@ -470,6 +508,26 @@ export class ScriptHost {
         this.onFire?.(fire);
         break;
       }
+      case "explosion": {
+        const { id, x, y, z, radius } = effect.payload;
+        const cutoff = this.now() - EXPLOSION_MEMORY_MS;
+        for (const [held, blast] of this.explosions) {
+          if (blast.at < cutoff) {
+            this.explosions.delete(held);
+          }
+        }
+        const explosion: ScriptedExplosion = {
+          id,
+          x,
+          y: y ?? this.heightAt(x, z),
+          z,
+          radius: radius ?? 4,
+          at: this.now(),
+        };
+        this.explosions.set(id, explosion);
+        this.onExplosion?.(explosion);
+        break;
+      }
       case "item-define":
         this.inventory.define(effect.payload);
         break;
@@ -549,6 +607,12 @@ export class ScriptHost {
         this.onPlayerFace?.(player, { x, z });
         break;
       }
+      case "player-speed":
+        this.onPlayerSpeed?.(effect.payload.player, effect.payload.multiplier);
+        break;
+      case "player-jump":
+        this.onPlayerJump?.(effect.payload.player, effect.payload.multiplier);
+        break;
     }
   }
 

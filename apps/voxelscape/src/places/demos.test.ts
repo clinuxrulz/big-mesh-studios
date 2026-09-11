@@ -79,6 +79,42 @@ const advance = async (host: ScriptHost, ms: number): Promise<void> => {
 const useHeld = (host: ScriptHost, id: string): Promise<void> =>
   host.use(id, "", host.inventory.heldItem()?.id ?? "");
 
+/** Loads the Late to School demo and returns its script entry, ready to run. */
+const lateToSchool = async () => {
+  stubModels();
+  const project = await loadBuiltinDemo(builtinDemo("late-to-school")!);
+  return { project, entry: project.manifest.scripts![0] };
+};
+
+/** Boots the Late to School demo against `knownEndings`, returning what it said. */
+const runLts = async (knownEndings: string[] = []) => {
+  clockMs = 0;
+  const { project, entry } = await lateToSchool();
+  const endings: string[] = [];
+  const narrations: string[] = [];
+  const toasts: string[] = [];
+  const jumps: number[] = [];
+  const speeds: number[] = [];
+  const host = new ScriptHost({
+    seed: project.manifest.seed,
+    now: () => clockMs,
+    heightAt: () => 62,
+    onTime: () => {},
+    onToast: (_player, text) => toasts.push(text),
+    onEnding: (_player, state) => {
+      if (state !== null) {
+        endings.push(state.title);
+      }
+    },
+    onNarrate: (_player, line) => narrations.push(line.text),
+    onPlayerJump: (_player, multiplier) => jumps.push(multiplier),
+    onPlayerSpeed: (_player, multiplier) => speeds.push(multiplier),
+    endings: () => knownEndings,
+  });
+  await host.loadProject(project.scripts, entry);
+  return { host, endings, narrations, toasts, jumps, speeds };
+};
+
 describe("the built-in demos", () => {
   it("lists the GASA4 place with its furniture and items", () => {
     const demo = builtinDemo("get-a-snack-at-4-am");
@@ -249,6 +285,262 @@ describe("the built-in demos", () => {
       await host.use(`robux-${i}`, "");
     }
     expect(toasts.at(-1)).toBe("You pocket some Robux. ($64)");
+    host.dispose();
+  });
+});
+
+describe("the Late to School demo", () => {
+  it("lists the place with its characters and fixtures", () => {
+    const demo = builtinDemo("late-to-school");
+    expect(demo?.name).toBe("Late to School");
+    expect(demo?.manifest.models).toContain("npc-laugh.zip");
+    expect(demo?.manifest.models).toContain("slushie-machine.zip");
+    expect(demo?.manifest.models).toContain("arcade.zip");
+    expect(BUILTIN_DEMOS).toContain(demo);
+  });
+
+  it("loads its models as bytes", async () => {
+    const { project } = await lateToSchool();
+    expect(Object.keys(project.models)).toContain("npc-laugh.zip");
+    expect(Object.keys(project.models)).toContain("arcade.zip");
+    expect(project.models["npc-laugh.zip"].length).toBeGreaterThan(0);
+  });
+
+  it("compiles its street, houses, and school", async () => {
+    const { project, entry } = await lateToSchool();
+    const plan = await compilePlacePlan({
+      files: project.scripts,
+      entry,
+      seed: project.manifest.seed,
+      region: planRegionAround(project.manifest.spawn),
+    });
+    expect(plan.some((shape) => shape.kind === "road")).toBe(true);
+    expect(plan.filter((shape) => shape.kind === "box").length).toBeGreaterThan(
+      20,
+    );
+  });
+
+  it("opens with its cast and the day's fixtures", async () => {
+    const { host } = await runLts();
+    expect(host.npcList).toHaveLength(17);
+    expect(host.npc("laugh")).toMatchObject({
+      name: "Laugh",
+      model: "npc-laugh.zip",
+    });
+    expect(host.propList.some((prop) => prop.model === "arcade.zip")).toBe(
+      true,
+    );
+    expect(host.prop("mailbox")).toMatchObject({ model: "mailbox.zip" });
+    host.dispose();
+  });
+
+  it("ends with Sleep when the player goes back to bed", async () => {
+    const { host, endings } = await runLts();
+    await host.movePlayer("", -12, 62, 16); // the bedroom
+    await host.use("bed", "");
+    expect(endings).toEqual(["Sleep"]);
+    host.dispose();
+  });
+
+  it("ends with Ded when the player drinks the lemonade", async () => {
+    const { host, endings } = await runLts();
+    await host.use("lemonade-stand", "", "lemonade");
+    expect(endings).toEqual(["Ded"]);
+    host.dispose();
+  });
+
+  it("ends with Flowey when the golden flower is used", async () => {
+    const { host, endings } = await runLts();
+    await host.use("flower", "");
+    expect(endings).toEqual(["Flowey"]);
+    host.dispose();
+  });
+
+  it("answers Laugh's dialog", async () => {
+    const { host } = await runLts();
+    await host.talk("laugh", "");
+    expect(host.dialogFor("")?.prompt).toContain("why did I call you");
+    await host.choose("laugh", 0, "");
+    expect(host.dialogFor("")).toBeNull();
+    host.dispose();
+  });
+
+  it("reads back the endings the place has already reached", async () => {
+    const { host, toasts } = await runLts(["Sleep", "Ded"]);
+    expect(toasts.some((text) => text.includes("Sleep, Ded"))).toBe(true);
+    host.dispose();
+  });
+
+  it("ends with Bullied when the plush goes to school", async () => {
+    const { host, endings } = await runLts();
+    await host.use("plush", "");
+    await host.talk("bully", "");
+    expect(endings).toEqual(["Bullied"]);
+    host.dispose();
+  });
+
+  it("ends with Big Brained after the nerd's quiz and a wait", async () => {
+    const { host, endings } = await runLts();
+    await host.talk("nerd", "");
+    await host.choose("nerd", 0, "");
+    await host.choose("nerd", 0, "");
+    await host.choose("nerd", 1, "");
+    await host.choose("nerd", 0, "");
+    await advance(host, 8_000);
+    await host.talk("nerd", "");
+    expect(endings).toEqual(["Big Brained"]);
+    host.dispose();
+  });
+
+  it("ends with Sit in a Chair after Laugh's gift", async () => {
+    const { host, endings } = await runLts();
+    await host.use("phone", "");
+    await host.talk("laugh", "");
+    await host.choose("laugh", 0, "");
+    await host.use("chair", "");
+    await host.use("bed", "");
+    expect(endings).toEqual(["Sit in a Chair"]);
+    host.dispose();
+  });
+
+  it("ends with Just being a Good Person when food reaches the homeless kid", async () => {
+    const { host, endings } = await runLts();
+    await host.use("chips", "");
+    await host.talk("homeless", "");
+    expect(endings).toEqual(["Just being a Good Person!"]);
+    host.dispose();
+  });
+
+  it("ends with Shoplifter when an unpaid good leaves Bean Bros.", async () => {
+    const { host, endings } = await runLts();
+    await host.movePlayer("", 16, 62, -24);
+    await host.use("bean-shelf-1", "");
+    await host.movePlayer("", 16, 62, 0);
+    expect(endings).toEqual(["Shoplifter"]);
+    host.dispose();
+  });
+
+  it("ends with Criminal when the arcade burns and the player gets home", async () => {
+    const { host, endings } = await runLts();
+    await host.use("matches", "");
+    await host.useItem("matches", "");
+    await host.use("dumpster", "", "litmatches");
+    await host.movePlayer("", -12, 62, 16);
+    await advance(host, 30_000);
+    expect(endings).toEqual(["Criminal"]);
+    host.dispose();
+  });
+
+  it("ends with Certified Attorney after taking Laugh's side", async () => {
+    const { host, endings } = await runLts();
+    await host.talk("laugh", "");
+    await host.choose("laugh", 1, "");
+    await host.talk("brett", "");
+    await host.choose("brett", 0, "");
+    expect(endings).toEqual(["Certified Attorney"]);
+    host.dispose();
+  });
+
+  it("ends with Excellent Employee after the delivery shift", async () => {
+    const { host, endings } = await runLts();
+    await host.talk("laugh", "");
+    await host.choose("laugh", 1, "");
+    await host.talk("brett", "");
+    await host.choose("brett", 0, "");
+    await host.use("mirror", "");
+    await host.talk("brett", "");
+    await host.talk("brad", "");
+    await host.talk("nerd", "");
+    await host.talk("littlebro", "");
+    await host.talk("brett", "");
+    expect(endings).toEqual(["Certified Attorney", "Excellent Employee"]);
+    host.dispose();
+  });
+
+  it("ends with Instant Regret after feeding Sleepa her list", async () => {
+    const { host, endings } = await runLts();
+    await host.talk("sleepa", "");
+    await host.talk("pothead", "");
+    await host.choose("pothead", 0, "");
+    await advance(host, 4_000);
+    await host.talk("sleepa", "");
+    await host.use("bean-shelf-2", "");
+    await host.talk("sleepa", "");
+    await host.talk("pothead", "");
+    await host.choose("pothead", 2, "");
+    await advance(host, 4_000);
+    await host.talk("sleepa", "");
+    expect(endings).toEqual(["Instant Regret"]);
+    host.dispose();
+  });
+
+  it("ends with Champion after five roaster hits", async () => {
+    const { host, endings } = await runLts();
+    await host.use("key", "");
+    await host.use("locked-door", "", "key");
+    for (let i = 0; i < 5; i++) {
+      await host.talk("champ", "");
+    }
+    expect(endings).toEqual(["Champion"]);
+    host.dispose();
+  });
+
+  it("ends with Breakfast with two foods on the cafeteria plate", async () => {
+    const { host, endings } = await runLts();
+    await host.use("bean-shelf-1", "");
+    await host.use("cafeteria-plate", "", "hotdog");
+    await host.use("bean-shelf-2", "");
+    await host.use("cafeteria-plate", "", "bean");
+    expect(endings).toEqual(["Breakfast"]);
+    host.dispose();
+  });
+
+  it("ends with Arcade Master after the token and the obby", async () => {
+    const { host, endings } = await runLts();
+    await host.use("cash-1", "");
+    await host.use("token-atm", "");
+    await host.use("broken-machine", "", "token");
+    await advance(host, 6_000);
+    expect(endings).toEqual(["Arcade Master"]);
+    host.dispose();
+  });
+
+  it("ends with Monke Takeover when the monkey blows the arcade", async () => {
+    const { host, endings } = await runLts();
+    await host.use("banana", "");
+    await host.use("cash-1", "");
+    await host.use("slushie-machine", "");
+    await host.useItem("slushie", "");
+    await host.use("dumpster", "", "banana");
+    await host.use("matches", "");
+    await host.useItem("matches", "");
+    await host.use("dumpster", "", "litmatches");
+    await advance(host, 10_000);
+    expect(endings).toEqual(["Monke Takeover"]);
+    host.dispose();
+  });
+
+  it("gives the player a jump from a slushie without a banana", async () => {
+    const { host, jumps } = await runLts();
+    await host.use("cash-1", "");
+    await host.use("slushie-machine", "");
+    await host.useItem("slushie", "");
+    expect(jumps).toEqual([1.6]);
+    host.dispose();
+  });
+
+  it("ends with the Good Ending when the collection opens the classroom", async () => {
+    const { host, endings } = await runLts(["Sleep", "Ded", "Flowey"]);
+    await host.use("classroom-door", "");
+    expect(endings).toEqual(["Good Ending"]);
+    host.dispose();
+  });
+
+  it("ends with the Bad Ending when the bell has already rung", async () => {
+    const { host, endings } = await runLts(["Sleep", "Ded", "Flowey"]);
+    await advance(host, 120_000);
+    await host.use("classroom-door", "");
+    expect(endings).toEqual(["Bad Ending"]);
     host.dispose();
   });
 });

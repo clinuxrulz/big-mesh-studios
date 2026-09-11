@@ -1,6 +1,11 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { ScriptHost, type DialogState, type ScriptedFire } from "./script-host";
+import {
+  ScriptHost,
+  type DialogState,
+  type ScriptedExplosion,
+  type ScriptedFire,
+} from "./script-host";
 import { SAMPLE_PLACE_SCRIPT } from "./sample";
 import { MAIN_SCRIPT_FILE } from "./project";
 
@@ -27,6 +32,10 @@ const fresh = async (): Promise<{
   }>;
   faces: Array<{ player: string; at: { x: number; z: number } }>;
   fires: ScriptedFire[];
+  explosions: ScriptedExplosion[];
+  speeds: Array<{ player: string; multiplier: number }>;
+  jumps: Array<{ player: string; multiplier: number }>;
+  knownEndings: string[];
 }> => {
   clockMs = 0;
   const toasts: Array<{ player: string; text: string }> = [];
@@ -47,6 +56,10 @@ const fresh = async (): Promise<{
   }> = [];
   const faces: Array<{ player: string; at: { x: number; z: number } }> = [];
   const fires: ScriptedFire[] = [];
+  const explosions: ScriptedExplosion[] = [];
+  const speeds: Array<{ player: string; multiplier: number }> = [];
+  const jumps: Array<{ player: string; multiplier: number }> = [];
+  const knownEndings: string[] = [];
   const h = new ScriptHost({
     seed: 5,
     now: clock,
@@ -59,7 +72,11 @@ const fresh = async (): Promise<{
     onNarrate: (player, line) => narrations.push({ player, line }),
     onPlayerPlace: (player, at) => places.push({ player, at }),
     onPlayerFace: (player, at) => faces.push({ player, at }),
+    onPlayerSpeed: (player, multiplier) => speeds.push({ player, multiplier }),
+    onPlayerJump: (player, multiplier) => jumps.push({ player, multiplier }),
     onFire: (fire) => fires.push(fire),
+    onExplosion: (explosion) => explosions.push(explosion),
+    endings: () => knownEndings,
   });
   return {
     host: h,
@@ -72,6 +89,10 @@ const fresh = async (): Promise<{
     places,
     faces,
     fires,
+    explosions,
+    speeds,
+    jumps,
+    knownEndings,
   };
 };
 
@@ -489,6 +510,67 @@ describe("a script host", () => {
     await host.talk("sable", "");
     expect(host.lastError).toMatch(/ReferenceError/);
     expect(notices.join("\n")).toMatch(/ReferenceError/);
+    host.dispose();
+  });
+
+  it("scales the player's speed and jump on request", async () => {
+    const { host, speeds, jumps } = await fresh();
+    await loadProject(
+      host,
+      `
+      var started = false;
+      export function bmsTick() {
+        if (!started) {
+          started = true;
+          engine.dispatch("player-speed", JSON.stringify({ player: "", multiplier: 2 }));
+          engine.dispatch("player-jump", JSON.stringify({ player: "", multiplier: 1.5 }));
+        }
+      }
+      `,
+    );
+    expect(speeds).toEqual([{ player: "", multiplier: 2 }]);
+    expect(jumps).toEqual([{ player: "", multiplier: 1.5 }]);
+    host.dispose();
+  });
+
+  it("sets off a blast and reports where it went off", async () => {
+    const { host, explosions } = await fresh();
+    await loadProject(
+      host,
+      `
+      var started = false;
+      export function bmsTick() {
+        if (!started) {
+          started = true;
+          engine.dispatch("explosion", JSON.stringify({ id: "boom", x: 10, z: 18, radius: 6 }));
+        }
+      }
+      `,
+    );
+    expect(host.explosion("boom")).toMatchObject({
+      id: "boom",
+      x: 10,
+      z: 18,
+      y: 10,
+      radius: 6,
+    });
+    expect(explosions).toHaveLength(1);
+    host.dispose();
+  });
+
+  it("reads back the endings the place has already reached", async () => {
+    const { host, knownEndings, toasts } = await fresh();
+    knownEndings.push("Sleep", "Bullied");
+    await loadProject(
+      host,
+      `
+      var seen = JSON.parse(engine.endings());
+      export function bmsTick() {
+        engine.dispatch("toast", JSON.stringify({ player: "", text: seen.join(",") }));
+      }
+      `,
+    );
+    expect(toasts.at(-1)?.text).toBe("Sleep,Bullied");
     host.dispose();
   });
 });

@@ -72,20 +72,38 @@ const solidCount = (s: Solved): number => {
 };
 
 describe("the bundled NPC models", () => {
-  it.each(["npc-sable.zip", "npc-rook.zip"])(
-    "%s loads as a one-part figure with a painted front",
-    async (file) => {
-      const figure = await model(file);
-      expect(figure.migrated).toBe(true);
-      expect(figure.parts).toHaveLength(1);
-      expect(figure.palette.length).toBeGreaterThanOrEqual(3);
+  it.each([
+    "npc-sable.zip",
+    "npc-rook.zip",
+    "npc-laugh.zip",
+    "npc-alex.zip",
+    "npc-james.zip",
+    "npc-bully.zip",
+    "npc-nerd.zip",
+    "npc-homeless.zip",
+    "npc-brit.zip",
+    "npc-brett.zip",
+    "npc-brad.zip",
+    "npc-sleepa.zip",
+    "npc-champ.zip",
+    "npc-teacher.zip",
+    "npc-lemonade.zip",
+    "npc-pothead.zip",
+    "npc-santa.zip",
+    "npc-obby.zip",
+    "npc-littlebro.zip",
+    "npc-anomaly.zip",
+  ])("%s loads as a one-part figure with a painted front", async (file) => {
+    const figure = await model(file);
+    expect(figure.migrated).toBe(true);
+    expect(figure.parts).toHaveLength(1);
+    expect(figure.palette.length).toBeGreaterThanOrEqual(3);
 
-      const part = figure.parts[0];
-      expect(part.name).toBe("body");
-      expect(painted(part, "front")).toBeGreaterThan(150);
-      expect(painted(part, "top")).toBeGreaterThan(50);
-    },
-  );
+    const part = figure.parts[0];
+    expect(part.name).toBe("body");
+    expect(painted(part, "front")).toBeGreaterThan(150);
+    expect(painted(part, "top")).toBeGreaterThan(50);
+  });
 
   it.each(["npc-sable.zip", "npc-rook.zip"])(
     "%s carves into a solid, standing figure",
@@ -109,6 +127,16 @@ describe("the built-in demo prop models", () => {
     "bed.zip",
     "chips.zip",
     "friedegg.zip",
+    "arcade.zip",
+    "slushie-machine.zip",
+    "desk.zip",
+    "locker.zip",
+    "cafeteria-table.zip",
+    "poster.zip",
+    "historybook.zip",
+    "roaster.zip",
+    "plush.zip",
+    "banana.zip",
   ])(
     "%s loads as a one-part indexed figure with a full palette",
     async (file) => {

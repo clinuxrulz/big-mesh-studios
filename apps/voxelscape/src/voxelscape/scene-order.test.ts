@@ -61,6 +61,7 @@ describe("scene draw order", () => {
       "npcFigures.group",
       "propFigures.group",
       "fireFigures.group",
+      "explosionFigures.group",
       "world.water",
       "environment.weatherEffects",
       "world.underwaterTint",

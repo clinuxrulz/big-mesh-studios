@@ -8,6 +8,7 @@
 import { MAIN_SCRIPT_FILE, type PlaceProject } from "./project";
 import type { PlaceManifest } from "./place";
 import GASA4_SCRIPT from "./demo-scripts/gasa4.ts?raw";
+import LATE_TO_SCHOOL_SCRIPT from "./demo-scripts/late-to-school.ts?raw";
 
 /** One built-in demo: the world it names, its scripts, and the models they wear. */
 export interface BuiltinDemo {
@@ -96,8 +97,103 @@ const GASA4: BuiltinDemo = {
   },
 };
 
+/**
+ * The models the "Late to School" demo wears: its neighborhood characters, the
+ * fixtures in its houses, school, and shops, and the items its game hands out.
+ */
+const LATE_TO_SCHOOL_MODELS = [
+  "npc-laugh.zip",
+  "npc-alex.zip",
+  "npc-james.zip",
+  "npc-bully.zip",
+  "npc-nerd.zip",
+  "npc-homeless.zip",
+  "npc-brit.zip",
+  "npc-brett.zip",
+  "npc-brad.zip",
+  "npc-sleepa.zip",
+  "npc-champ.zip",
+  "npc-teacher.zip",
+  "npc-lemonade.zip",
+  "npc-pothead.zip",
+  "npc-santa.zip",
+  "npc-obby.zip",
+  "npc-littlebro.zip",
+  "npc-anomaly.zip",
+  "bed.zip",
+  "phone.zip",
+  "mirror.zip",
+  "bookshelf.zip",
+  "counter.zip",
+  "fridge.zip",
+  "tv.zip",
+  "sofa.zip",
+  "door.zip",
+  "mailbox.zip",
+  "lemonade-stand.zip",
+  "bus-stop.zip",
+  "flower.zip",
+  "gate.zip",
+  "shelf.zip",
+  "vending.zip",
+  "slushie-machine.zip",
+  "arcade.zip",
+  "boarded-machine.zip",
+  "dumpster.zip",
+  "bench.zip",
+  "desk.zip",
+  "chair.zip",
+  "locker.zip",
+  "cafeteria-table.zip",
+  "plate.zip",
+  "poster.zip",
+  "plush.zip",
+  "banana.zip",
+  "chips.zip",
+  "key.zip",
+  "matches.zip",
+  "slushie.zip",
+  "pizza.zip",
+  "hotdog.zip",
+  "salad.zip",
+  "taco.zip",
+  "historybook.zip",
+  "roaster.zip",
+  "hat.zip",
+  "lemonade.zip",
+  "foodbag.zip",
+  "bean.zip",
+  "cola.zip",
+  "tix.zip",
+];
+
+/**
+ * The "Late to School" demo: a flat block of four houses, a school, a corner
+ * shop, and an arcade under a pinned morning sky, with the neighborhood's
+ * characters standing in it and the first few endings reachable. It is the
+ * proof that a place's script can build a small town (`bmsPlan`), stand a cast
+ * of NPCs, define and hand out items, remember the endings a player has reached
+ * across restarts, and end the game.
+ */
+const LATE_TO_SCHOOL: BuiltinDemo = {
+  id: "late-to-school",
+  name: "Late to School",
+  manifest: {
+    name: "Late to School",
+    // The history book's page and the Dimensionator code, in one seed.
+    seed: 2_546,
+    // The player wakes in their bedroom.
+    spawn: [-12, 0, 16],
+    models: LATE_TO_SCHOOL_MODELS,
+  },
+  modelFiles: LATE_TO_SCHOOL_MODELS,
+  scripts: {
+    [MAIN_SCRIPT_FILE]: LATE_TO_SCHOOL_SCRIPT,
+  },
+};
+
 /** Every built-in demo, in the order a list shows them. */
-export const BUILTIN_DEMOS: BuiltinDemo[] = [GASA4];
+export const BUILTIN_DEMOS: BuiltinDemo[] = [GASA4, LATE_TO_SCHOOL];
 
 /** The built-in demo with `id`, or null when there is none. */
 export const builtinDemo = (id: string): BuiltinDemo | null =>

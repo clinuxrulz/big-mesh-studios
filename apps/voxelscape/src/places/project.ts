@@ -19,7 +19,9 @@ export const STARTER_SCRIPT = `// Your place's script. Export a bmsTick function
 // each step with the shared clock and the events since the last step. Export an
 // optional bmsPlan too and the world calls it once, before generating terrain,
 // to stamp roads and houses into the ground: it returns JSON shapes, and the
-// block ids it may use are on engine.blocks. The TypeScript types are stripped
+// block ids it may use are on engine.blocks. engine.endings() returns a JSON
+// array of the ending titles this place has already reached. The TypeScript
+// types are stripped
 // when the script loads, so the panel's squiggles are the whole of the
 // type-check; imports may only reach this place's own script files. Run
 // /script:demo for a working sample.
@@ -27,6 +29,7 @@ declare const engine: {
   dispatch(tag: string, payload: string): void;
   log(line: string): void;
   now(): number;
+  endings(): string;
   blocks: Record<string, number>;
 };
 
