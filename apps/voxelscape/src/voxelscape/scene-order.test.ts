@@ -60,6 +60,7 @@ describe("scene draw order", () => {
       "monsterRender.group",
       "npcFigures.group",
       "propFigures.group",
+      "fireFigures.group",
       "world.water",
       "environment.weatherEffects",
       "world.underwaterTint",

@@ -623,15 +623,12 @@ function ignite(): void {
   stoveCooked = false;
   fireLit = true;
   for (const [index, [x, z, height]] of FIRE_SPOTS.entries()) {
-    dispatch("prop", {
+    dispatch("fire", {
       id: "fire-" + index,
-      model: "fire.zip",
       x,
       z,
       y: FLOOR,
-      name: "fire",
       height,
-      solid: false,
     });
   }
   narrate("You", "The kitchen catches fire!");

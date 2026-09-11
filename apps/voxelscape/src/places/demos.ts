@@ -62,7 +62,6 @@ const GASA4: BuiltinDemo = {
       "tix.zip",
       "robux.zip",
       "plate.zip",
-      "fire.zip",
     ],
   },
   modelFiles: [
@@ -91,7 +90,6 @@ const GASA4: BuiltinDemo = {
     "tix.zip",
     "robux.zip",
     "plate.zip",
-    "fire.zip",
   ],
   scripts: {
     [MAIN_SCRIPT_FILE]: GASA4_SCRIPT,

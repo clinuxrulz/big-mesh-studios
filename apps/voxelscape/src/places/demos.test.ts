@@ -83,7 +83,6 @@ describe("the built-in demos", () => {
     expect(demo?.manifest.models).toContain("fridge.zip");
     expect(demo?.manifest.models).toContain("bed.zip");
     expect(demo?.manifest.models).toContain("chips.zip");
-    expect(demo?.manifest.models).toContain("fire.zip");
     expect(demo?.manifest.models).toContain("friedegg.zip");
     expect(BUILTIN_DEMOS).toContain(demo);
   });
@@ -92,7 +91,6 @@ describe("the built-in demos", () => {
     const { project } = await gasa4();
     expect(Object.keys(project.models)).toContain("fridge.zip");
     expect(Object.keys(project.models)).toContain("plate.zip");
-    expect(Object.keys(project.models)).toContain("fire.zip");
     expect(Object.keys(project.models)).toContain("friedegg.zip");
     expect(project.models["fridge.zip"].length).toBeGreaterThan(0);
   });
@@ -220,7 +218,7 @@ describe("the built-in demos", () => {
     await host.use("cola", "");
     await useHeld(host, "stove");
     await advance(host, 5_000);
-    expect(host.prop("fire-0")).toMatchObject({ model: "fire.zip" });
+    expect(host.fire("fire-0")).toMatchObject({ height: 3.5 });
     await advance(host, 8_000);
     expect(endings).toContain("Fire");
     host.dispose();

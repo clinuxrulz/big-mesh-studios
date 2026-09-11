@@ -44,6 +44,12 @@ export interface ScriptedProp {
   solid: boolean;
 }
 
+// The blaze record the host reports lives in the world area, whose types both
+// the host and the renderer may import; it is re-exported so a caller of the
+// host need not know where it is kept.
+import type { ScriptedFire } from "../world/fire-ember";
+export type { ScriptedFire };
+
 /** One named box a script watches the players move through. */
 export interface ScriptZone {
   id: string;
@@ -96,6 +102,8 @@ export interface ScriptHostParams {
   ) => void;
   /** Called when the script turns a player to look at a world point. */
   onPlayerFace?: (player: string, at: { x: number; z: number }) => void;
+  /** Called when the script lights a fire; the world seeds its ember light. */
+  onFire?: (fire: ScriptedFire) => void;
 }
 
 /**
@@ -135,6 +143,7 @@ export class ScriptHost {
     player: string,
     at: { x: number; z: number },
   ) => void;
+  private readonly onFire?: (fire: ScriptedFire) => void;
 
   /** The items this place's script defines and the local player carries. */
   readonly inventory = new ScriptInventory();
@@ -142,6 +151,7 @@ export class ScriptHost {
   private readonly sent = new Set<string>();
   private readonly npcs = new Map<string, ScriptedNpc>();
   private readonly props = new Map<string, ScriptedProp>();
+  private readonly fires = new Map<string, ScriptedFire>();
   private readonly zones = new Map<string, ScriptZone>();
   /** Which zones each player currently stands in, keyed by player. */
   private readonly playerZones = new Map<string, Set<string>>();
@@ -166,6 +176,7 @@ export class ScriptHost {
     this.onNarrate = params.onNarrate;
     this.onPlayerPlace = params.onPlayerPlace;
     this.onPlayerFace = params.onPlayerFace;
+    this.onFire = params.onFire;
     this.ready = createQuickJSSandbox({
       seed: params.seed,
       now: params.now,
@@ -190,6 +201,16 @@ export class ScriptHost {
   /** The prop with `id`, or null when the script has not placed one. */
   prop(id: string): ScriptedProp | null {
     return this.props.get(id) ?? null;
+  }
+
+  /** Every blaze the script has lit in the world. */
+  get fireList(): ScriptedFire[] {
+    return [...this.fires.values()];
+  }
+
+  /** The blaze with `id`, or null when the script has not lit one. */
+  fire(id: string): ScriptedFire | null {
+    return this.fires.get(id) ?? null;
   }
 
   /** The dialog `player` is in, or null when they are not talking. */
@@ -338,7 +359,7 @@ export class ScriptHost {
 
   /** One line about the script and what it has created, for a debug console. */
   describe(): string {
-    return `script: ${this.loaded ? "loaded" : "not loaded"} · ${this.npcs.size} NPC(s), ${this.props.size} prop(s), ${this.dialogs.size} dialog(s)${
+    return `script: ${this.loaded ? "loaded" : "not loaded"} · ${this.npcs.size} NPC(s), ${this.props.size} prop(s), ${this.fires.size} fire(s), ${this.dialogs.size} dialog(s)${
       this.problem === undefined ? "" : ` — ${this.problem}`
     }`;
   }
@@ -436,6 +457,19 @@ export class ScriptHost {
       case "prop-remove":
         this.props.delete(effect.payload.id);
         break;
+      case "fire": {
+        const { id, x, y, z, height } = effect.payload;
+        const fire: ScriptedFire = {
+          id,
+          x,
+          y: y ?? this.heightAt(x, z),
+          z,
+          height: height ?? 2,
+        };
+        this.fires.set(id, fire);
+        this.onFire?.(fire);
+        break;
+      }
       case "item-define":
         this.inventory.define(effect.payload);
         break;

@@ -27,6 +27,8 @@ const surface = (
     /** The sheet cell the coordinates wrap into. */
     tileIndex?: number;
     brightness?: number;
+    /** The emitters' own light, unscaled by the time of day. */
+    blockLight?: number;
   } = {},
 ): number[] => {
   const {
@@ -35,6 +37,7 @@ const surface = (
     uv = [0, 0],
     tileIndex = 0,
     brightness = 1,
+    blockLight = 0,
   } = options;
   const value = shadeTerrain(material)({
     varyings: {
@@ -43,6 +46,7 @@ const surface = (
       uv,
       tileIndex,
       brightness,
+      blockLight,
     },
     uniforms: { cameraPosition: [0, 0, 0] },
   }).value;
@@ -60,7 +64,7 @@ const water = (
   positionWorld: [number, number, number],
 ): number[] => {
   const value = fromProgram(material.build(new Scene()))({
-    varyings: { positionWorld, brightness: 1 },
+    varyings: { positionWorld, brightness: 1, blockLight: 0 },
     uniforms: { cameraPosition: [0, 0, 0] },
   }).value;
   if (value === null) throw new Error("the fragment discarded");
@@ -92,6 +96,20 @@ describe("terrain lighting", () => {
 
     expect(moonlit[2]).toBeCloseTo(0.6, 6);
     expect(shadowed[2]).toBeCloseTo(0.2, 6);
+  });
+
+  it("lights a surface by its block light even when the sky is dark", () => {
+    const material = new TriangleMaterial();
+    // Deep night: almost no ambient, and no sun or moon.
+    material.ambientColor = [0.05, 0.07, 0.15];
+    material.sunLightColor = [0, 0, 0];
+    material.moonLightColor = [0, 0, 0];
+    const dark = surface(material, { brightness: 0 });
+    const lit = surface(material, { brightness: 0, blockLight: 1 });
+
+    // The untextured albedo is flat blue, so the blue channel carries the light.
+    expect(lit[2]).toBeCloseTo(1, 6);
+    expect(lit[2]).toBeGreaterThan(dark[2]);
   });
 
   /** A material drawing a two-by-two sheet of single-texel tiles. */

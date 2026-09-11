@@ -10,6 +10,7 @@ import {
   VOXEL_LAVA_LEVEL_1,
   VOXEL_LAVA_LEVEL_7,
   VOXEL_LAVA_FALLING,
+  VOXEL_EMBER,
   VOXEL_PADDING,
   type VoxelStore,
 } from "./voxel-store";
@@ -17,9 +18,17 @@ import {
 /** The highest light level; light falls off by one per propagated voxel. */
 export const MAX_LIGHT = 15;
 
-/** Light levels per voxel id for the emissive blocks that seed block light. */
+/**
+ * Light levels per voxel id for the emissive blocks that seed block light.
+ * Lava and fire embers both shine at full strength; a place can lower an
+ * ember's light by re-lighting the block around an edited copy, or this table
+ * can grow torches and glowstone as their ids land.
+ */
 export const EMISSIVE_LEVEL: Record<number, number> = (() => {
-  const levels: Record<number, number> = { [VOXEL_LAVA]: MAX_LIGHT };
+  const levels: Record<number, number> = {
+    [VOXEL_LAVA]: MAX_LIGHT,
+    [VOXEL_EMBER]: MAX_LIGHT,
+  };
   for (let id = VOXEL_LAVA_LEVEL_1; id <= VOXEL_LAVA_LEVEL_7; id++) {
     levels[id] = MAX_LIGHT;
   }

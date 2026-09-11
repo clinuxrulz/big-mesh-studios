@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { ScriptHost, type DialogState } from "./script-host";
+import { ScriptHost, type DialogState, type ScriptedFire } from "./script-host";
 import { SAMPLE_PLACE_SCRIPT } from "./sample";
 import { MAIN_SCRIPT_FILE } from "./project";
 
@@ -26,6 +26,7 @@ const fresh = async (): Promise<{
     at: { x: number; z: number; y?: number; yaw?: number };
   }>;
   faces: Array<{ player: string; at: { x: number; z: number } }>;
+  fires: ScriptedFire[];
 }> => {
   clockMs = 0;
   const toasts: Array<{ player: string; text: string }> = [];
@@ -45,6 +46,7 @@ const fresh = async (): Promise<{
     at: { x: number; z: number; y?: number; yaw?: number };
   }> = [];
   const faces: Array<{ player: string; at: { x: number; z: number } }> = [];
+  const fires: ScriptedFire[] = [];
   const h = new ScriptHost({
     seed: 5,
     now: clock,
@@ -57,6 +59,7 @@ const fresh = async (): Promise<{
     onNarrate: (player, line) => narrations.push({ player, line }),
     onPlayerPlace: (player, at) => places.push({ player, at }),
     onPlayerFace: (player, at) => faces.push({ player, at }),
+    onFire: (fire) => fires.push(fire),
   });
   return {
     host: h,
@@ -68,6 +71,7 @@ const fresh = async (): Promise<{
     narrations,
     places,
     faces,
+    fires,
   };
 };
 
@@ -122,6 +126,33 @@ describe("a script host", () => {
     });
     await host.use("fridge", "", "cola");
     expect(toasts.map((t) => t.text)).toEqual(["opened fridge with cola"]);
+    host.dispose();
+  });
+
+  it("lights a fire and tells the world where it burns", async () => {
+    const { host, fires } = await fresh();
+    await loadProject(
+      host,
+      `
+      var started = false;
+      export function bmsTick(clockMs, eventsJson) {
+        if (!started) {
+          started = true;
+          engine.dispatch("fire", JSON.stringify({
+            id: "fire-0", x: 10, z: 18, height: 3.5,
+          }));
+        }
+      }
+      `,
+    );
+    expect(host.fire("fire-0")).toMatchObject({
+      id: "fire-0",
+      x: 10,
+      z: 18,
+      y: 10,
+      height: 3.5,
+    });
+    expect(fires).toHaveLength(1);
     host.dispose();
   });
 

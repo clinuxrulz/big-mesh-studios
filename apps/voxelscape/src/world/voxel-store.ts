@@ -22,6 +22,9 @@ export const VOXEL_BRICK = 25;
 export const VOXEL_WOOD = 26;
 export const VOXEL_ICE = 27;
 export const VOXEL_GREYSTONE = 28;
+// Fire embers: a solid block that shines like lava but stays out of the fluid
+// and lava-id ranges, so it never spreads, fills, or counts as a hazard.
+export const VOXEL_EMBER = 29;
 
 // Flowing water and lava. A fluid voxel is its kind's source id at level 0
 // (a full, stationary body cell) or one of the level ids below, level k being

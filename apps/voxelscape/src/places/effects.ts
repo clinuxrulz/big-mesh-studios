@@ -12,6 +12,7 @@ export type EffectTag =
   | "npc-remove"
   | "prop"
   | "prop-remove"
+  | "fire"
   | "zone"
   | "zone-remove"
   | "item-define"
@@ -108,6 +109,19 @@ export type ParsedEffect =
       };
     }
   | { tag: "prop-remove"; payload: { id: string } }
+  | {
+      tag: "fire";
+      payload: {
+        id: string;
+        /** The blaze's base, in world units; the host grounds the ember. */
+        x: number;
+        z: number;
+        /** The blaze's base height in world units; defaults to the ground. */
+        y?: number;
+        /** Drawn height of the flame in world units. */
+        height?: number;
+      };
+    }
   | {
       tag: "zone";
       payload: {
@@ -244,6 +258,18 @@ const isPayload = (tag: EffectTag, value: unknown): boolean => {
       );
     case "prop-remove":
       return isShort(p.id, 64);
+    case "fire":
+      return (
+        isShort(p.id, 64) &&
+        isCoord(p.x) &&
+        isCoord(p.z) &&
+        (p.y === undefined || isCoord(p.y)) &&
+        (p.height === undefined ||
+          (typeof p.height === "number" &&
+            Number.isFinite(p.height) &&
+            p.height > 0 &&
+            p.height <= MAX_PROP_HEIGHT))
+      );
     case "zone": {
       const { min, max } = p;
       return (

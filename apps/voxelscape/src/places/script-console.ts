@@ -3,7 +3,7 @@
 // console drives the dialog — starting a talk, picking an option, walking away —
 // while the script's toasts go wherever the caller sends them. Everything the
 // methods return is one line-shaped answer for a console to print.
-import { ScriptHost, type DialogState } from "./script-host";
+import { ScriptHost, type DialogState, type ScriptedFire } from "./script-host";
 import { SAMPLE_PLACE_SCRIPT } from "./sample";
 import { MAIN_SCRIPT_FILE } from "./project";
 
@@ -36,6 +36,8 @@ export interface ScriptConsoleParams {
   ) => void;
   /** Called when the script turns a player to look at a world point. */
   onPlayerFace?: (player: string, at: { x: number; z: number }) => void;
+  /** Called when the script lights a fire; the world seeds its ember light. */
+  onFire?: (fire: ScriptedFire) => void;
 }
 
 /** The option a console prints for a dialog, numbered for `/script:choose`. */
@@ -72,6 +74,7 @@ export class ScriptConsole {
     player: string,
     at: { x: number; z: number },
   ) => void;
+  private readonly onFire: (fire: ScriptedFire) => void;
   private host: ScriptHost | null = null;
   /** The last project loaded, so `restart` can run it once more from scratch. */
   private last: {
@@ -90,6 +93,7 @@ export class ScriptConsole {
     this.onNarrate = params.onNarrate ?? (() => {});
     this.onPlayerPlace = params.onPlayerPlace ?? (() => {});
     this.onPlayerFace = params.onPlayerFace ?? (() => {});
+    this.onFire = params.onFire ?? (() => {});
   }
 
   /** Whether a script is loaded and running. */
@@ -115,6 +119,16 @@ export class ScriptConsole {
   /** The prop with `id`, or null when the script has not placed one. */
   prop(id: string) {
     return this.host?.prop(id) ?? null;
+  }
+
+  /** The fires the loaded script has lit, for the world to draw. */
+  fires() {
+    return this.host?.fireList ?? [];
+  }
+
+  /** The blaze with `id`, or null when the script has not lit one. */
+  fire(id: string) {
+    return this.host?.fire(id) ?? null;
   }
 
   /**
@@ -293,6 +307,7 @@ export class ScriptConsole {
       onNarrate: (player, line) => this.onNarrate(player, line),
       onPlayerPlace: (player, at) => this.onPlayerPlace(player, at),
       onPlayerFace: (player, at) => this.onPlayerFace(player, at),
+      onFire: (fire) => this.onFire(fire),
     });
     return this.host;
   }

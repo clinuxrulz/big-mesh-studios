@@ -1,6 +1,10 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { SlicePlane, type MergedRectangle } from "./plane-merge";
+import {
+  SlicePlane,
+  type FaceLight,
+  type MergedRectangle,
+} from "./plane-merge";
 
 /** Every rectangle a plane covers itself with, in the order it finds them. */
 const rectanglesOf = (plane: SlicePlane): MergedRectangle[] => {
@@ -9,8 +13,11 @@ const rectanglesOf = (plane: SlicePlane): MergedRectangle[] => {
   return found;
 };
 
-/** A face shaded the same on all four corners. */
-const flat = (value: number): number[] => [value, value, value, value];
+/** A face lit the same on all four corners, with no block light. */
+const flat = (value: number): FaceLight => ({
+  sky: [value, value, value, value],
+  block: [0, 0, 0, 0],
+});
 
 describe("SlicePlane", () => {
   it("covers nothing when nothing was set", () => {
@@ -23,7 +30,7 @@ describe("SlicePlane", () => {
       plane.set(first, 0, 7, flat(1));
     }
     expect(rectanglesOf(plane)).toEqual([
-      { first: 0, second: 0, wide: 3, tall: 1, id: 7, shade: 1 },
+      { first: 0, second: 0, wide: 3, tall: 1, id: 7, sky: 1, block: 0 },
     ]);
   });
 
@@ -35,7 +42,7 @@ describe("SlicePlane", () => {
       }
     }
     expect(rectanglesOf(plane)).toEqual([
-      { first: 0, second: 0, wide: 2, tall: 3, id: 7, shade: 1 },
+      { first: 0, second: 0, wide: 2, tall: 3, id: 7, sky: 1, block: 0 },
     ]);
   });
 
@@ -61,18 +68,28 @@ describe("SlicePlane", () => {
     const plane = new SlicePlane(4, 4);
     plane.set(0, 0, 7, flat(1));
     plane.set(1, 0, 7, flat(0.5));
-    expect(rectanglesOf(plane).map((one) => one.shade)).toEqual([1, 0.5]);
+    expect(rectanglesOf(plane).map((one) => one.sky)).toEqual([1, 0.5]);
   });
 
   it("leaves a face that is not shaded flat on its own, for the caller to draw", () => {
     const plane = new SlicePlane(4, 4);
     plane.set(0, 0, 7, flat(1));
-    plane.set(1, 0, 7, [1, 1, 0.5, 1]);
+    plane.set(1, 0, 7, { sky: [1, 1, 0.5, 1], block: [0, 0, 0, 0] });
     plane.set(2, 0, 7, flat(1));
     const found = rectanglesOf(plane);
     expect(found).toHaveLength(3);
-    expect(found.map((one) => one.shade)).toEqual([1, null, 1]);
+    expect(found.map((one) => one.sky)).toEqual([1, null, 1]);
     expect(found.every((one) => one.wide === 1 && one.tall === 1)).toBe(true);
+  });
+
+  it("keeps faces apart when only their block light differs", () => {
+    const plane = new SlicePlane(4, 4);
+    plane.set(0, 0, 7, flat(1));
+    plane.set(1, 0, 7, { sky: [1, 1, 1, 1], block: [0.8, 0.8, 0.8, 0.8] });
+    expect(rectanglesOf(plane)).toEqual([
+      { first: 0, second: 0, wide: 1, tall: 1, id: 7, sky: 1, block: 0 },
+      { first: 1, second: 0, wide: 1, tall: 1, id: 7, sky: 1, block: 0.8 },
+    ]);
   });
 
   it("treats an unlit plane as flat, so a world without light still merges", () => {
@@ -80,7 +97,7 @@ describe("SlicePlane", () => {
     plane.set(0, 0, 7, null);
     plane.set(1, 0, 7, null);
     expect(rectanglesOf(plane)).toEqual([
-      { first: 0, second: 0, wide: 2, tall: 1, id: 7, shade: 1 },
+      { first: 0, second: 0, wide: 2, tall: 1, id: 7, sky: 1, block: 0 },
     ]);
   });
 

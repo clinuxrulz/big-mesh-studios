@@ -42,6 +42,8 @@ export const VOXEL_TILES: Record<number, VoxelTiles> = {
   26: { top: "wood", side: "wood", bottom: "wood" },
   27: { top: "ice", side: "ice", bottom: "ice" },
   28: { top: "greystone", side: "greystone", bottom: "greystone" },
+  // Fire embers wear the lava glow, since they light exactly the same way.
+  29: { top: "lava", side: "lava", bottom: "lava" },
   // Flowing lava is textured by the terrain mesh like its source, at whatever
   // partial height its level calls for; water flows are drawn by the water mesh.
   16: { top: "lava", side: "lava", bottom: "lava" },

@@ -10,6 +10,8 @@ import { createPlaceLibrary, createPlacePublisher } from "../atproto/places";
 import type { PlaceLibrary, PlacePublisher } from "../atproto/places";
 import type { ScriptConsole } from "../places/script-console";
 import { VoxelFigures } from "../places/voxel-figures";
+import { FireFigures } from "../renderers/fire-figures";
+import { FireEmbers } from "../world/fire-ember";
 import { pickFigure, type AimTarget } from "../places/figure-pick";
 import type { DialogState } from "../places/script-host";
 import type { ScriptItemDefinition } from "../places/effects";
@@ -437,6 +439,13 @@ export const createVoxelscape = ({
     getFigures: () => scriptConsole?.props() ?? [],
     modelFor: (id) => scriptConsole?.prop(id)?.model ?? "",
   });
+  // A scripted fire is its own particle flame, drawn from the same billboard
+  // shader the bomb-bloom demo uses, with its ember kindled into the floor.
+  const fireFigures = new FireFigures(() => scriptConsole?.fires() ?? []);
+  // The embers the fires kindle, kept so a restart can put the floor back.
+  const fireEmbers = new FireEmbers(world.blocks, (indices) =>
+    world.renderer.onBlocksChanged(indices),
+  );
 
   /** Rebuilds the solid boxes the player collides with from the current props. */
   const refreshPropBoxes = (): void => {
@@ -638,6 +647,9 @@ export const createVoxelscape = ({
     avatar.player.vz = 0;
     avatar.player.onGround = false;
     health.respawn();
+    // The fresh script lights no fires, so the embers of the old run go back
+    // to being the floor they kindled from.
+    fireEmbers.clear();
     void scriptConsole?.restart();
   };
 
@@ -704,6 +716,9 @@ export const createVoxelscape = ({
             at.z - avatar.player.position.z,
           );
           avatar.place();
+        },
+        onFire: (fire) => {
+          fireEmbers.seed(fire);
         },
       });
     }
@@ -892,6 +907,7 @@ export const createVoxelscape = ({
     monsterRender.group,
     npcFigures.group,
     propFigures.group,
+    fireFigures.group,
     world.water,
     environment.weatherEffects,
     world.underwaterTint,
@@ -1340,6 +1356,7 @@ export const createVoxelscape = ({
       monsterRender.tick(dt);
       npcFigures.tick(dt);
       propFigures.tick(dt);
+      fireFigures.tick(dt);
       probe.end(Phase.monsters);
       setScriptItem(scriptConsole?.heldItem() ?? null);
       // The script's zones are checked against where the player stands, so a
@@ -1437,6 +1454,7 @@ export const createVoxelscape = ({
       monsterRender.clear();
       npcFigures.clear();
       propFigures.clear();
+      fireFigures.clear();
       monsterSync.dispose();
       hand.dispose();
       input.dispose();

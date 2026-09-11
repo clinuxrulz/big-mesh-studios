@@ -42,6 +42,17 @@ describe("effect parsing", () => {
     expect(parseEffect(effect("prop-remove", { id: "fridge" }))).not.toBeNull();
     expect(
       parseEffect(
+        effect("fire", { id: "fire-0", x: 10, z: 18, y: 62, height: 3.5 }),
+      ),
+    ).toEqual({
+      tag: "fire",
+      payload: { id: "fire-0", x: 10, z: 18, y: 62, height: 3.5 },
+    });
+    expect(
+      parseEffect(effect("fire", { id: "fire-1", x: 10, z: 18 })),
+    ).not.toBeNull();
+    expect(
+      parseEffect(
         effect("item-define", {
           id: "chips",
           name: "Chips",
@@ -153,6 +164,10 @@ describe("effect parsing", () => {
       ["prop", { id: "fridge", model: "fridge.zip", x: 0, z: 0, height: 0 }],
       ["prop", { id: "fridge", model: "fridge.zip", x: 0, z: 0, yaw: "n" }],
       ["prop-remove", {}],
+      ["fire", { id: "fire", x: 0 }],
+      ["fire", { id: "fire", x: 1, z: 2, height: 0 }],
+      ["fire", { id: "fire", x: 1, z: 2, height: "big" }],
+      ["fire", { id: "fire", x: 1, z: 2, y: 1e7 }],
       ["item-define", { id: "chips", name: "Chips", sprite: "apple" }],
       ["item-give", { player: "", item: "chips", count: 0 }],
       ["item-take", { player: "", item: "", count: 1 }],
