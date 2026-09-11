@@ -157,6 +157,15 @@ export interface VoxelscapeConfig {
    * own drawings to; `null` keeps to the model file the site serves.
    */
   modelAccount?: string | null;
+  /**
+   * Moves the address bar to a different place or demo, for `/place:join`
+   * and `/place:demo` — what that means to the browser (a real path, a hash,
+   * something else) is not this module's business, nor is what happens once
+   * it does: the caller booted this world in response to the address it
+   * already had, and is trusted to do the same when this one changes.
+   * Defaults to setting `window.location.hash` directly.
+   */
+  navigate?: (to: string) => void;
   /** Receives the statistics line once per frame while `debugPerf` is on. */
   onDebugStats?: (line: string) => void;
   /**
@@ -301,6 +310,9 @@ export const createVoxelscape = ({
   debugPerf: initialDebugPerf = __PERF__ &&
     typeof window !== "undefined" &&
     window.location.hash.includes("perf"),
+  navigate = (to) => {
+    window.location.hash = to;
+  },
   onDebugStats,
   onNotice,
   player,
@@ -869,10 +881,8 @@ export const createVoxelscape = ({
    * wait for either to deploy.
    */
   const dressMonsters = async (): Promise<string> => {
-    // Resolved against the site's own root rather than the current address —
-    // a relative fetch would instead resolve against whatever depth the world
-    // was opened from (`/demos/get-a-snack-at-4-am`, `/<handle>/<world-name>`,
-    // …).
+    // Served from the site's own root, the same folder every other address
+    // in this application is built from (see `vite.config.ts`'s `base`).
     const response = await fetch(
       `${import.meta.env.BASE_URL}models/zombie.zip`,
     ).catch(() => null);
@@ -1088,6 +1098,7 @@ export const createVoxelscape = ({
     modelAccount,
     places: placeLibrary,
     placePublisher,
+    navigate,
     togglePlaceEditor: () => {
       const next = !placeEditorOpen();
       setPlaceEditorOpen(next);

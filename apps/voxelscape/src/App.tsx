@@ -1,5 +1,6 @@
 import {
   Component,
+  createEffect,
   createSignal,
   For,
   lazy,
@@ -7,7 +8,7 @@ import {
   onSettled,
   Show,
 } from "solid-js";
-import { useParams } from "@solidjs/router";
+import { useNavigate, useParams } from "@solidjs/router";
 import styles from "./App.module.css";
 import { createPlaceLibrary } from "./atproto/places";
 import { builtinDemo, loadBuiltinDemo } from "./places/demos";
@@ -55,7 +56,10 @@ interface LaunchConfig {
   notice?: string;
 }
 
-const World: Component<{ launch: LaunchConfig }> = (props) => {
+const World: Component<{
+  launch: LaunchConfig;
+  navigate: (to: string) => void;
+}> = (props) => {
   let hud: HTMLDivElement | undefined;
 
   const [notice, setNotice] = createSignal<string>();
@@ -69,6 +73,7 @@ const World: Component<{ launch: LaunchConfig }> = (props) => {
     place: props.launch.place,
     chunkRadius: radiusInUrl(),
     antialias: antialiasInUrl(),
+    navigate: props.navigate,
     onDebugStats: (line) => {
       if (hud !== undefined) {
         hud.textContent = line;
@@ -230,22 +235,33 @@ const App: Component<{}> = () => {
     worldName?: string;
   }>();
 
+  const routerNavigate = useNavigate();
+  // Bumped on every `navigate` call, whatever address it is given — the
+  // router itself treats navigating to the address already showing as
+  // nothing to do, which would otherwise leave `/place:demo` unable to
+  // restart the demo already running. The boot effect below tracks this
+  // alongside `params`, so either changing boots the world again.
+  const [bootGeneration, setBootGeneration] = createSignal(0);
+  const navigate = (to: string): void => {
+    setBootGeneration((n) => n + 1);
+    routerNavigate(to);
+  };
+
   /**
-   * Boots the world a place project describes: its terrain seed, spawn, the
+   * Builds the world a place project describes: its terrain seed, spawn, the
    * structure plan its script compiles, and the scripts themselves.
    */
-  const launchProject = async (
+  const buildLaunch = async (
     project: PlaceProject,
     source: string,
-  ): Promise<void> => {
+  ): Promise<LaunchConfig> => {
     const entry = project.manifest.scripts?.[0];
     if (entry === undefined) {
-      setLaunch({
+      return {
         terrain: { ...DEFAULT_TERRAIN, seed: project.manifest.seed },
         spawn: project.manifest.spawn,
         notice: `${source} names no scripts — playing its terrain`,
-      });
-      return;
+      };
     }
     let structures: StructurePlan | undefined;
     let planNote = "";
@@ -261,7 +277,7 @@ const App: Component<{}> = () => {
       const detail = err instanceof Error ? err.message : String(err);
       planNote = ` · its plan did not compile (${detail})`;
     }
-    setLaunch({
+    return {
       terrain: { ...DEFAULT_TERRAIN, seed: project.manifest.seed },
       spawn: project.manifest.spawn,
       structures,
@@ -272,61 +288,110 @@ const App: Component<{}> = () => {
         models: project.models,
       },
       notice: `${source}${planNote}`,
-    });
+    };
   };
 
-  onSettled(() => {
-    void (async () => {
-      const demoId = params.id;
-      if (demoId !== undefined) {
-        const demo = builtinDemo(demoId);
-        if (demo === null) {
-          setLaunch({
-            notice: `there is no demo "${demoId}" — /place:demos lists them`,
-          });
+  // Boots the world the address bar names, and reboots it whenever that
+  // address — or `bootGeneration`, on a `navigate` to the address already
+  // showing — changes. A boot a newer one has superseded is left to finish
+  // on its own time rather than cancelled outright, but is kept from
+  // overwriting what the newer one decides.
+  createEffect(
+    () => ({
+      demoId: params.id,
+      handle: params.handle,
+      worldName: params.worldName,
+      generation: bootGeneration(),
+    }),
+    ({ demoId, handle, worldName }) => {
+      let current = true;
+      setLaunch(null);
+      setJoiningLine("joining world…");
+
+      void (async () => {
+        if (demoId !== undefined) {
+          const demo = builtinDemo(demoId);
+          if (demo === null) {
+            if (current) {
+              setLaunch({
+                notice: `there is no demo "${demoId}" — /place:demos lists them`,
+              });
+            }
+            return;
+          }
+          if (current) {
+            setJoiningLine(`opening "${demo.name}"…`);
+          }
+          try {
+            const config = await buildLaunch(
+              await loadBuiltinDemo(demo),
+              `playing the demo "${demo.name}"`,
+            );
+            if (current) {
+              setLaunch(config);
+            }
+          } catch (error) {
+            const detail =
+              error instanceof Error ? error.message : String(error);
+            if (current) {
+              setJoiningLine(`could not open the demo — ${detail}`);
+              setLaunch({ notice: `could not open the demo (${detail})` });
+            }
+          }
           return;
         }
-        setJoiningLine(`opening "${demo.name}"…`);
+
+        if (handle === undefined || worldName === undefined) {
+          if (current) {
+            setLaunch({});
+          }
+          return;
+        }
+        if (current) {
+          setJoiningLine(`joining ${handle}/${worldName}…`);
+        }
         try {
-          await launchProject(
-            await loadBuiltinDemo(demo),
-            `playing the demo "${demo.name}"`,
+          const place = await places.find(handle, worldName);
+          if (current) {
+            setJoiningLine("opening the place's scripts…");
+          }
+          const config = await buildLaunch(
+            await readPlaceProject(await places.file(place)),
+            `joined "${place.record.name}" — playing its world`,
           );
+          if (current) {
+            setLaunch(config);
+          }
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
-          setJoiningLine(`could not open the demo — ${detail}`);
-          setLaunch({ notice: `could not open the demo (${detail})` });
+          if (current) {
+            setJoiningLine(`could not join — ${detail}`);
+            setLaunch({
+              notice: `could not join ${handle}/${worldName} (${detail}) — playing this world instead`,
+            });
+          }
         }
-        return;
-      }
+      })();
 
-      const { handle, worldName } = params;
-      if (handle === undefined || worldName === undefined) {
-        setLaunch({});
-        return;
-      }
-      setJoiningLine(`joining ${handle}/${worldName}…`);
-      try {
-        const place = await places.find(handle, worldName);
-        setJoiningLine("opening the place's scripts…");
-        await launchProject(
-          await readPlaceProject(await places.file(place)),
-          `joined "${place.record.name}" — playing its world`,
-        );
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        setJoiningLine(`could not join — ${detail}`);
-        setLaunch({
-          notice: `could not join ${handle}/${worldName} (${detail}) — playing this world instead`,
-        });
-      }
-    })();
-  });
+      return () => {
+        current = false;
+      };
+    },
+  );
 
   return (
-    <Show when={launch()} fallback={<Joining line={joiningLine()} />} keyed>
-      {(config) => <World launch={config} />}
-    </Show>
+    // A world is thrown away and a fresh one built whenever the config
+    // driving it changes, the same way `WorldCanvas` throws away its canvas
+    // on a multisampling change: keying the list on the config is what does
+    // that. `launch()` is a freshly built object each time the boot effect
+    // above lands on one, so identity alone is enough to tell two worlds
+    // apart, including two builds of the very same place or demo.
+    <For
+      each={launch() ? [launch()!] : []}
+      fallback={<Joining line={joiningLine()} />}
+    >
+      {(config) => <World launch={config} navigate={navigate} />}
+    </For>
   );
 };
 

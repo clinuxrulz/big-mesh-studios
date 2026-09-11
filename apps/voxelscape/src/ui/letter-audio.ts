@@ -5,9 +5,8 @@
 // decode it. The context is created and resumed on the first user gesture, the
 // same discipline the weather's sound controller follows, so a dialog opened by
 // a tap can make a sound.
-// Resolved against the site's own root rather than the current address — a
-// relative URL would instead resolve against whatever depth the world was
-// opened from (`/demos/get-a-snack-at-4-am`, `/<handle>/<world-name>`, …).
+// Served from the site's own root, the same folder every other address in
+// this application is built from (see `vite.config.ts`'s `base`).
 const TICK_URL = `${import.meta.env.BASE_URL}audio/letter-tick.ogg`;
 
 /** How loud one letter tick is, relative to the sample. */

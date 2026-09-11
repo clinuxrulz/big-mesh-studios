@@ -163,6 +163,8 @@ export interface CommandsParams {
   places: PlaceLibrary;
   /** Publishing a place of your own, to the signed-in account. */
   placePublisher: PlacePublisher;
+  /** Moves the address bar to a different place or demo, for `/place:join` and `/place:demo`. */
+  navigate: (to: string) => void;
   /** Opens whether the place script editor is showing, and reports the flip. */
   togglePlaceEditor: () => string;
   /** Driving the place script loaded for this session, over the console. */
@@ -277,6 +279,7 @@ export const createCommands = ({
   modelAccount,
   places,
   placePublisher,
+  navigate,
   togglePlaceEditor,
   script,
   resolution,
@@ -821,7 +824,7 @@ export const createCommands = ({
                 return `published — ${atUri}`;
               }
               const handle = await atproto.resolveHandle(parsed.repo);
-              return `published — /${handle ?? parsed.repo}/${parsed.rkey}`;
+              return `published — ${import.meta.env.BASE_URL}#/${handle ?? parsed.repo}/${parsed.rkey}`;
             },
             (err) => `publish failed: ${describeError(err)}`,
           );
@@ -898,10 +901,8 @@ export const createCommands = ({
         try {
           const place = await places.find(account, name);
           const handle = await atproto.resolveHandle(place.repo);
-          window.location.assign(
-            `${import.meta.env.BASE_URL}${handle ?? place.repo}/${place.rkey}`,
-          );
-          return `joining "${place.record.name}" — reloading into its world`;
+          navigate(`/${handle ?? place.repo}/${place.rkey}`);
+          return `joining "${place.record.name}" — loading its world`;
         } catch (err) {
           return `no "${name}" from ${account} — ${describeError(err)}`;
         }
@@ -925,8 +926,8 @@ export const createCommands = ({
         if (demo === null) {
           return `no demo "${id}" — /place:demos lists them`;
         }
-        window.location.assign(`${import.meta.env.BASE_URL}demos/${demo.id}`);
-        return `opening the demo "${demo.name}" — reloading into its world`;
+        navigate(`/demos/${demo.id}`);
+        return `opening the demo "${demo.name}" — loading its world`;
       },
     },
     "/script:demo": {

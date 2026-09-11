@@ -1,12 +1,20 @@
-// Where the world lives under the address bar, and where the application
-// itself lives under the site.
+// Where the world lives under the address bar.
 //
-// Addresses are real paths, not a query string, so an asset cannot be found
-// relative to the page that asked for it — see the `base` comment in
-// `vite.config.ts`. GitHub Pages has no idea a deep path is a page rather than
-// a missing file, so the deploy workflow copies `index.html` to `404.html`,
-// and the router then reads the address it was asked for.
-import { createRouter, defineRoutes } from "@solidjs/router";
+// GitHub Pages is a static file host with no server-side routing at all: an
+// address a client-side router owns (`/demos/gasa4`, say) is not a file it
+// holds, and the one workaround that does not involve GitHub Pages quietly
+// answering a real address with a 404 is to never send the route to the
+// server in the first place. Routing on the URL's hash does that — the
+// browser never sends the fragment after `#` in the request, so every
+// address below is `/big-mesh-studios/voxelscape/#/demos/gasa4`, one single
+// real page (`index.html`) as far as GitHub Pages is concerned, with the
+// hash read back out by the router once that page has loaded.
+//
+// The site's own folder (`import.meta.env.BASE_URL`, set from `vite.config.ts`)
+// still matters for every asset this application fetches — see its `base`
+// comment — but not for routing: the hash carries no site prefix, so the
+// router is given none to match against.
+import { createRouter, defineRoutes, hashHistory } from "@solidjs/router";
 import App from "./App";
 
 export const routes = defineRoutes([
@@ -19,4 +27,4 @@ export const routes = defineRoutes([
   { path: "/:handle/:worldName", component: App },
 ]);
 
-export const Router = createRouter({ routes, base: import.meta.env.BASE_URL });
+export const Router = createRouter({ routes, history: hashHistory() });

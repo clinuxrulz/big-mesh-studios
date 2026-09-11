@@ -55,11 +55,11 @@ jobs:
       # a file on disk. GitHub Pages serves `404.html` for anything it cannot
       # find, so handing it the application means a page opened directly,
       # reloaded, or followed from a link arrives at the application, which then
-      # reads the address and shows the right page.
+      # reads the address and shows the right page. Voxelscape needs no such
+      # copy: its own addresses live after a `#`, which a browser never sends
+      # to the server at all, so GitHub Pages never has to answer for one.
       - name: Answer unknown addresses with the editor
-        run: |
-          cp site/rm-stacker/index.html site/rm-stacker/404.html
-          cp site/voxelscape/index.html site/voxelscape/404.html
+        run: cp site/rm-stacker/index.html site/rm-stacker/404.html
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4

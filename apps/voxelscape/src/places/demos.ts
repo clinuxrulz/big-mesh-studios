@@ -115,10 +115,8 @@ export const loadBuiltinDemo = async (
   const models: Record<string, Uint8Array> = {};
   for (const file of demo.modelFiles) {
     try {
-      // Resolved against the site's own root rather than the current address
-      // — a relative fetch would instead resolve against whatever depth the
-      // demo was opened from (`/demos/get-a-snack-at-4-am`,
-      // `/<handle>/<world-name>`, …).
+      // Served from the site's own root, the same folder every other address
+      // in this application is built from (see `vite.config.ts`'s `base`).
       const response = await fetch(`${import.meta.env.BASE_URL}models/${file}`);
       if (response.ok) {
         models[file] = new Uint8Array(await response.arrayBuffer());
