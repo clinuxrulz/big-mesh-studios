@@ -673,6 +673,38 @@ export const createVoxelscape = ({
           }
         },
         onNarrate: (_player, line) => setNarration(line),
+        onPlayerPlace: (player, at) => {
+          if (player !== "") {
+            return;
+          }
+          // The script gives the player's feet; the avatar's position is the
+          // centre of its cube, `halfSize` above them.
+          avatar.player.position.set(
+            at.x,
+            at.y === undefined
+              ? avatar.player.position.y
+              : at.y + avatar.player.config.halfSize,
+            at.z,
+          );
+          if (at.yaw !== undefined) {
+            avatar.player.yaw = at.yaw;
+          }
+          avatar.player.vx = 0;
+          avatar.player.vy = 0;
+          avatar.player.vz = 0;
+          avatar.player.onGround = false;
+          avatar.place();
+        },
+        onPlayerFace: (player, at) => {
+          if (player !== "") {
+            return;
+          }
+          avatar.player.yaw = Math.atan2(
+            at.x - avatar.player.position.x,
+            at.z - avatar.player.position.z,
+          );
+          avatar.place();
+        },
       });
     }
     return scriptConsole;
@@ -1317,6 +1349,9 @@ export const createVoxelscape = ({
         avatar.player.position.y,
         avatar.player.position.z,
       );
+      // A script's timers fire off the shared clock: pumping is how the world
+      // tells the host time has passed even when no player action arrived.
+      void scriptConsole?.pump();
     }
     probe.begin(Phase.environment);
     const lighting = environment.tick(dt, camera);

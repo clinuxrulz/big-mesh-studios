@@ -79,6 +79,11 @@ export type ScriptEventPayload =
       kind: "npc-leave";
       /** The id of the NPC the player stopped talking to. */
       npcId: string;
+    }
+  | {
+      kind: "timer";
+      /** The id a script gave the deadline it set with a `timer` effect. */
+      timerId: string;
     };
 
 /** One immutable script fact, stamped with where it came from and when. */
@@ -171,6 +176,9 @@ export const isScriptEvent = (v: unknown): v is ScriptEvent => {
   }
   if (r.kind === "npc-talk" || r.kind === "npc-leave") {
     return isShortString(r.npcId, MAX_EVENT_ID);
+  }
+  if (r.kind === "timer") {
+    return isShortString(r.timerId, MAX_EVENT_ID);
   }
   if (r.kind === "npc-choose") {
     return (

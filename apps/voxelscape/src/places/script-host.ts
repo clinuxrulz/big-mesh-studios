@@ -14,7 +14,7 @@ import { bundlePlaceProject } from "./bundle";
 import type { ScriptSandbox } from "./sandbox";
 import type { ScriptEventPayload } from "./events";
 
-/** One scripted NPC: where it stands, and what it is called. */
+/** One scripted NPC: where it stands, how it faces, and what it is called. */
 export interface ScriptedNpc {
   id: string;
   name: string;
@@ -24,6 +24,8 @@ export interface ScriptedNpc {
   x: number;
   y: number;
   z: number;
+  /** Heading in radians; the renderer turns the figure to it. */
+  yaw: number;
 }
 
 /** One scripted prop: where it stands, and which place model it wears. */
@@ -87,6 +89,13 @@ export interface ScriptHostParams {
   }) => void;
   /** Called when a player is shown a line with no figure speaking it. */
   onNarrate?: (player: string, line: { name: string; text: string }) => void;
+  /** Called when the script moves a player, optionally turning them. */
+  onPlayerPlace?: (
+    player: string,
+    at: { x: number; z: number; y?: number; yaw?: number },
+  ) => void;
+  /** Called when the script turns a player to look at a world point. */
+  onPlayerFace?: (player: string, at: { x: number; z: number }) => void;
 }
 
 /**
@@ -118,6 +127,14 @@ export class ScriptHost {
     player: string,
     line: { name: string; text: string },
   ) => void;
+  private readonly onPlayerPlace?: (
+    player: string,
+    at: { x: number; z: number; y?: number; yaw?: number },
+  ) => void;
+  private readonly onPlayerFace?: (
+    player: string,
+    at: { x: number; z: number },
+  ) => void;
 
   /** The items this place's script defines and the local player carries. */
   readonly inventory = new ScriptInventory();
@@ -129,6 +146,9 @@ export class ScriptHost {
   /** Which zones each player currently stands in, keyed by player. */
   private readonly playerZones = new Map<string, Set<string>>();
   private readonly dialogs = new Map<string, DialogState>();
+  /** Timer ids waiting to fire, each against the shared clock it is due at. */
+  private readonly pendingTimers = new Map<string, number>();
+  private pumping = false;
   private loaded = false;
   private sequence = 0;
   private problem: string | undefined;
@@ -144,6 +164,8 @@ export class ScriptHost {
     this.onRestart = params.onRestart;
     this.onTime = params.onTime;
     this.onNarrate = params.onNarrate;
+    this.onPlayerPlace = params.onPlayerPlace;
+    this.onPlayerFace = params.onPlayerFace;
     this.ready = createQuickJSSandbox({
       seed: params.seed,
       now: params.now,
@@ -285,6 +307,35 @@ export class ScriptHost {
     await this.step();
   }
 
+  /**
+   * Fires every timer the shared clock has reached, in id order so peers agree,
+   * and steps the script once if any fired. A script that sets no timer costs
+   * nothing to pump, so the world may call this every frame.
+   */
+  async pump(): Promise<void> {
+    if (!this.loaded || this.pendingTimers.size === 0 || this.pumping) {
+      return;
+    }
+    const now = this.now();
+    const due = [...this.pendingTimers]
+      .filter(([, at]) => at <= now)
+      .map(([id]) => id)
+      .sort();
+    if (due.length === 0) {
+      return;
+    }
+    this.pumping = true;
+    try {
+      for (const id of due) {
+        this.pendingTimers.delete(id);
+        this.author({ kind: "timer", timerId: id }, "");
+      }
+      await this.step();
+    } finally {
+      this.pumping = false;
+    }
+  }
+
   /** One line about the script and what it has created, for a debug console. */
   describe(): string {
     return `script: ${this.loaded ? "loaded" : "not loaded"} · ${this.npcs.size} NPC(s), ${this.props.size} prop(s), ${this.dialogs.size} dialog(s)${
@@ -352,7 +403,7 @@ export class ScriptHost {
   private apply(effect: ParsedEffect): void {
     switch (effect.tag) {
       case "npc": {
-        const { id, x, y, z, name, model } = effect.payload;
+        const { id, x, y, z, name, model, yaw } = effect.payload;
         this.npcs.set(id, {
           id,
           name: name ?? "NPC",
@@ -360,6 +411,7 @@ export class ScriptHost {
           x,
           y: y ?? this.heightAt(x, z),
           z,
+          yaw: yaw ?? 0,
         });
         break;
       }
@@ -447,6 +499,22 @@ export class ScriptHost {
           clear: effect.payload.clear,
         });
         break;
+      case "timer":
+        this.pendingTimers.set(
+          effect.payload.id,
+          this.now() + effect.payload.afterMs,
+        );
+        break;
+      case "player-place": {
+        const { player, x, y, z, yaw } = effect.payload;
+        this.onPlayerPlace?.(player, { x, z, y, yaw });
+        break;
+      }
+      case "player-face": {
+        const { player, x, z } = effect.payload;
+        this.onPlayerFace?.(player, { x, z });
+        break;
+      }
     }
   }
 

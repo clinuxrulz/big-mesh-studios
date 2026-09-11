@@ -24,7 +24,10 @@ export type EffectTag =
   | "narrate"
   | "ending"
   | "restart"
-  | "time";
+  | "time"
+  | "timer"
+  | "player-place"
+  | "player-face";
 
 /** The furthest an NPC or prop may stand from the origin, in world units. */
 export const MAX_NPC_COORD = 1_000_000;
@@ -63,6 +66,8 @@ export const MAX_ENDING_TITLE = 80;
 export const MAX_ENDING_TEXT = 1_000;
 /** The longest a narration line or its speaker's name may be. */
 export const MAX_NARRATION = 500;
+/** The furthest ahead, in milliseconds, a timer may be set. */
+export const MAX_TIMER_MS = 86_400_000;
 
 export type ParsedEffect =
   | {
@@ -77,6 +82,8 @@ export type ParsedEffect =
         name?: string;
         /** The place model file the NPC wears; the world picks one when absent. */
         model?: string;
+        /** Heading in radians, turning the figure to face somewhere. */
+        yaw?: number;
       };
     }
   | { tag: "npc-remove"; payload: { id: string } }
@@ -155,6 +162,37 @@ export type ParsedEffect =
         /** Clears any override, returning the clock to its own cycle. */
         clear?: boolean;
       };
+    }
+  | {
+      tag: "timer";
+      payload: {
+        /** Names the deadline, so the `timer` event it produces can be matched. */
+        id: string;
+        /** How long from now, in milliseconds on the shared clock, to fire. */
+        afterMs: number;
+      };
+    }
+  | {
+      tag: "player-place";
+      payload: {
+        player: string;
+        /** Where the player's feet are put, in world units. */
+        x: number;
+        z: number;
+        /** The feet height to set; the current height is kept when absent. */
+        y?: number;
+        /** The heading to turn the player to, in radians. */
+        yaw?: number;
+      };
+    }
+  | {
+      tag: "player-face";
+      payload: {
+        player: string;
+        /** The world point the player is turned to look at, in world units. */
+        x: number;
+        z: number;
+      };
     };
 
 const isShort = (v: unknown, max: number): boolean =>
@@ -183,7 +221,8 @@ const isPayload = (tag: EffectTag, value: unknown): boolean => {
         isCoord(p.z) &&
         (p.y === undefined || isCoord(p.y)) &&
         (p.name === undefined || isShort(p.name, MAX_NPC_NAME)) &&
-        (p.model === undefined || isShort(p.model, MAX_PROP_MODEL))
+        (p.model === undefined || isShort(p.model, MAX_PROP_MODEL)) &&
+        (p.yaw === undefined || isCoord(p.yaw))
       );
     case "npc-remove":
       return isShort(p.id, 64);
@@ -279,6 +318,24 @@ const isPayload = (tag: EffectTag, value: unknown): boolean => {
         (p.clear === undefined || typeof p.clear === "boolean") &&
         (p.seconds !== undefined || p.speed !== undefined || p.clear === true)
       );
+    case "timer":
+      return (
+        isShort(p.id, 64) &&
+        typeof p.afterMs === "number" &&
+        Number.isFinite(p.afterMs) &&
+        p.afterMs >= 0 &&
+        p.afterMs <= MAX_TIMER_MS
+      );
+    case "player-place":
+      return (
+        isPlayer(p.player) &&
+        isCoord(p.x) &&
+        isCoord(p.z) &&
+        (p.y === undefined || isCoord(p.y)) &&
+        (p.yaw === undefined || isCoord(p.yaw))
+      );
+    case "player-face":
+      return isPlayer(p.player) && isCoord(p.x) && isCoord(p.z);
   }
 };
 

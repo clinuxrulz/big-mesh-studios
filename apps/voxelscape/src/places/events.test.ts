@@ -104,6 +104,11 @@ describe("script event validation", () => {
         kind: "zone-left",
         zoneId: "kitchen",
       } as ScriptEvent,
+      {
+        ...stamp("e14", 1_000, "did:plc:bob"),
+        kind: "timer",
+        timerId: "cook",
+      } as ScriptEvent,
     ]) {
       expect(isScriptEvent(e)).toBe(true);
     }
@@ -156,6 +161,9 @@ describe("script event validation", () => {
         option: 1.5,
       },
       { ...stamp("e1", 1, "p"), kind: "npc-leave" },
+      { ...stamp("e1", 1, "p"), kind: "timer" },
+      { ...stamp("e1", 1, "p"), kind: "timer", timerId: "" },
+      { ...stamp("e1", 1, "p"), kind: "timer", timerId: "x".repeat(65) },
     ];
     for (const bad of cases) {
       expect(isScriptEvent(bad), JSON.stringify(bad)).toBe(false);

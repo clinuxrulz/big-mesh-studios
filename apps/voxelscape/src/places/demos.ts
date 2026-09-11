@@ -23,10 +23,10 @@ export interface BuiltinDemo {
 
 /**
  * The "Get a Snack at 4 AM" demo: a flat street of brick houses under a pinned
- * 4 AM sky, a store with a fridge and a vending machine, two NPCs to talk to,
- * and two endings that eating a snack reaches. It is the proof that a place's
+ * 4 AM sky, a kitchen with a stove and two plates, a store whose counter the
+ * cashier rings up at, and two NPCs to talk to. It is the proof that a place's
  * script can build its world (`bmsPlan`), stand NPCs and rm-stacker props,
- * define and hand out items, and end the game.
+ * define and hand out items, set timers, place the player, and end the game.
  */
 const GASA4: BuiltinDemo = {
   id: "gasa4",
@@ -56,11 +56,13 @@ const GASA4: BuiltinDemo = {
       "colgate.zip",
       "cola.zip",
       "egg.zip",
+      "friedegg.zip",
       "juice.zip",
       "milk.zip",
       "tix.zip",
       "robux.zip",
       "plate.zip",
+      "fire.zip",
     ],
   },
   modelFiles: [
@@ -83,11 +85,13 @@ const GASA4: BuiltinDemo = {
     "colgate.zip",
     "cola.zip",
     "egg.zip",
+    "friedegg.zip",
     "juice.zip",
     "milk.zip",
     "tix.zip",
     "robux.zip",
     "plate.zip",
+    "fire.zip",
   ],
   scripts: {
     [MAIN_SCRIPT_FILE]: GASA4_SCRIPT,

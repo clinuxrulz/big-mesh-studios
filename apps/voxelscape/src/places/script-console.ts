@@ -29,6 +29,13 @@ export interface ScriptConsoleParams {
   }) => void;
   /** Called when a player is shown a line with no figure speaking it. */
   onNarrate?: (player: string, line: { name: string; text: string }) => void;
+  /** Called when the script moves a player, optionally turning them. */
+  onPlayerPlace?: (
+    player: string,
+    at: { x: number; z: number; y?: number; yaw?: number },
+  ) => void;
+  /** Called when the script turns a player to look at a world point. */
+  onPlayerFace?: (player: string, at: { x: number; z: number }) => void;
 }
 
 /** The option a console prints for a dialog, numbered for `/script:choose`. */
@@ -57,6 +64,14 @@ export class ScriptConsole {
     player: string,
     line: { name: string; text: string },
   ) => void;
+  private readonly onPlayerPlace: (
+    player: string,
+    at: { x: number; z: number; y?: number; yaw?: number },
+  ) => void;
+  private readonly onPlayerFace: (
+    player: string,
+    at: { x: number; z: number },
+  ) => void;
   private host: ScriptHost | null = null;
   /** The last project loaded, so `restart` can run it once more from scratch. */
   private last: {
@@ -73,6 +88,8 @@ export class ScriptConsole {
     this.onRestart = params.onRestart ?? (() => {});
     this.onTime = params.onTime ?? (() => {});
     this.onNarrate = params.onNarrate ?? (() => {});
+    this.onPlayerPlace = params.onPlayerPlace ?? (() => {});
+    this.onPlayerFace = params.onPlayerFace ?? (() => {});
   }
 
   /** Whether a script is loaded and running. */
@@ -111,6 +128,11 @@ export class ScriptConsole {
   /** Tells the script where the local player now stands, for its zones. */
   async updatePosition(x: number, y: number, z: number): Promise<void> {
     await this.host?.movePlayer("", x, y, z);
+  }
+
+  /** Fires any timer the shared clock has reached; cheap when none is set. */
+  async pump(): Promise<void> {
+    await this.host?.pump();
   }
 
   /** The local player uses the item they are holding, away from any object. */
@@ -269,6 +291,8 @@ export class ScriptConsole {
       onRestart: (player) => this.onRestart(player),
       onTime: (command) => this.onTime(command),
       onNarrate: (player, line) => this.onNarrate(player, line),
+      onPlayerPlace: (player, at) => this.onPlayerPlace(player, at),
+      onPlayerFace: (player, at) => this.onPlayerFace(player, at),
     });
     return this.host;
   }

@@ -21,6 +21,11 @@ const fresh = async (): Promise<{
   }>;
   restarts: string[];
   narrations: Array<{ player: string; line: { name: string; text: string } }>;
+  places: Array<{
+    player: string;
+    at: { x: number; z: number; y?: number; yaw?: number };
+  }>;
+  faces: Array<{ player: string; at: { x: number; z: number } }>;
 }> => {
   clockMs = 0;
   const toasts: Array<{ player: string; text: string }> = [];
@@ -35,6 +40,11 @@ const fresh = async (): Promise<{
     player: string;
     line: { name: string; text: string };
   }> = [];
+  const places: Array<{
+    player: string;
+    at: { x: number; z: number; y?: number; yaw?: number };
+  }> = [];
+  const faces: Array<{ player: string; at: { x: number; z: number } }> = [];
   const h = new ScriptHost({
     seed: 5,
     now: clock,
@@ -45,8 +55,20 @@ const fresh = async (): Promise<{
     onEnding: (player, state) => endings.push({ player, state }),
     onRestart: (player) => restarts.push(player),
     onNarrate: (player, line) => narrations.push({ player, line }),
+    onPlayerPlace: (player, at) => places.push({ player, at }),
+    onPlayerFace: (player, at) => faces.push({ player, at }),
   });
-  return { host: h, toasts, dialogs, notices, endings, restarts, narrations };
+  return {
+    host: h,
+    toasts,
+    dialogs,
+    notices,
+    endings,
+    restarts,
+    narrations,
+    places,
+    faces,
+  };
 };
 
 describe("a script host", () => {
@@ -283,6 +305,77 @@ describe("a script host", () => {
     );
     expect(host.npc("dad")).toMatchObject({ y: 3 });
     expect(host.prop("bed")).toMatchObject({ y: 4 });
+    host.dispose();
+  });
+
+  it("turns an NPC to the heading the script gives it", async () => {
+    const { host } = await fresh();
+    await loadProject(
+      host,
+      `
+      var started = false;
+      export function bmsTick() {
+        if (!started) {
+          started = true;
+          engine.dispatch("npc", JSON.stringify({ id: "dad", x: 0, z: 0, yaw: 1.25 }));
+        }
+      }
+      `,
+    );
+    expect(host.npc("dad")).toMatchObject({ yaw: 1.25 });
+    host.dispose();
+  });
+
+  it("places and turns the player a script asks for", async () => {
+    const { host, places, faces } = await fresh();
+    await loadProject(
+      host,
+      `
+      var started = false;
+      export function bmsTick() {
+        if (!started) {
+          started = true;
+          engine.dispatch("player-place", JSON.stringify({ player: "", x: 4, z: 5, yaw: 1 }));
+          engine.dispatch("player-face", JSON.stringify({ player: "", x: 4, z: 9 }));
+        }
+      }
+      `,
+    );
+    expect(places).toEqual([{ player: "", at: { x: 4, z: 5, yaw: 1 } }]);
+    expect(faces).toEqual([{ player: "", at: { x: 4, z: 9 } }]);
+    host.dispose();
+  });
+
+  it("fires a timer once the shared clock reaches it, and only once", async () => {
+    const { host, toasts } = await fresh();
+    await loadProject(
+      host,
+      `
+      var started = false;
+      export function bmsTick(clockMs, eventsJson) {
+        if (!started) {
+          started = true;
+          engine.dispatch("timer", JSON.stringify({ id: "ding", afterMs: 1000 }));
+        }
+        var events = JSON.parse(eventsJson);
+        for (var i = 0; i < events.length; i++) {
+          if (events[i].kind === "timer") {
+            engine.dispatch("toast", JSON.stringify({ player: "", text: "fired " + events[i].timerId }));
+          }
+        }
+      }
+      `,
+    );
+    expect(toasts).toEqual([]);
+    clockMs = 500;
+    await host.pump();
+    expect(toasts).toEqual([]);
+    clockMs = 1000;
+    await host.pump();
+    expect(toasts.map((t) => t.text)).toEqual(["fired ding"]);
+    clockMs = 5000;
+    await host.pump();
+    expect(toasts.map((t) => t.text)).toEqual(["fired ding"]);
     host.dispose();
   });
 

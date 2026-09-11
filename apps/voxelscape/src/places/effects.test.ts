@@ -98,6 +98,21 @@ describe("effect parsing", () => {
         effect("npc", { id: "sable", x: 1, z: 2, model: "sable.zip" }),
       ),
     ).not.toBeNull();
+    expect(
+      parseEffect(effect("npc", { id: "dad", x: 1, z: 2, yaw: 1.5 })),
+    ).not.toBeNull();
+    expect(
+      parseEffect(effect("timer", { id: "cook", afterMs: 1_000 })),
+    ).toEqual({ tag: "timer", payload: { id: "cook", afterMs: 1_000 } });
+    expect(
+      parseEffect(effect("player-place", { player: "", x: 1, z: 2, yaw: 0.5 })),
+    ).not.toBeNull();
+    expect(
+      parseEffect(effect("player-place", { player: "", x: 1, z: 2 })),
+    ).not.toBeNull();
+    expect(
+      parseEffect(effect("player-face", { player: "", x: 1, z: 2 })),
+    ).not.toBeNull();
     expect(parseEffect(effect("time", { seconds: 100 }))).not.toBeNull();
     expect(parseEffect(effect("time", { speed: 0 }))).not.toBeNull();
     expect(parseEffect(effect("time", { clear: true }))).not.toBeNull();
@@ -125,7 +140,15 @@ describe("effect parsing", () => {
       ["npc", { id: "x", x: "40", z: 12 }],
       ["npc", { id: "x".repeat(65), x: 0, z: 0 }],
       ["npc", { id: "x", x: 1e7, z: 0 }],
+      ["npc", { id: "x", x: 1, z: 2, yaw: "n" }],
       ["npc-remove", {}],
+      ["timer", { id: "cook" }],
+      ["timer", { id: "cook", afterMs: -1 }],
+      ["timer", { id: "cook", afterMs: 1e9 }],
+      ["timer", { id: "", afterMs: 1 }],
+      ["player-place", { player: "", x: 1 }],
+      ["player-place", { player: "", x: 1, z: 2, yaw: "n" }],
+      ["player-face", { player: "", x: 1 }],
       ["prop", { id: "fridge", x: 0, z: 0 }],
       ["prop", { id: "fridge", model: "fridge.zip", x: 0, z: 0, height: 0 }],
       ["prop", { id: "fridge", model: "fridge.zip", x: 0, z: 0, yaw: "n" }],

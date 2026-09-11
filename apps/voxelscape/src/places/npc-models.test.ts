@@ -103,7 +103,14 @@ describe("the bundled NPC models", () => {
 });
 
 describe("the built-in demo prop models", () => {
-  it.each(["fridge.zip", "vending.zip", "bed.zip", "chips.zip"])(
+  it.each([
+    "fridge.zip",
+    "vending.zip",
+    "bed.zip",
+    "chips.zip",
+    "fire.zip",
+    "friedegg.zip",
+  ])(
     "%s loads as a one-part indexed figure with a full palette",
     async (file) => {
       const figure = await model(file);
