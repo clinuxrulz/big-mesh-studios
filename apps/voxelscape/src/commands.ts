@@ -17,7 +17,7 @@ import type { AdaptiveResolution } from "./render/adaptive";
 import type { PlaceLibrary, PlacePublisher } from "./atproto/places";
 import { parsePlaceAtUri } from "./places/place";
 import { BUILTIN_DEMOS, builtinDemo, loadBuiltinDemo } from "./places/demos";
-import { writePlaceZip } from "./places/project";
+import { emptyPlaceProject, writePlaceZip } from "./places/project";
 
 /**
  * Declares every debug console command as a single object literal, keyed by
@@ -163,6 +163,8 @@ export interface CommandsParams {
   places: PlaceLibrary;
   /** Publishing a place of your own, to the signed-in account. */
   placePublisher: PlacePublisher;
+  /** The seed a freshly created place starts from: the world being played. */
+  defaultSeed: number;
   /** Moves the address bar to a different place or demo, for `/place:join` and `/place:demo`. */
   navigate: (to: string) => void;
   /** Opens whether the place script editor is showing, and reports the flip. */
@@ -279,6 +281,7 @@ export const createCommands = ({
   modelAccount,
   places,
   placePublisher,
+  defaultSeed,
   navigate,
   togglePlaceEditor,
   script,
@@ -810,6 +813,33 @@ export const createCommands = ({
     "/place:editor": {
       description: "open (or close) the place script editor",
       run: () => togglePlaceEditor(),
+    },
+    "/place:create": {
+      description:
+        "publish a new, empty place under your account, seeded from the world being played, and join it",
+      args: "<name>",
+      run: async (rest) => {
+        const name = rest.join(" ").trim();
+        if (name === "") {
+          return "usage: /place:create <name>";
+        }
+        const project = emptyPlaceProject(defaultSeed);
+        project.manifest.name = name;
+        try {
+          const atUri = await placePublisher.publish(
+            await writePlaceZip(project),
+          );
+          const parsed = parsePlaceAtUri(atUri);
+          if (parsed === null) {
+            return `created — ${atUri}`;
+          }
+          const handle = await atproto.resolveHandle(parsed.repo);
+          navigate(`/${handle ?? parsed.repo}/${parsed.rkey}`);
+          return `created "${name}" — joining its world`;
+        } catch (err) {
+          return `create failed: ${describeError(err)}`;
+        }
+      },
     },
     "/place:publish": {
       description:

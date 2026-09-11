@@ -1134,6 +1134,7 @@ export const createVoxelscape = ({
     modelAccount,
     places: placeLibrary,
     placePublisher,
+    defaultSeed: terrain.seed,
     navigate,
     togglePlaceEditor: () => {
       const next = !placeEditorOpen();
