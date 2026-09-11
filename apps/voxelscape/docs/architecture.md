@@ -1,6 +1,6 @@
 # What voxelscape is made of
 
-Drawn from the imports under `src` at 1d18928 by `pnpm architecture`.
+Drawn from the imports under `src` at eb15b4b by `pnpm architecture`.
 Nothing here is written by hand: change the code and run it again.
 
 ```mermaid
@@ -13,10 +13,10 @@ graph TD
   player["player<br/>16 files · 3318 lines"]
   monsters["monsters<br/>6 files · 1638 lines"]
   multiplayer["multiplayer<br/>13 files · 3109 lines"]
-  places["places<br/>21 files · 6223 lines"]
+  places["places<br/>21 files · 6451 lines"]
   environment["environment<br/>6 files · 1798 lines"]
   atproto["atproto<br/>8 files · 1303 lines"]
-  ui["ui<br/>13 files · 1894 lines"]
+  ui["ui<br/>13 files · 1943 lines"]
   atproto --> monsters
   atproto --> places
   atproto --> world
@@ -79,10 +79,10 @@ graph TD
 | `player`      | the body, its input, its tools and what they do to the world           | 16    | 3318  |
 | `monsters`    | what wanders the world and fights the player                           | 6     | 1638  |
 | `multiplayer` | other players, over a peer connection                                  | 13    | 3109  |
-| `places`      | a published place: its script, its people, and the sandbox they run in | 21    | 6223  |
+| `places`      | a published place: its script, its people, and the sandbox they run in | 21    | 6451  |
 | `environment` | the sky, the clock, the weather and the sound                          | 6     | 1798  |
 | `atproto`     | being signed in, and reading and writing published records             | 8     | 1303  |
-| `ui`          | what is drawn over the world in the page                               | 13    | 1894  |
+| `ui`          | what is drawn over the world in the page                               | 13    | 1943  |
 
 ## What reaches into what
 

@@ -543,4 +543,41 @@ describe("the Late to School demo", () => {
     expect(endings).toEqual(["Bad Ending"]);
     host.dispose();
   });
+
+  it("keeps the Dimensionator locked until the collection is ready", async () => {
+    const { host } = await runLts();
+    await host.use("dimensionator", "");
+    expect(host.dialogFor("")).toBeNull();
+    host.dispose();
+  });
+
+  it("resets the corrupted gate on a wrong button", async () => {
+    const { host } = await runLts(["Good Ending", "Bad Ending"]);
+    await host.use("corrupt-button-red", "");
+    expect(host.prop("corrupt-gate")).not.toBeNull();
+    host.dispose();
+  });
+
+  it("ends with the True Ending through the finale", async () => {
+    const { host, endings } = await runLts(["Good Ending", "Bad Ending"]);
+    await host.movePlayer("", -12, 62, 16);
+    await host.movePlayer("", -12, 62, 0);
+    expect(host.npc("james")).toMatchObject({ x: -12, z: 2 });
+    await host.talk("james", "");
+    await host.use("dimensionator", "");
+    await host.choose("dimensionator", 0, "");
+    await host.use("corrupt-button-blue", "");
+    await host.use("corrupt-button-red", "");
+    await host.use("corrupt-button-green", "");
+    await host.use("corrupt-button-purple", "");
+    expect(host.prop("corrupt-gate")).toBeNull();
+    await host.use("corrupt-book", "");
+    expect(host.npc("anomaly")).not.toBeNull();
+    await host.use("corrupt-portal", "");
+    for (let i = 0; i < 5; i++) {
+      await host.talk("anomaly", "");
+    }
+    expect(endings).toEqual(["True Ending"]);
+    host.dispose();
+  });
 });

@@ -28,6 +28,11 @@ interface Event {
 // units, which is why `FLOOR` is 62.
 const GROUND = 30;
 const FLOOR = 62;
+/**
+ * The LOD-0 voxel row the corrupted dimension is built from, far south of the
+ * neighborhood so its ruins never touch the living block.
+ */
+const CORRUPT_Z = 110;
 
 /** The neighborhood's rooms and buildings, as zone ids. */
 const PLAYER_HOUSE = "player-house";
@@ -58,6 +63,10 @@ const LEMONADE = "lemonade";
 const POTHEAD = "pothead";
 const SANTA = "santa";
 const OBBY = "obby";
+const ANOMALY = "anomaly";
+
+/** The order the corrupted dimension's four house buttons must be pressed in. */
+const BUTTON_ORDER = ["blue", "red", "green", "purple"];
 
 /** The dollar value one cash pickup is worth. */
 const CASH = 10;
@@ -84,6 +93,10 @@ let plateA: string | null = null;
 let plateB: string | null = null;
 /** How many times the player has struck Champ with the roaster. */
 let champHits = 0;
+/** How many of the corrupted gate's buttons have been pressed in order. */
+let buttonProgress = 0;
+/** How many times the player has struck The Anomaly with the roaster. */
+let anomalyHits = 0;
 /** How far through the Nerd's three-question quiz the player is; 0 is not started. */
 let quizStage = 0;
 /** The food Pot Head is cooking, or "" when nothing is on the grill. */
@@ -232,10 +245,11 @@ function building(
 export function bmsPlan(): string {
   const b = engine.blocks;
   const shapes: unknown[] = [
-    // A flat neighborhood over the noise, razed clear above it.
-    box(-160, 0, -80, 240, GROUND - 1, 80, b.dirt),
-    box(-160, GROUND, -80, 240, GROUND, 80, b.grass),
-    box(-160, GROUND + 1, -80, 240, 200, 80, 0),
+    // A flat neighborhood over the noise, razed clear above it, reaching south
+    // far enough to carry the corrupted dimension too.
+    box(-160, 0, -80, 160, GROUND - 1, 140, b.dirt),
+    box(-160, GROUND, -80, 160, GROUND, 140, b.grass),
+    box(-160, GROUND + 1, -80, 160, 200, 140, 0),
     // The street, running the length of the block.
     {
       kind: "road",
@@ -254,6 +268,23 @@ export function bmsPlan(): string {
   shapes.push(...building(2, -18, 14, -6, b.wood, "north"));
   shapes.push(...building(16, -18, 28, -6, b.greystone, "north"));
   shapes.push(...building(34, -22, 58, -2, b.greystone, "north"));
+  // The corrupted dimension: the same four houses and school, built in bare
+  // stone far to the south, where the true ending's finale plays out.
+  shapes.push(
+    ...building(-12, CORRUPT_Z + 2, 0, CORRUPT_Z + 14, b.stone, "south"),
+  );
+  shapes.push(
+    ...building(2, CORRUPT_Z + 2, 14, CORRUPT_Z + 14, b.stone, "south"),
+  );
+  shapes.push(
+    ...building(16, CORRUPT_Z + 2, 28, CORRUPT_Z + 14, b.stone, "south"),
+  );
+  shapes.push(
+    ...building(30, CORRUPT_Z + 2, 42, CORRUPT_Z + 14, b.stone, "south"),
+  );
+  shapes.push(
+    ...building(70, CORRUPT_Z + 2, 94, CORRUPT_Z + 14, b.stone, "south"),
+  );
   return JSON.stringify(shapes);
 }
 
@@ -415,6 +446,49 @@ function open(): void {
     false,
   );
 
+  // The finale: the Dimensionator at the arcade, and the corrupted dimension's
+  // four house buttons, gate, history book, and portal, far to the south.
+  prop("dimensionator", "arcade.zip", 40, -10, 2.4, "Dimensionator", false);
+  prop(
+    "corrupt-button-blue",
+    "poster.zip",
+    -12,
+    240,
+    1.4,
+    "Blue Button",
+    false,
+  );
+  prop("corrupt-button-red", "poster.zip", 16, 240, 1.4, "Red Button", false);
+  prop(
+    "corrupt-button-green",
+    "poster.zip",
+    44,
+    240,
+    1.4,
+    "Green Button",
+    false,
+  );
+  prop(
+    "corrupt-button-purple",
+    "poster.zip",
+    72,
+    240,
+    1.4,
+    "Purple Button",
+    false,
+  );
+  prop("corrupt-gate", "gate.zip", 150, 236, 2, "Gate", true);
+  pickup(
+    "corrupt-book",
+    "historybook.zip",
+    "History Book",
+    164,
+    236,
+    FLOOR,
+    0.4,
+  );
+  prop("corrupt-portal", "gate.zip", 200, 236, 2, "Portal", false);
+
   // The pickups the day begins with.
   pickup("plush", "plush.zip", "Plush", -22, 18, FLOOR, 0.6);
   pickup("banana", "banana.zip", "Banana", -20, -6, FLOOR, 0.4);
@@ -456,6 +530,11 @@ function open(): void {
   if (collected.length > 0) {
     say("Endings found so far: " + collected.join(", ") + ".");
   }
+  // The true ending opens once both classroom endings are in the collection,
+  // the way the game asks for every ending before the finale.
+  flags.finaleReady =
+    collected.indexOf("Good Ending") >= 0 &&
+    collected.indexOf("Bad Ending") >= 0;
   // The school bell: wait too long and the classroom ending turns bad.
   timer("late", 120_000);
 }
@@ -821,6 +900,73 @@ function lemonadeChoose(option: number): void {
   give("lemonade", "Pleasure doing business with you, good sir.");
 }
 
+// --- the true ending finale -----------------------------------------------
+
+/** James appears outside the house once the collection is ready for the finale. */
+function maybeStartFinale(): void {
+  if (flags.finaleReady !== true || flags.jamesAppeared === true) {
+    return;
+  }
+  flags.jamesAppeared = true;
+  npc(JAMES, -12, 2, "James", "npc-james.zip", Math.PI);
+  narrate(
+    "James",
+    "I've been expecting you. Your history book is the key to the perfect ending. Go to the arcade — something is waiting outside.",
+  );
+}
+
+/** Opens the Dimensionator and drops the party into the corrupted dimension. */
+function startCorruption(): void {
+  flags.portalOpen = true;
+  dispatch("explosion", { id: "portal-boom", x: 40, z: -10, radius: 5 });
+  narrate("Laugh", "Do you realize what you have done?");
+  narrate(
+    "James",
+    "It's the only way to stop the Anomaly. Find your history book, then run for the portal.",
+  );
+  dispatch("player-place", { player: "", x: 0, z: 236, y: FLOOR });
+  flags.corrupt = true;
+  narrate("You", "The corrupted dimension. It looks like home, but ruined.");
+}
+
+/** Presses one of the four house buttons, which must come in the gate's order. */
+function useButton(color: string): void {
+  if (color !== BUTTON_ORDER[buttonProgress]) {
+    buttonProgress = 0;
+    narrate("You", "The button goes dark. Wrong order.");
+    return;
+  }
+  buttonProgress += 1;
+  if (buttonProgress < BUTTON_ORDER.length) {
+    say("The " + color + " button lights up. (" + buttonProgress + "/4)");
+    return;
+  }
+  flags.gateOpen = true;
+  dispatch("prop-remove", { id: "corrupt-gate" });
+  narrate("You", "The gate drops. The way to the school is open.");
+}
+
+/** The Anomaly in the arena: strike it with the roaster to finish the game. */
+function anomalyTalk(): void {
+  if (flags.arena !== true) {
+    narrate("The Anomaly", "You are weak. Run.");
+    return;
+  }
+  if (held !== "roaster") {
+    narrate("The Anomaly", "You cannot beat me without the roaster.");
+    return;
+  }
+  anomalyHits += 1;
+  if (anomalyHits >= 5) {
+    ending(
+      "True Ending",
+      "You look at your history book. You strangely feel the power of many different alternate realities. Class begins on page 1987.",
+    );
+    return;
+  }
+  narrate("The Anomaly", "You can't stop me. (" + anomalyHits + "/5)");
+}
+
 // --- using props ----------------------------------------------------------
 
 /** Takes a store good without paying, which is the shoplifter's first step. */
@@ -907,6 +1053,51 @@ function used(entityId: string, item: string): void {
   }
   if (entityId === "classroom-door") {
     enterClassroom();
+    return;
+  }
+  if (entityId === "dimensionator") {
+    if (flags.finaleReady !== true) {
+      narrate("You", "The Dimensionator is locked. A code might open it.");
+      return;
+    }
+    dialog("dimensionator", "Enter the code.", ["2546", "0000"]);
+    return;
+  }
+  const buttons: Record<string, string> = {
+    "corrupt-button-blue": "blue",
+    "corrupt-button-red": "red",
+    "corrupt-button-green": "green",
+    "corrupt-button-purple": "purple",
+  };
+  if (buttons[entityId] !== undefined) {
+    useButton(buttons[entityId]);
+    return;
+  }
+  if (entityId === "corrupt-book") {
+    dispatch("prop-remove", { id: "corrupt-book" });
+    flags.gotBook = true;
+    give(
+      "roaster",
+      "You grab the history book. The Anomaly is coming — run to the portal!",
+    );
+    npc(ANOMALY, 92, 236, "The Anomaly", "npc-anomaly.zip", Math.PI);
+    flags.chase = true;
+    timer("chase", 30_000);
+    return;
+  }
+  if (entityId === "corrupt-portal") {
+    if (flags.chase !== true) {
+      narrate("You", "The portal isn't open yet.");
+      return;
+    }
+    flags.chase = false;
+    flags.arena = true;
+    dispatch("player-place", { player: "", x: 280, z: 236, y: FLOOR });
+    npc(ANOMALY, 284, 236, "The Anomaly", "npc-anomaly.zip", Math.PI);
+    narrate(
+      "James",
+      "This is his domain. Look through your memories for the key to defeating him.",
+    );
     return;
   }
   if (entityId === "lemonade-stand" && item === "lemonade") {
@@ -1175,6 +1366,25 @@ function talked(npcId: string, player: string): void {
     );
     return;
   }
+  if (npcId === JAMES) {
+    if (flags.finaleQuest === true) {
+      narrate(
+        "James",
+        "The Dimensionator is outside the arcade. The code is your address.",
+      );
+      return;
+    }
+    flags.finaleQuest = true;
+    narrate(
+      "James",
+      "Your history book has the power to stop the Anomaly. Go to the arcade and unlock the Dimensionator.",
+    );
+    return;
+  }
+  if (npcId === ANOMALY) {
+    anomalyTalk();
+    return;
+  }
   if (npcId === ALEX || npcId === JAMES) {
     narrate("You", "They aren't home right now.");
     return;
@@ -1183,6 +1393,14 @@ function talked(npcId: string, player: string): void {
 
 function chose(npcId: string, option: number, player: string): void {
   dispatch("dialog-close", { player, npcId });
+  if (npcId === "dimensionator") {
+    if (option === 0) {
+      startCorruption();
+    } else {
+      narrate("You", "Access denied.");
+    }
+    return;
+  }
   if (npcId === LAUGH) {
     laughChoose(option);
   } else if (npcId === BRETT) {
@@ -1240,6 +1458,13 @@ function timerFired(id: string): void {
   }
   if (id === "deliver") {
     narrate("Brett", "You're out of time. The shift is over.");
+    return;
+  }
+  if (id === "chase") {
+    if (flags.chase === true) {
+      narrate("The Anomaly", "You can't escape. Try again.");
+    }
+    return;
   }
 }
 
@@ -1259,6 +1484,9 @@ export function bmsTick(_clockMs: number, eventsJson: string): void {
       }
     } else if (event.kind === "zone-left" && event.zoneId !== undefined) {
       delete inZone[event.zoneId];
+      if (event.zoneId === PLAYER_HOUSE) {
+        maybeStartFinale();
+      }
       if (event.zoneId === BEAN_BROS && flags.unpaid === true) {
         ending(
           "Shoplifter",
