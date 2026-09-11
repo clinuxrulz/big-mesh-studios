@@ -7,6 +7,7 @@ import {
   onSettled,
   Show,
 } from "solid-js";
+import { useParams } from "@solidjs/router";
 import styles from "./App.module.css";
 import { createPlaceLibrary } from "./atproto/places";
 import { builtinDemo, loadBuiltinDemo } from "./places/demos";
@@ -180,20 +181,12 @@ const EndingOverlay: Component = () => {
   );
 };
 
-/** What shows while a `?place=` address is resolving, if it ever takes a moment. */
+/** What shows while a place address is resolving, if it ever takes a moment. */
 const Joining: Component<{ line: string }> = (props) => (
   <div class={styles.container}>
     <div class={styles.joining}>{props.line}</div>
   </div>
 );
-
-/** The place the address bar names, or null when it names none. */
-const placeInUrl = (): string | null =>
-  new URLSearchParams(window.location.search).get("place");
-
-/** The built-in demo the address bar names, or null when it names none. */
-const demoInUrl = (): string | null =>
-  new URLSearchParams(window.location.search).get("demo");
 
 /**
  * Whether the address bar turns multisampling off, or undefined when it says
@@ -229,6 +222,13 @@ const App: Component<{}> = () => {
   const [joiningLine, setJoiningLine] = createSignal("joining world…");
 
   const places = createPlaceLibrary();
+  // Which of `src/routes.tsx`'s routes matched: `id` for `/demos/:id`,
+  // `handle`/`worldName` for `/:handle/:worldName`, all undefined on `/`.
+  const params = useParams<{
+    id?: string;
+    handle?: string;
+    worldName?: string;
+  }>();
 
   /**
    * Boots the world a place project describes: its terrain seed, spawn, the
@@ -277,8 +277,8 @@ const App: Component<{}> = () => {
 
   onSettled(() => {
     void (async () => {
-      const demoId = demoInUrl();
-      if (demoId !== null) {
+      const demoId = params.id;
+      if (demoId !== undefined) {
         const demo = builtinDemo(demoId);
         if (demo === null) {
           setLaunch({
@@ -300,14 +300,14 @@ const App: Component<{}> = () => {
         return;
       }
 
-      const atUri = placeInUrl();
-      if (atUri === null) {
+      const { handle, worldName } = params;
+      if (handle === undefined || worldName === undefined) {
         setLaunch({});
         return;
       }
-      setJoiningLine("joining the published place…");
+      setJoiningLine(`joining ${handle}/${worldName}…`);
       try {
-        const place = await places.recordAtUri(atUri);
+        const place = await places.find(handle, worldName);
         setJoiningLine("opening the place's scripts…");
         await launchProject(
           await readPlaceProject(await places.file(place)),
@@ -317,7 +317,7 @@ const App: Component<{}> = () => {
         const detail = error instanceof Error ? error.message : String(error);
         setJoiningLine(`could not join — ${detail}`);
         setLaunch({
-          notice: `could not join that place (${detail}) — playing this world instead`,
+          notice: `could not join ${handle}/${worldName} (${detail}) — playing this world instead`,
         });
       }
     })();

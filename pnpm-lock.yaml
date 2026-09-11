@@ -214,6 +214,9 @@ importers:
       '@random-mesh/rmsl':
         specifier: 'catalog:'
         version: 1.14.0(vite@7.3.6(@types/node@26.4.0))
+      '@solidjs/router':
+        specifier: 2.0.0-next.13
+        version: 2.0.0-next.13(@solidjs/web@2.0.0-beta.29(solid-js@2.0.0-beta.29))(solid-js@2.0.0-beta.29)
       '@solidjs/signals':
         specifier: 'catalog:'
         version: 2.0.0-beta.29

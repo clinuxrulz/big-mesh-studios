@@ -29,7 +29,7 @@ export interface BuiltinDemo {
  * define and hand out items, set timers, place the player, and end the game.
  */
 const GASA4: BuiltinDemo = {
-  id: "gasa4",
+  id: "get-a-snack-at-4-am",
   name: "Get a Snack at 4 AM",
   manifest: {
     name: "Get a Snack at 4 AM",
@@ -115,7 +115,11 @@ export const loadBuiltinDemo = async (
   const models: Record<string, Uint8Array> = {};
   for (const file of demo.modelFiles) {
     try {
-      const response = await fetch(`./models/${file}`);
+      // Resolved against the site's own root rather than the current address
+      // — a relative fetch would instead resolve against whatever depth the
+      // demo was opened from (`/demos/get-a-snack-at-4-am`,
+      // `/<handle>/<world-name>`, …).
+      const response = await fetch(`${import.meta.env.BASE_URL}models/${file}`);
       if (response.ok) {
         models[file] = new Uint8Array(await response.arrayBuffer());
       }

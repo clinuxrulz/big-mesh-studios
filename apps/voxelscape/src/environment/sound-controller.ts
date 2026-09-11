@@ -19,10 +19,13 @@ const SNOW_WIND_MULTIPLIER = 1.4;
 const RAMP_TAU = 0.6;
 /** Speed of sound, metres per second; thunder lags the flash by distance / c. */
 const SPEED_OF_SOUND = 343;
+// Resolved against the site's own root rather than the current address — a
+// relative URL would instead resolve against whatever depth the world was
+// opened from (`/demos/get-a-snack-at-4-am`, `/<handle>/<world-name>`, …).
 /** The CC0 rain recording, served from `public/audio` (see its README). */
-const RAIN_LOOP_URL = "./audio/rain.ogg";
+const RAIN_LOOP_URL = `${import.meta.env.BASE_URL}audio/rain.ogg`;
 /** The CC0 thunder clap, served from `public/audio` (see its README). */
-const THUNDER_URL = "./audio/thunder.ogg";
+const THUNDER_URL = `${import.meta.env.BASE_URL}audio/thunder.ogg`;
 /** How loudly the recorded thunder clap plays on top of the distance gain. */
 const THUNDER_PLAY_GAIN = 0.9;
 

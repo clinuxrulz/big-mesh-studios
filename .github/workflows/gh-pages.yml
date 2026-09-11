@@ -35,6 +35,11 @@ jobs:
 
       - name: Build both applications
         run: pnpm build
+        env:
+          # Read by apps/voxelscape/vite.config.ts, and from there carried to
+          # the router and anything else that builds an address of its own —
+          # see the `base` comment there.
+          VOXELSCAPE_BASE_PATH: /big-mesh-studios/voxelscape/
 
       # One repository publishes one Pages site. The two applications take a
       # folder each under it and the addresses each was built for say so, and
@@ -52,7 +57,9 @@ jobs:
       # reloaded, or followed from a link arrives at the application, which then
       # reads the address and shows the right page.
       - name: Answer unknown addresses with the editor
-        run: cp site/rm-stacker/index.html site/rm-stacker/404.html
+        run: |
+          cp site/rm-stacker/index.html site/rm-stacker/404.html
+          cp site/voxelscape/index.html site/voxelscape/404.html
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4

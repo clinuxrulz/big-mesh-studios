@@ -3,7 +3,13 @@ import solid from "vite-plugin-solid";
 import { walkTraceEndpoint } from "./tools/walk-trace-endpoint";
 
 export default defineConfig(({ mode, command }) => ({
-  base: "./",
+  // Addresses are real paths — `/<handle>/<world-name>`, not a query string —
+  // so an asset cannot be found relative to the page that asked for it: two
+  // routes at different depths would resolve a relative address differently.
+  // The deploy workflow sets `VOXELSCAPE_BASE_PATH` to the folder GitHub Pages
+  // serves this app from; `import.meta.env.BASE_URL` then carries the same
+  // value to the router and anything else that builds an address of its own.
+  base: process.env.VOXELSCAPE_BASE_PATH ?? "/",
   server: {
     // Named rather than left to the default, which listens on the version six
     // loopback address alone. A browser resolves `localhost` to the version

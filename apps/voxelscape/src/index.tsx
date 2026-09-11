@@ -2,7 +2,7 @@ import "./index.css";
 import "@fortawesome/fontawesome-free/css/fontawesome.min.css";
 import "@fortawesome/fontawesome-free/css/solid.min.css";
 import { render } from "@solidjs/web";
-import App from "./App";
+import { Router } from "./routes";
 import { OAuthCallbackPage } from "./atproto/oauth-callback-page";
 import { isOAuthCallback } from "./atproto/oauth";
 
@@ -27,7 +27,12 @@ if (window.location.hostname === "localhost") {
   const callback = isOAuthCallback();
 
   render(
-    () => (callback ? <OAuthCallbackPage /> : <App />),
+    () =>
+      callback ? (
+        <OAuthCallbackPage />
+      ) : (
+        <Router>{(props) => props.children}</Router>
+      ),
     document.getElementById("root")!,
   );
 }

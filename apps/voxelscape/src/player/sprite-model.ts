@@ -15,8 +15,11 @@ import { parseTileAtlasXml, type SubTexture } from "../renderers/atlas";
 /** The resolution every face of a tool's model is built at. */
 const SIDE = 24;
 
-export const SPRITESHEET_URL = "./spritesheets/spritesheet_items.png";
-const SPRITESHEET_XML_URL = "./spritesheets/spritesheet_items.xml";
+// Resolved against the site's own root rather than the current address — a
+// relative URL would instead resolve against whatever depth the world was
+// opened from (`/demos/get-a-snack-at-4-am`, `/<handle>/<world-name>`, …).
+export const SPRITESHEET_URL = `${import.meta.env.BASE_URL}spritesheets/spritesheet_items.png`;
+const SPRITESHEET_XML_URL = `${import.meta.env.BASE_URL}spritesheets/spritesheet_items.xml`;
 
 /** The items spritesheet's size, in pixels. */
 export const SPRITESHEET_WIDTH = 1024;

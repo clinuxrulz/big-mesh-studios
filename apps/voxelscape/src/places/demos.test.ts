@@ -16,10 +16,13 @@ const modelBytes = (file: string): ArrayBuffer => {
   ) as ArrayBuffer;
 };
 
-/** Answers the loader's `./models/...` fetches from disk. */
+/** Answers the loader's `<base>models/...` fetches from disk. */
 const stubModels = (): void => {
   vi.stubGlobal("fetch", async (input: unknown) => {
-    const file = String(input).replace("./models/", "");
+    const file = String(input).replace(
+      `${import.meta.env.BASE_URL}models/`,
+      "",
+    );
     return new Response(modelBytes(file));
   });
 };
@@ -31,7 +34,7 @@ afterEach(() => {
 /** Loads the GASA4 demo and returns its script entry, ready to run. */
 const gasa4 = async () => {
   stubModels();
-  const project = await loadBuiltinDemo(builtinDemo("gasa4")!);
+  const project = await loadBuiltinDemo(builtinDemo("get-a-snack-at-4-am")!);
   return { project, entry: project.manifest.scripts![0] };
 };
 
@@ -78,7 +81,7 @@ const useHeld = (host: ScriptHost, id: string): Promise<void> =>
 
 describe("the built-in demos", () => {
   it("lists the GASA4 place with its furniture and items", () => {
-    const demo = builtinDemo("gasa4");
+    const demo = builtinDemo("get-a-snack-at-4-am");
     expect(demo?.name).toBe("Get a Snack at 4 AM");
     expect(demo?.manifest.models).toContain("fridge.zip");
     expect(demo?.manifest.models).toContain("bed.zip");

@@ -15,8 +15,9 @@ import type { MultiplayerController } from "./multiplayer/multiplayer-controller
 import type { PlayerHealth } from "./player/health";
 import type { AdaptiveResolution } from "./render/adaptive";
 import type { PlaceLibrary, PlacePublisher } from "./atproto/places";
-import { placeAtUri } from "./places/place";
-import { BUILTIN_DEMOS, builtinDemo } from "./places/demos";
+import { parsePlaceAtUri } from "./places/place";
+import { BUILTIN_DEMOS, builtinDemo, loadBuiltinDemo } from "./places/demos";
+import { writePlaceZip } from "./places/project";
 
 /**
  * Declares every debug console command as a single object literal, keyed by
@@ -808,8 +809,32 @@ export const createCommands = ({
       run: () => togglePlaceEditor(),
     },
     "/place:publish": {
-      description: "publish a place zip from this device to your account",
-      run: () => {
+      description:
+        "publish a place zip to your account — a file from this device, or a built-in demo by id",
+      args: "[demo id]",
+      run: (rest) => {
+        const publish = (zip: Blob): Promise<string> =>
+          placePublisher.publish(zip).then(
+            async (atUri) => {
+              const parsed = parsePlaceAtUri(atUri);
+              if (parsed === null) {
+                return `published — ${atUri}`;
+              }
+              const handle = await atproto.resolveHandle(parsed.repo);
+              return `published — /${handle ?? parsed.repo}/${parsed.rkey}`;
+            },
+            (err) => `publish failed: ${describeError(err)}`,
+          );
+
+        const demoId = rest[0];
+        if (demoId !== undefined) {
+          const demo = builtinDemo(demoId);
+          if (demo === null) {
+            return `no demo "${demoId}" — /place:demos lists them`;
+          }
+          return loadBuiltinDemo(demo).then(writePlaceZip).then(publish);
+        }
+
         let settle!: (line: string) => void;
         const input = document.createElement("input");
         input.type = "file";
@@ -822,10 +847,7 @@ export const createCommands = ({
             settle("no zip picked");
             return;
           }
-          void placePublisher.publish(file).then(
-            (atUri) => settle(`published — ${atUri}`),
-            (err) => settle(`publish failed: ${describeError(err)}`),
-          );
+          void publish(file).then(settle);
         };
         input.oncancel = () => {
           input.remove();
@@ -875,9 +897,10 @@ export const createCommands = ({
         }
         try {
           const place = await places.find(account, name);
-          const url = new URL(window.location.href);
-          url.searchParams.set("place", placeAtUri(place.repo, place.rkey));
-          window.location.assign(url.toString());
+          const handle = await atproto.resolveHandle(place.repo);
+          window.location.assign(
+            `${import.meta.env.BASE_URL}${handle ?? place.repo}/${place.rkey}`,
+          );
           return `joining "${place.record.name}" — reloading into its world`;
         } catch (err) {
           return `no "${name}" from ${account} — ${describeError(err)}`;
@@ -902,10 +925,7 @@ export const createCommands = ({
         if (demo === null) {
           return `no demo "${id}" — /place:demos lists them`;
         }
-        const url = new URL(window.location.href);
-        url.searchParams.delete("place");
-        url.searchParams.set("demo", demo.id);
-        window.location.assign(url.toString());
+        window.location.assign(`${import.meta.env.BASE_URL}demos/${demo.id}`);
         return `opening the demo "${demo.name}" — reloading into its world`;
       },
     },

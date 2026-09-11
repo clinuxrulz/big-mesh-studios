@@ -71,6 +71,7 @@
     "@fortawesome/fontawesome-free": "catalog:",
     "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
     "@random-mesh/rmsl": "catalog:",
+    "@solidjs/router": "2.0.0-next.13",
     "@solidjs/signals": "catalog:",
     "@solidjs/web": "catalog:",
     "browser-fs-access": "catalog:",

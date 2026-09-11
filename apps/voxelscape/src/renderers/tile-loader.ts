@@ -7,8 +7,11 @@ import {
 } from "./atlas";
 import type { TriangleRenderer } from "./triangle-renderer";
 
-const TILE_URL = "./spritesheets/spritesheet_tiles.png";
-const XML_URL = "./spritesheets/spritesheet_tiles.xml";
+// Resolved against the site's own root rather than the current address — a
+// relative URL would instead resolve against whatever depth the world was
+// opened from (`/demos/get-a-snack-at-4-am`, `/<handle>/<world-name>`, …).
+const TILE_URL = `${import.meta.env.BASE_URL}spritesheets/spritesheet_tiles.png`;
+const XML_URL = `${import.meta.env.BASE_URL}spritesheets/spritesheet_tiles.xml`;
 
 export interface LoadVoxelTilesOptions {
   tileUrl?: string;

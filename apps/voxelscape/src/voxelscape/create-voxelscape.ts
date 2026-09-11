@@ -869,7 +869,13 @@ export const createVoxelscape = ({
    * wait for either to deploy.
    */
   const dressMonsters = async (): Promise<string> => {
-    const response = await fetch("./models/zombie.zip").catch(() => null);
+    // Resolved against the site's own root rather than the current address —
+    // a relative fetch would instead resolve against whatever depth the world
+    // was opened from (`/demos/get-a-snack-at-4-am`, `/<handle>/<world-name>`,
+    // …).
+    const response = await fetch(
+      `${import.meta.env.BASE_URL}models/zombie.zip`,
+    ).catch(() => null);
     if (response !== null && response.ok) {
       const line = await monsterRender.loadModelFromBlob(await response.blob());
       onNotice?.(`${line} — served by this site`);
@@ -898,7 +904,9 @@ export const createVoxelscape = ({
   const dressNpcs = async (): Promise<void> => {
     for (const file of ["npc-sable.zip", "npc-rook.zip", "zombie.zip"]) {
       try {
-        const response = await fetch(`./models/${file}`);
+        const response = await fetch(
+          `${import.meta.env.BASE_URL}models/${file}`,
+        );
         if (response.ok) {
           npcFigures.setFigure(file, await loadFigure(await response.blob()));
         }
