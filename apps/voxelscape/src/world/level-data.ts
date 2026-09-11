@@ -16,6 +16,7 @@ import {
   type FillStoreFn,
 } from "./voxel-store";
 import { placeTrees } from "./tree-fill";
+import { stampStructures, type StructurePlan } from "./structure-fill";
 import { LightStore } from "./light-store";
 import { fillSkyLight } from "./sky-light";
 import { fillBlockLight } from "./block-light";
@@ -139,6 +140,8 @@ export const buildBlock = (params: {
   terrain?: TerrainConfig;
   customFillStore?: FillStoreFn;
   borderSizes?: BorderSizes;
+  /** Structures to stamp over the generated terrain, after the trees. */
+  structures?: StructurePlan;
   /** Arrays to fill, lent by their owner; see `buildBlockShell`. */
   into?: BlockArrays;
 }): WorldBlock => {
@@ -157,6 +160,9 @@ export const buildBlock = (params: {
     VOXEL_LOG,
     VOXEL_LEAVES,
   );
+  if (params.structures !== undefined) {
+    stampStructures(block.store, params.center, params.structures);
+  }
   fillLight(block, params.terrain ?? DEFAULT_TERRAIN);
   return block;
 };
@@ -473,6 +479,8 @@ export const buildBlockData = (params: {
   terrain?: TerrainConfig;
   customFillStore?: FillStoreFn;
   borderSizes?: BorderSizes;
+  /** Structures to stamp over the generated terrain, after the trees. */
+  structures?: StructurePlan;
   /** Arrays to fill, lent by their owner; see `buildBlockShell`. */
   into?: BlockArrays;
 }): BlockData => {

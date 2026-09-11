@@ -75,6 +75,11 @@ export interface InputSnapshot {
   secondaryHeld: boolean;
   /** Edge-triggered: true only on the frame the secondary button went up. */
   secondaryReleased: boolean;
+  /**
+   * Edge-triggered: true only on the frame the interact key (E) was pressed,
+   * which uses whatever the crosshair is on or the held item.
+   */
+  use: boolean;
   /** Edge-triggered: the selected hotbar slot changed this frame, or null. */
   select: number | null;
   /** Edge-triggered: the mouse wheel's direction this frame, or 0. */
@@ -96,6 +101,7 @@ interface InputState {
   secondaryQueued: boolean;
   secondaryHeld: boolean;
   secondaryReleasedQueued: boolean;
+  useQueued: boolean;
   selectQueued: number | null;
   wheelQueued: -1 | 0 | 1;
 }
@@ -117,6 +123,8 @@ export interface InputController {
   queuePrimary(): void;
   /** Edge-triggered secondary (use) request, normally from the right mouse button. */
   queueSecondary(): void;
+  /** Edge-triggered interact request, from the E key or the touch interact button. */
+  queueUse(): void;
   /** Selects a hotbar slot by index (0-based) on the next frame. */
   queueSelect(slot: number): void;
   /** Edge-triggered jump request from the touch button. */
@@ -205,6 +213,7 @@ export const createInput = (): InputController => {
     secondaryQueued: false,
     secondaryHeld: false,
     secondaryReleasedQueued: false,
+    useQueued: false,
     selectQueued: null,
     wheelQueued: 0,
   };
@@ -350,6 +359,12 @@ export const createInput = (): InputController => {
           state.jumpHeld = true;
           return;
         }
+        if (e.code === "KeyE") {
+          if (!e.repeat) {
+            state.useQueued = true;
+          }
+          return;
+        }
         if (e.code.startsWith("Digit")) {
           const slot = Number(e.code.slice(5));
           if (slot >= 1 && slot <= 9) {
@@ -438,6 +453,7 @@ export const createInput = (): InputController => {
         secondary: state.secondaryQueued,
         secondaryHeld: state.secondaryHeld,
         secondaryReleased: state.secondaryReleasedQueued,
+        use: state.useQueued,
         select: state.selectQueued,
         wheel: state.wheelQueued,
       };
@@ -449,6 +465,7 @@ export const createInput = (): InputController => {
       state.tapQueued = false;
       state.secondaryQueued = false;
       state.secondaryReleasedQueued = false;
+      state.useQueued = false;
       state.selectQueued = null;
       state.wheelQueued = 0;
       return snap;
@@ -460,6 +477,10 @@ export const createInput = (): InputController => {
 
     queueSecondary() {
       state.secondaryQueued = true;
+    },
+
+    queueUse() {
+      state.useQueued = true;
     },
 
     queueSelect(slot) {

@@ -9,18 +9,53 @@
 import { createQuickJSSandbox } from "./quickjs-sandbox";
 import { EventLog } from "./event-log";
 import { parseEffect, type ParsedEffect } from "./effects";
+import { ScriptInventory } from "./script-items";
 import { bundlePlaceProject } from "./bundle";
 import type { ScriptSandbox } from "./sandbox";
 import type { ScriptEventPayload } from "./events";
 
-/** One scripted NPC: where it stands, and what it is called. */
+/** One scripted NPC: where it stands, how it faces, and what it is called. */
 export interface ScriptedNpc {
   id: string;
   name: string;
+  /** The place model file the NPC wears, or "" for the world's own pick. */
+  model: string;
   /** Feet position, in world units; the renderer stands a figure on it. */
   x: number;
   y: number;
   z: number;
+  /** Heading in radians; the renderer turns the figure to it. */
+  yaw: number;
+}
+
+/** One scripted prop: where it stands, and which place model it wears. */
+export interface ScriptedProp {
+  id: string;
+  /** The model file the prop wears, as the place's manifest names it. */
+  model: string;
+  name: string;
+  /** Feet position, in world units. */
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  height: number;
+  /** Whether the prop blocks the player rather than being walked through. */
+  solid: boolean;
+}
+
+// The blaze record the host reports lives in the world area, whose types both
+// the host and the renderer may import; it is re-exported so a caller of the
+// host need not know where it is kept.
+import type { ScriptedFire } from "../world/fire-ember";
+export type { ScriptedFire };
+
+/** One named box a script watches the players move through. */
+export interface ScriptZone {
+  id: string;
+  name: string;
+  min: [number, number, number];
+  max: [number, number, number];
 }
 
 /** The dialog one player is currently in, as the script last set it. */
@@ -45,6 +80,30 @@ export interface ScriptHostParams {
   onDialog?: (player: string, state: DialogState | null) => void;
   /** Called when a step could not run, or the script logged a line. */
   onNotice?: (message: string) => void;
+  /** Called when `player`'s game reaches an ending, or null to close it. */
+  onEnding?: (
+    player: string,
+    state: { title: string; text: string } | null,
+  ) => void;
+  /** Called when `player`'s game asks to start over. */
+  onRestart?: (player: string) => void;
+  /** Called when the script pins, jumps, or releases the day-night clock. */
+  onTime?: (command: {
+    seconds?: number;
+    speed?: number;
+    clear?: boolean;
+  }) => void;
+  /** Called when a player is shown a line with no figure speaking it. */
+  onNarrate?: (player: string, line: { name: string; text: string }) => void;
+  /** Called when the script moves a player, optionally turning them. */
+  onPlayerPlace?: (
+    player: string,
+    at: { x: number; z: number; y?: number; yaw?: number },
+  ) => void;
+  /** Called when the script turns a player to look at a world point. */
+  onPlayerFace?: (player: string, at: { x: number; z: number }) => void;
+  /** Called when the script lights a fire; the world seeds its ember light. */
+  onFire?: (fire: ScriptedFire) => void;
 }
 
 /**
@@ -62,11 +121,44 @@ export class ScriptHost {
     state: DialogState | null,
   ) => void;
   private readonly onNotice?: (message: string) => void;
+  private readonly onEnding?: (
+    player: string,
+    state: { title: string; text: string } | null,
+  ) => void;
+  private readonly onRestart?: (player: string) => void;
+  private readonly onTime?: (command: {
+    seconds?: number;
+    speed?: number;
+    clear?: boolean;
+  }) => void;
+  private readonly onNarrate?: (
+    player: string,
+    line: { name: string; text: string },
+  ) => void;
+  private readonly onPlayerPlace?: (
+    player: string,
+    at: { x: number; z: number; y?: number; yaw?: number },
+  ) => void;
+  private readonly onPlayerFace?: (
+    player: string,
+    at: { x: number; z: number },
+  ) => void;
+  private readonly onFire?: (fire: ScriptedFire) => void;
 
+  /** The items this place's script defines and the local player carries. */
+  readonly inventory = new ScriptInventory();
   private readonly log = new EventLog();
   private readonly sent = new Set<string>();
   private readonly npcs = new Map<string, ScriptedNpc>();
+  private readonly props = new Map<string, ScriptedProp>();
+  private readonly fires = new Map<string, ScriptedFire>();
+  private readonly zones = new Map<string, ScriptZone>();
+  /** Which zones each player currently stands in, keyed by player. */
+  private readonly playerZones = new Map<string, Set<string>>();
   private readonly dialogs = new Map<string, DialogState>();
+  /** Timer ids waiting to fire, each against the shared clock it is due at. */
+  private readonly pendingTimers = new Map<string, number>();
+  private pumping = false;
   private loaded = false;
   private sequence = 0;
   private problem: string | undefined;
@@ -78,6 +170,13 @@ export class ScriptHost {
     this.onToast = params.onToast;
     this.onDialog = params.onDialog;
     this.onNotice = params.onNotice;
+    this.onEnding = params.onEnding;
+    this.onRestart = params.onRestart;
+    this.onTime = params.onTime;
+    this.onNarrate = params.onNarrate;
+    this.onPlayerPlace = params.onPlayerPlace;
+    this.onPlayerFace = params.onPlayerFace;
+    this.onFire = params.onFire;
     this.ready = createQuickJSSandbox({
       seed: params.seed,
       now: params.now,
@@ -92,6 +191,26 @@ export class ScriptHost {
   /** The NPC with `id`, or null when the script has not placed one. */
   npc(id: string): ScriptedNpc | null {
     return this.npcs.get(id) ?? null;
+  }
+
+  /** Every prop the script has placed in the world. */
+  get propList(): ScriptedProp[] {
+    return [...this.props.values()];
+  }
+
+  /** The prop with `id`, or null when the script has not placed one. */
+  prop(id: string): ScriptedProp | null {
+    return this.props.get(id) ?? null;
+  }
+
+  /** Every blaze the script has lit in the world. */
+  get fireList(): ScriptedFire[] {
+    return [...this.fires.values()];
+  }
+
+  /** The blaze with `id`, or null when the script has not lit one. */
+  fire(id: string): ScriptedFire | null {
+    return this.fires.get(id) ?? null;
   }
 
   /** The dialog `player` is in, or null when they are not talking. */
@@ -150,9 +269,97 @@ export class ScriptHost {
     await this.step();
   }
 
+  /**
+   * The player used the NPC or prop with `entityId`, optionally while holding
+   * `item` — a fact the script's rules answer, such as a vending machine taking
+   * a soda.
+   */
+  async use(entityId: string, player: string, item = ""): Promise<void> {
+    this.assertAlive();
+    this.author({ kind: "entity-used", entityId, item }, player);
+    await this.step();
+  }
+
+  /** The player used the item with `itemId` on its own, away from any object. */
+  async useItem(itemId: string, player: string): Promise<void> {
+    this.assertAlive();
+    this.author({ kind: "item-used", item: itemId }, player);
+    await this.step();
+  }
+
+  /**
+   * Tells the host where a player now stands, so it can author the
+   * `zone-entered` and `zone-left` facts for the zones they crossed. A step
+   * that crosses nothing is not run, so walking around costs nothing.
+   */
+  async movePlayer(
+    player: string,
+    x: number,
+    y: number,
+    z: number,
+  ): Promise<void> {
+    this.assertAlive();
+    const inside = new Set<string>();
+    for (const zone of this.zones.values()) {
+      if (
+        x >= zone.min[0] &&
+        x <= zone.max[0] &&
+        y >= zone.min[1] &&
+        y <= zone.max[1] &&
+        z >= zone.min[2] &&
+        z <= zone.max[2]
+      ) {
+        inside.add(zone.id);
+      }
+    }
+    const was = this.playerZones.get(player) ?? new Set<string>();
+    const entered = [...inside].filter((id) => !was.has(id));
+    const left = [...was].filter((id) => !inside.has(id));
+    if (entered.length === 0 && left.length === 0) {
+      return;
+    }
+    this.playerZones.set(player, inside);
+    for (const id of left) {
+      this.author({ kind: "zone-left", zoneId: id }, player);
+    }
+    for (const id of entered) {
+      this.author({ kind: "zone-entered", zoneId: id }, player);
+    }
+    await this.step();
+  }
+
+  /**
+   * Fires every timer the shared clock has reached, in id order so peers agree,
+   * and steps the script once if any fired. A script that sets no timer costs
+   * nothing to pump, so the world may call this every frame.
+   */
+  async pump(): Promise<void> {
+    if (!this.loaded || this.pendingTimers.size === 0 || this.pumping) {
+      return;
+    }
+    const now = this.now();
+    const due = [...this.pendingTimers]
+      .filter(([, at]) => at <= now)
+      .map(([id]) => id)
+      .sort();
+    if (due.length === 0) {
+      return;
+    }
+    this.pumping = true;
+    try {
+      for (const id of due) {
+        this.pendingTimers.delete(id);
+        this.author({ kind: "timer", timerId: id }, "");
+      }
+      await this.step();
+    } finally {
+      this.pumping = false;
+    }
+  }
+
   /** One line about the script and what it has created, for a debug console. */
   describe(): string {
-    return `script: ${this.loaded ? "loaded" : "not loaded"} · ${this.npcs.size} NPC(s), ${this.dialogs.size} dialog(s)${
+    return `script: ${this.loaded ? "loaded" : "not loaded"} · ${this.npcs.size} NPC(s), ${this.props.size} prop(s), ${this.fires.size} fire(s), ${this.dialogs.size} dialog(s)${
       this.problem === undefined ? "" : ` — ${this.problem}`
     }`;
   }
@@ -217,18 +424,65 @@ export class ScriptHost {
   private apply(effect: ParsedEffect): void {
     switch (effect.tag) {
       case "npc": {
-        const { id, x, z, name } = effect.payload;
+        const { id, x, y, z, name, model, yaw } = effect.payload;
         this.npcs.set(id, {
           id,
           name: name ?? "NPC",
+          model: model ?? "",
           x,
-          y: this.heightAt(x, z),
+          y: y ?? this.heightAt(x, z),
           z,
+          yaw: yaw ?? 0,
         });
         break;
       }
       case "npc-remove":
         this.npcs.delete(effect.payload.id);
+        break;
+      case "prop": {
+        const { id, model, x, y, z, name, yaw, height, solid } = effect.payload;
+        this.props.set(id, {
+          id,
+          model,
+          name: name ?? id,
+          x,
+          y: y ?? this.heightAt(x, z),
+          z,
+          yaw: yaw ?? 0,
+          height: height ?? 2,
+          solid: solid ?? false,
+        });
+        break;
+      }
+      case "prop-remove":
+        this.props.delete(effect.payload.id);
+        break;
+      case "fire": {
+        const { id, x, y, z, height } = effect.payload;
+        const fire: ScriptedFire = {
+          id,
+          x,
+          y: y ?? this.heightAt(x, z),
+          z,
+          height: height ?? 2,
+        };
+        this.fires.set(id, fire);
+        this.onFire?.(fire);
+        break;
+      }
+      case "item-define":
+        this.inventory.define(effect.payload);
+        break;
+      case "item-give":
+        this.inventory.give(effect.payload.item, effect.payload.count);
+        break;
+      case "item-take":
+        this.inventory.take(effect.payload.item, effect.payload.count);
+        break;
+      case "item-hold":
+        this.inventory.hold(
+          effect.payload.item === "" ? null : effect.payload.item,
+        );
         break;
       case "toast":
         this.onToast?.(effect.payload.player, effect.payload.text);
@@ -249,6 +503,52 @@ export class ScriptHost {
         this.dialogs.delete(effect.payload.player);
         this.notifyDialog(effect.payload.player, null);
         break;
+      case "zone": {
+        const { id, name, min, max } = effect.payload;
+        this.zones.set(id, { id, name: name ?? id, min, max });
+        break;
+      }
+      case "zone-remove":
+        this.zones.delete(effect.payload.id);
+        break;
+      case "narrate":
+        this.onNarrate?.(effect.payload.player, {
+          name: effect.payload.name,
+          text: effect.payload.text,
+        });
+        break;
+      case "ending":
+        this.onEnding?.(effect.payload.player, {
+          title: effect.payload.title,
+          text: effect.payload.text,
+        });
+        break;
+      case "restart":
+        this.onRestart?.(effect.payload.player);
+        break;
+      case "time":
+        this.onTime?.({
+          seconds: effect.payload.seconds,
+          speed: effect.payload.speed,
+          clear: effect.payload.clear,
+        });
+        break;
+      case "timer":
+        this.pendingTimers.set(
+          effect.payload.id,
+          this.now() + effect.payload.afterMs,
+        );
+        break;
+      case "player-place": {
+        const { player, x, y, z, yaw } = effect.payload;
+        this.onPlayerPlace?.(player, { x, z, y, yaw });
+        break;
+      }
+      case "player-face": {
+        const { player, x, z } = effect.payload;
+        this.onPlayerFace?.(player, { x, z });
+        break;
+      }
     }
   }
 

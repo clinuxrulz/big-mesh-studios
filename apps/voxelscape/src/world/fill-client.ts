@@ -8,6 +8,7 @@ import {
 } from "./level-data";
 import type { EditLayer } from "./edit-layer";
 import { type FillBatchResult, type FillConfig } from "./fill-worker";
+import { stampStructures, type StructurePlan } from "./structure-fill";
 import type { FillMeshBlockResult } from "./fill-mesh-worker";
 import type { BlockMeshes } from "../renderers/mesh";
 import type { VoxelTileConfig } from "../renderers/atlas";
@@ -44,6 +45,8 @@ export interface FillClientParams {
   editLayer?: EditLayer;
   customFillStore?: FillStoreFn;
   customFillStoreUrl?: string;
+  /** Structures every block is stamped with, over its generated terrain. */
+  structures?: StructurePlan;
   /**
    * The current atlas tile rectangles, read anew for each batch. When it is
    * supplied, a `requestFill` sends combined fill-and-mesh jobs instead of
@@ -165,6 +168,7 @@ export class FillClient {
   ) => void;
   private readonly customFillStore?: FillStoreFn;
   private readonly customFillStoreUrl?: string;
+  private readonly structures?: StructurePlan;
   private readonly editLayer?: EditLayer;
   private readonly tileRects?: () => VoxelTileConfig[];
   /**
@@ -190,6 +194,7 @@ export class FillClient {
     this.onBlockChanged = params.onBlockChanged;
     this.customFillStore = params.customFillStore;
     this.customFillStoreUrl = params.customFillStoreUrl;
+    this.structures = params.structures;
     this.editLayer = params.editLayer;
     this.tileRects = params.tileRects;
     this.fillGen = new Array(params.blocks.length).fill(0);
@@ -228,6 +233,7 @@ export class FillClient {
     const fillConfig: FillConfig = {
       terrain: this.terrain,
       customFillStoreUrl: this.customFillStoreUrl,
+      structures: this.structures,
     };
     worker.postMessage({ type: "config", config: fillConfig });
   }
@@ -578,6 +584,9 @@ export class FillClient {
     block.targetLod = lod;
     const fill = this.customFillStore ?? fillStore;
     fill(block.store, block.center, this.terrain, borderSizes);
+    if (this.structures !== undefined) {
+      stampStructures(block.store, block.center, this.structures);
+    }
     this.applyEdits(i);
     fillLight(block, this.terrain);
     this.onBlockChanged(i);

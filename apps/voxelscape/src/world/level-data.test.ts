@@ -11,7 +11,14 @@ import {
   isWaterAt,
   type Dim3,
 } from "./level-data";
-import { VOXEL_AIR, VOXEL_CLOUD, VOXEL_DIRT, VOXEL_WATER } from "./voxel-store";
+import {
+  VOXEL_AIR,
+  VOXEL_BRICK,
+  VOXEL_CLOUD,
+  VOXEL_DIRT,
+  VOXEL_WATER,
+  VoxelStore,
+} from "./voxel-store";
 
 /** A fast, deterministic constant-height terrain for the byte-for-byte tests. */
 const flatConfig = {
@@ -48,6 +55,27 @@ describe("buildBlockData", () => {
       terrain: flatConfig,
     });
     expect(buf(data.storeData).equals(buf(sync.store.data))).toBe(true);
+  });
+
+  it("stamps a structure plan over the generated terrain", () => {
+    const center: Dim3 = [0, 0, 0];
+    const data = buildBlockData({
+      center,
+      terrain: flatConfig,
+      structures: [
+        { kind: "box", min: [0, 0, 0], max: [0, 0, 0], id: VOXEL_BRICK },
+      ],
+    });
+    // A plan index is a world voxel; with the block centred at the origin, the
+    // voxel at world [0, 2) is interior index 32 on each axis.
+    const store = new VoxelStore({
+      dims: [128, 128, 128],
+      voxels: [64, 64, 64],
+      scale: 2,
+      data: data.storeData,
+    });
+    expect(store.get(32, 32, 32)).toBe(VOXEL_BRICK);
+    expect(data.mightHaveVoxels).toBe(true);
   });
 
   it("generates different data for a different centre", () => {

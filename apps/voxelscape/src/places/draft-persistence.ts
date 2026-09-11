@@ -1,7 +1,9 @@
 // IndexedDB persistence for the place editor's working draft, following the
-// edit-overlay persistence's shape: the whole project is one JSON record under
-// one key, so a save is a single write, and saving is debounced so a burst of
-// keystrokes coalesce into one write rather than one per change.
+// edit-overlay persistence's shape: the whole project is one record under one
+// key, so a save is a single write, and saving is debounced so a burst of
+// keystrokes coalesce into one write rather than one per change. The record is
+// stored as an object rather than JSON, because IndexedDB's structured clone
+// keeps the project's model Blobs as bytes instead of flattening them.
 import type { PlaceProject } from "./project";
 
 const DB_NAME = "bms-voxelscape-places";
@@ -30,35 +32,31 @@ const openDb = (): Promise<IDBDatabase> =>
     req.onerror = () => reject(req.error);
   });
 
-const getJson = (db: IDBDatabase): Promise<string | undefined> =>
+const getRecord = (db: IDBDatabase): Promise<unknown> =>
   new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readonly");
     const req = tx.objectStore(STORE).get(KEY) as IDBRequest;
-    req.onsuccess = () => resolve(req.result as string | undefined);
+    req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
 
-const putJson = (db: IDBDatabase, json: string): Promise<void> =>
+const putRecord = (db: IDBDatabase, record: PlaceProject): Promise<void> =>
   new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite");
-    tx.objectStore(STORE).put(json, KEY);
+    tx.objectStore(STORE).put(record, KEY);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
 
-/** Whether a parsed value is shaped like a saved project, before it is trusted. */
+/** Whether a stored value is shaped like a saved project, before it is trusted. */
 const isPlaceProject = (v: unknown): v is PlaceProject => {
   if (typeof v !== "object" || v === null) {
     return false;
   }
   const r = v as Record<string, unknown>;
-  return (
-    typeof r.manifest === "object" &&
-    r.manifest !== null &&
-    typeof r.scripts === "object" &&
-    r.scripts !== null &&
-    !Array.isArray(r.scripts)
-  );
+  const isMap = (map: unknown): boolean =>
+    typeof map === "object" && map !== null && !Array.isArray(map);
+  return isMap(r.manifest) && isMap(r.scripts) && isMap(r.models);
 };
 
 /**
@@ -84,7 +82,7 @@ export const createDraftPersistence = (): DraftPersistence => {
     const saved = pending;
     pending = null;
     try {
-      await putJson(await db(), JSON.stringify(saved));
+      await putRecord(await db(), saved);
     } catch (err) {
       console.warn("[place draft] failed to persist to IndexedDB.", err);
     }
@@ -93,12 +91,8 @@ export const createDraftPersistence = (): DraftPersistence => {
   return {
     async load() {
       try {
-        const json = await getJson(await db());
-        if (json === undefined) {
-          return null;
-        }
-        const parsed: unknown = JSON.parse(json);
-        return isPlaceProject(parsed) ? parsed : null;
+        const stored = await getRecord(await db());
+        return isPlaceProject(stored) ? stored : null;
       } catch (err) {
         console.warn("[place draft] failed to load from IndexedDB.", err);
         return null;

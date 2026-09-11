@@ -24,6 +24,7 @@ const PROJECT: PlaceProject = {
     "main.js": "var started = false;",
     "extra.js": "function bmsTick() {}",
   },
+  models: {},
 };
 
 describe("a place project", () => {
@@ -36,7 +37,19 @@ describe("a place project", () => {
       scripts: [MAIN_SCRIPT_FILE],
     });
     expect(fresh.scripts[MAIN_SCRIPT_FILE]).toBe(STARTER_SCRIPT);
+    expect(fresh.models).toEqual({});
     expect(STARTER_SCRIPT).toContain("function bmsTick");
+  });
+
+  it("carries model files through its zip as bytes", async () => {
+    const project: PlaceProject = {
+      manifest: MANIFEST,
+      scripts: { "main.js": "var started = false;" },
+      models: { "fridge.zip": new Uint8Array([1, 2, 3, 4]) },
+    };
+    const opened = await readPlaceProject(await writePlaceZip(project));
+    expect(opened.manifest.models).toEqual(["fridge.zip"]);
+    expect(opened.models["fridge.zip"]).toEqual(new Uint8Array([1, 2, 3, 4]));
   });
 
   it("round-trips a project through its zip", async () => {
@@ -65,6 +78,7 @@ describe("a place project", () => {
     const zip = await writePlaceZip({
       manifest: bare,
       scripts: { "main.js": "var started = false;" },
+      models: {},
     });
     const opened = await readPlaceProject(zip);
     expect(opened.manifest.scripts).toEqual(["main.js"]);

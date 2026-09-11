@@ -20,9 +20,12 @@ import {
 import { createPlaceLibrary, createPlacePublisher } from "../atproto/places";
 import type { PlaceLibrary, PlacePublisher } from "../atproto/places";
 import type { ScriptConsole } from "../places/script-console";
-import { NpcFigures } from "../places/npc-figures";
-import { pickNpc } from "../places/npc-pick";
+import { VoxelFigures } from "../places/voxel-figures";
+import { FireFigures } from "../renderers/fire-figures";
+import { FireEmbers } from "../world/fire-ember";
+import { pickFigure, type AimTarget } from "../places/figure-pick";
 import type { DialogState } from "../places/script-host";
+import type { ScriptItemDefinition } from "../places/effects";
 import type { Commander } from "../commands";
 import { createCommands } from "../commands";
 import { createEnvironment } from "../environment/create-environment";
@@ -32,7 +35,15 @@ import { RemoteMonsters } from "../monsters/remote-monsters";
 import { MultiplayerController } from "../multiplayer/multiplayer-controller";
 import { createPeerJSSignaling } from "../multiplayer/peerjs-transport";
 import { createInput, type InputController } from "../player/create-input";
-import { createPlayerAvatar } from "../player/create-player-avatar";
+import {
+  createPlayerAvatar,
+  type AvatarTerrain,
+} from "../player/create-player-avatar";
+import {
+  boxGroundAt,
+  solidBoxAt,
+  type SolidBox,
+} from "../player/prop-collision";
 import { EditingController } from "../player/editing-controller";
 import { Hand } from "../player/hand";
 import { PlayerHealth } from "../player/health";
@@ -51,14 +62,28 @@ import {
   createVoxelWorld,
   type InitialDrawProgress,
 } from "../world/create-voxel-world";
-import type { SubTexture } from "../renderers/atlas";
+import type { SubTexture, VoxelTiles } from "../renderers/atlas";
 import { cellsInSphere } from "../world/chunk-sphere";
 import { type Dim3 } from "../world/level-data";
+import type { StructurePlan } from "../world/structure-fill";
 import { DEFAULT_TERRAIN, type TerrainConfig } from "../world/noise";
 import { Field, Phase, probe } from "../render/perf-probe";
 
 /** Sky blue, matching the material's default fog color so the horizon blends. */
 const SKY_BLUE = 0x87ceeb;
+
+/**
+ * A Blob over a model's bytes. The copy strips the `SharedArrayBuffer`
+ * possibility TypeScript gives a `Uint8Array`, so the bytes are a `BlobPart`
+ * the DOM will accept.
+ */
+const modelBlob = (bytes: Uint8Array): Blob =>
+  new Blob([
+    bytes.buffer.slice(
+      bytes.byteOffset,
+      bytes.byteOffset + bytes.byteLength,
+    ) as ArrayBuffer,
+  ]);
 
 /**
  * A movement a benchmark drives the player along in place of the keyboard.
@@ -78,6 +103,18 @@ export interface BenchRoute {
   seconds: number;
 }
 
+/** A place whose scripts run in this world from boot, rather than by console. */
+export interface PlaceBoot {
+  /** The place's script files, keyed by manifest-relative path. */
+  files: Record<string, string>;
+  /** The file execution starts from; its module must export `bmsTick`. */
+  entry: string;
+  /** The seed the place's scripts are run against. */
+  seed: number;
+  /** The rm-stacker models the place carries, keyed by manifest-relative path. */
+  models?: Record<string, Uint8Array>;
+}
+
 export interface VoxelscapeConfig {
   /**
    * Whether the canvas starts drawn multisampled, which `/render:msaa` then
@@ -93,6 +130,16 @@ export interface VoxelscapeConfig {
   chunkRadiusY?: number;
   /** Terrain noise settings shared by every block in the ring. */
   terrain?: TerrainConfig;
+  /**
+   * Extra voxel ids and the spritesheet tiles their faces show, merged over the
+   * built-in tile map when the sheet loads. A place that adds block ids names
+   * their tiles here.
+   */
+  customVoxelTiles?: Record<number, VoxelTiles>;
+  /** Structures every chunk is stamped with, over its generated terrain. */
+  structures?: StructurePlan;
+  /** The place whose scripts this world runs from boot, if it is a published one. */
+  place?: PlaceBoot;
   /** When true, only surface voxels are written into each block's GPU chunks instead of the full solid volume. */
   /** Where the player starts, in world units; the spawn height is the terrain surface there. */
   spawn?: Dim3;
@@ -169,11 +216,15 @@ export interface Voxelscape {
     defaultSeed: number;
     places: PlaceLibrary;
     publisher: PlacePublisher;
-    /** Loads the draft's scripts into the running place host, seeded from the draft. */
+    /**
+     * Loads the draft's scripts into the running place host, seeded from the
+     * draft, and dresses any props they place with the draft's model files.
+     */
     runScript(
       files: Record<string, string>,
       entry: string,
       seed: number,
+      models?: Record<string, Uint8Array>,
     ): Promise<string>;
   };
   /** Whether `onDebugStats` is being called, which `/render:perf` toggles. */
@@ -186,10 +237,23 @@ export interface Voxelscape {
   editStatus: Accessor<string>;
   /** What the crosshair is over, or null when the primary button would find nothing. */
   target: Accessor<Target | null>;
-  /** The NPC the crosshair is on, or null when none is in reach to talk to. */
-  npcAim: Accessor<{ id: string; name: string } | null>;
+  /**
+   * The NPC or prop the crosshair is on, or null when none is in reach. The
+   * action says whether a tap talks to it or uses it.
+   */
+  npcAim: Accessor<{ id: string; name: string; action: "talk" | "use" } | null>;
   /** The dialog the local player is in, or null when nobody is talking. */
   dialog: Accessor<DialogState | null>;
+  /** The item a place script has the local player holding, or null. */
+  scriptItem: Accessor<ScriptItemDefinition | null>;
+  /** The ending a place script has reached, or null while the game runs. */
+  ending: Accessor<{ title: string; text: string } | null>;
+  /** A line a place's script is showing with no figure speaking it. */
+  narration: Accessor<{ name: string; text: string } | null>;
+  /** Clears the current narration line. */
+  dismissNarration(): void;
+  /** Starts the place's game over, fresh from the beginning. */
+  restart(): void;
   /** The player starts talking to the NPC with `id`, if a script has one. */
   talkTo(id: string): void;
   /** The player picks option `option` of the dialog on screen. */
@@ -229,6 +293,9 @@ export const createVoxelscape = ({
   chunkRadius = 4,
   chunkRadiusY = 2,
   terrain = DEFAULT_TERRAIN,
+  customVoxelTiles,
+  structures,
+  place,
   spawn = [0, 0, 0],
   modelAccount = WORLD_MODEL_ACCOUNT,
   debugPerf: initialDebugPerf = __PERF__ &&
@@ -240,10 +307,26 @@ export const createVoxelscape = ({
 }: VoxelscapeConfig = {}): Voxelscape => {
   const [editStatus, setEditStatus] = createSignal("");
   const [target, setTarget] = createSignal<Target | null>(null);
-  const [npcAim, setNpcAim] = createSignal<{ id: string; name: string } | null>(
+  const [npcAim, setNpcAim] = createSignal<{
+    id: string;
+    name: string;
+    action: "talk" | "use";
+  } | null>(null);
+  const [dialog, setDialog] = createSignal<DialogState | null>(null);
+  /** The item the local player holds, as a place script last set it. */
+  const [scriptItem, setScriptItem] = createSignal<ScriptItemDefinition | null>(
     null,
   );
-  const [dialog, setDialog] = createSignal<DialogState | null>(null);
+  /** The ending a place script has reached, or null while the game runs. */
+  const [ending, setEnding] = createSignal<{
+    title: string;
+    text: string;
+  } | null>(null);
+  /** A line a place's script is showing with no figure speaking it. */
+  const [narration, setNarration] = createSignal<{
+    name: string;
+    text: string;
+  } | null>(null);
   const [icons, setIcons] = createSignal<Partial<Record<ItemId, SubTexture>>>(
     {},
   );
@@ -298,6 +381,8 @@ export const createVoxelscape = ({
     chunkRadius,
     chunkRadiusY,
     terrain,
+    customVoxelTiles,
+    structures,
     spawn,
     onInitialDraw: setLoading,
   });
@@ -308,12 +393,34 @@ export const createVoxelscape = ({
    * actual cutoff).
    */
   const camera = new PerspectiveCamera(50, 1.0, 0.1, world.ringRadius + 200);
+  /**
+   * The solid boxes the place's props present, refreshed each frame from what
+   * the script has placed. The player's samplers below fold them in, so the
+   * physics treats a bed or a counter like terrain it walks around and onto.
+   */
+  const propBoxes: SolidBox[] = [];
+  const playerTerrain: AvatarTerrain = {
+    heightAt: (x, z) => world.heightAt(x, z),
+    groundHeightAt: (x, y, z) =>
+      Math.max(world.groundHeightAt(x, y, z), boxGroundAt(propBoxes, x, y, z)),
+    inWaterAt: (x, y, z) => world.inWaterAt(x, y, z),
+    solidAt: (x, y, z) =>
+      world.solidAt(x, y, z) || solidBoxAt(propBoxes, x, y, z),
+  };
   const avatar = createPlayerAvatar({
     camera,
-    terrain: world,
+    terrain: playerTerrain,
     spawn,
     player,
   });
+
+  /**
+   * The cube centre the player starts at, kept so a respawn returns there.
+   * Reading `world.heightAt` again would not: it returns the topmost solid
+   * voxel in the column, which is the roof once the house around spawn has
+   * streamed in — the reason a restart put the player on top of it.
+   */
+  const spawnY = avatar.player.position.y;
 
   /**
    * The player's hearts and the death sequence. When a zombie's swing empties
@@ -324,12 +431,7 @@ export const createVoxelscape = ({
     onFallDone: () => {
       // The fall has lain out: put the player back on their feet at spawn,
       // facing the way they started, before this frame's normal placement.
-      const ground = world.heightAt(spawn[0], spawn[2]);
-      avatar.player.position.set(
-        spawn[0],
-        ground + avatar.player.config.halfSize + 0.1,
-        spawn[2],
-      );
+      avatar.player.position.set(spawn[0], spawnY, spawn[2]);
       avatar.player.yaw = 0;
       avatar.player.pitch = 0;
       avatar.player.vx = 0;
@@ -381,15 +483,78 @@ export const createVoxelscape = ({
   // has placed and wearing the bundled model their id names. Nothing draws
   // until /script:demo loads a script that places them.
   let scriptConsole: ScriptConsole | null = null;
-  const npcFigures = new NpcFigures({
-    getNpcs: () => scriptConsole?.npcs() ?? [],
-    modelFor: (id) =>
-      id === "sable"
+  const npcFigures = new VoxelFigures({
+    getFigures: () => scriptConsole?.npcs() ?? [],
+    modelFor: (id) => {
+      const named = scriptConsole?.npc(id)?.model;
+      if (named !== undefined && named !== "") {
+        return named;
+      }
+      return id === "sable"
         ? "npc-sable.zip"
         : id === "rook"
           ? "npc-rook.zip"
-          : "zombie.zip",
+          : "zombie.zip";
+    },
   });
+  // Props are any other object a script stands in the world — a fridge, a
+  // vending machine — drawn from the rm-stacker model it names, exactly as the
+  // zombies and NPCs are.
+  const propFigures = new VoxelFigures({
+    getFigures: () => scriptConsole?.props() ?? [],
+    modelFor: (id) => scriptConsole?.prop(id)?.model ?? "",
+  });
+  // A scripted fire is its own particle flame, drawn from the same billboard
+  // shader the bomb-bloom demo uses, with its ember kindled into the floor.
+  const fireFigures = new FireFigures(() => scriptConsole?.fires() ?? []);
+  // The embers the fires kindle, kept so a restart can put the floor back.
+  const fireEmbers = new FireEmbers(world.blocks, (indices) =>
+    world.renderer.onBlocksChanged(indices),
+  );
+
+  /** Rebuilds the solid boxes the player collides with from the current props. */
+  const refreshPropBoxes = (): void => {
+    propBoxes.length = 0;
+    for (const prop of scriptConsole?.props() ?? []) {
+      if (!prop.solid) {
+        continue;
+      }
+      const box = propFigures.aimBounds(prop.id);
+      if (box === null) {
+        continue;
+      }
+      propBoxes.push({
+        minX: prop.x - box.half,
+        maxX: prop.x + box.half,
+        minY: prop.y,
+        maxY: prop.y + box.height,
+        minZ: prop.z - box.half,
+        maxZ: prop.z + box.half,
+      });
+    }
+  };
+
+  /**
+   * Bakes each model a place carries once and gives it to both figure
+   * renderers, so an NPC or a prop can wear whichever the script names.
+   */
+  const loadPlaceModels = async (
+    models: Record<string, Uint8Array>,
+  ): Promise<void> => {
+    for (const [name, bytes] of Object.entries(models)) {
+      try {
+        const figure = await loadFigure(modelBlob(bytes));
+        npcFigures.setFigure(name, figure);
+        propFigures.setFigure(name, figure);
+      } catch (err) {
+        onNotice?.(
+          `model "${name}" did not load — ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+  };
 
   const inventory = new Inventory();
   const hand = new Hand({ camera });
@@ -534,6 +699,25 @@ export const createVoxelscape = ({
     getRepo: () => atproto.did,
   });
 
+  /**
+   * Starts the place's game over: the player stands back up at spawn and the
+   * script runs from a fresh interpreter, while the world it built stays.
+   */
+  const restartPlace = (): void => {
+    setEnding(null);
+    setDialog(null);
+    avatar.player.position.set(spawn[0], spawnY, spawn[2]);
+    avatar.player.vx = 0;
+    avatar.player.vy = 0;
+    avatar.player.vz = 0;
+    avatar.player.onGround = false;
+    health.respawn();
+    // The fresh script lights no fires, so the embers of the old run go back
+    // to being the floor they kindled from.
+    fireEmbers.clear();
+    void scriptConsole?.restart();
+  };
+
   // The console's place script, built only when a /script: command first needs
   // it, so the interpreter is not loaded by every world that never runs one.
   const scriptConsoleFor = async (): Promise<ScriptConsole> => {
@@ -548,15 +732,101 @@ export const createVoxelscape = ({
             setDialog(state);
           }
         },
+        onEnding: (player, state) => {
+          if (player === "") {
+            setEnding(state);
+          }
+        },
+        onRestart: () => restartPlace(),
+        onTime: (command) => {
+          if (command.clear === true) {
+            environment.dayNight.clearOverride();
+          }
+          if (command.seconds !== undefined) {
+            environment.dayNight.jumpTo(command.seconds);
+          }
+          if (command.speed !== undefined) {
+            environment.dayNight.setSpeed(command.speed);
+          }
+        },
+        onNarrate: (_player, line) => setNarration(line),
+        onPlayerPlace: (player, at) => {
+          if (player !== "") {
+            return;
+          }
+          // The script gives the player's feet; the avatar's position is the
+          // centre of its cube, `halfSize` above them.
+          avatar.player.position.set(
+            at.x,
+            at.y === undefined
+              ? avatar.player.position.y
+              : at.y + avatar.player.config.halfSize,
+            at.z,
+          );
+          if (at.yaw !== undefined) {
+            avatar.player.yaw = at.yaw;
+          }
+          avatar.player.vx = 0;
+          avatar.player.vy = 0;
+          avatar.player.vz = 0;
+          avatar.player.onGround = false;
+          avatar.place();
+        },
+        onPlayerFace: (player, at) => {
+          if (player !== "") {
+            return;
+          }
+          avatar.player.yaw = Math.atan2(
+            at.x - avatar.player.position.x,
+            at.z - avatar.player.position.z,
+          );
+          avatar.place();
+        },
+        onFire: (fire) => {
+          fireEmbers.seed(fire);
+        },
       });
     }
     return scriptConsole;
   };
 
+  // A place joined from its address runs its scripts as soon as the console
+  // that hosts them exists, so its NPCs and dialogs are live without the player
+  // typing a command. Its structure plan was compiled before the world was
+  // built, because the terrain it stamps has to be in place for the first fill.
+  if (place !== undefined) {
+    void loadPlaceModels(place.models ?? {});
+    void scriptConsoleFor()
+      .then((console) =>
+        console.loadProject(place.files, place.entry, place.seed),
+      )
+      .then((line) => onNotice?.(line))
+      .catch((err) =>
+        onNotice?.(
+          `place script did not load — ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        ),
+      );
+  }
+
   /** The player starts talking to the NPC `id` names, over the script host. */
   const npcTalk = (id: string): void => {
     void scriptConsoleFor()
       .then((console) => console.talkTo(id))
+      .catch(() => {});
+  };
+  /** The player uses the prop `id` names, over the script host. */
+  const npcUse = (id: string): void => {
+    const held = scriptConsole?.heldItem()?.id ?? "";
+    void scriptConsoleFor()
+      .then((console) => console.use(id, held))
+      .catch(() => {});
+  };
+  /** The player uses the item `id` names on its own, over the script host. */
+  const itemUse = (id: string): void => {
+    void scriptConsoleFor()
+      .then((console) => console.useItem(id))
       .catch(() => {});
   };
   /** The player picks option `option` (0-based) of the current dialog. */
@@ -701,6 +971,8 @@ export const createVoxelscape = ({
     multiplayer.avatars,
     monsterRender.group,
     npcFigures.group,
+    propFigures.group,
+    fireFigures.group,
     world.water,
     environment.weatherEffects,
     world.underwaterTint,
@@ -776,10 +1048,19 @@ export const createVoxelscape = ({
     defaultSeed: terrain.seed,
     places: placeLibrary,
     publisher: placePublisher,
-    runScript: (files: Record<string, string>, entry: string, seed: number) =>
-      scriptConsoleFor().then((console) =>
+    runScript: (
+      files: Record<string, string>,
+      entry: string,
+      seed: number,
+      models?: Record<string, Uint8Array>,
+    ) => {
+      if (models !== undefined) {
+        void loadPlaceModels(models);
+      }
+      return scriptConsoleFor().then((console) =>
         console.loadProject(files, entry, seed),
-      ),
+      );
+    },
   };
 
   const commands = createCommands({
@@ -1069,6 +1350,7 @@ export const createVoxelscape = ({
       } else {
         probe.begin(Phase.player);
         const snapshot = input.consume();
+        refreshPropBoxes();
         avatar.move(dt, snapshot);
         probe.end(Phase.player);
         // Selecting first, so the rest of the frame — the pick, both buttons,
@@ -1081,47 +1363,90 @@ export const createVoxelscape = ({
         }
         wield(inventory.selectedId);
         const tool = tools[inventory.selectedId];
-        // An NPC the crosshair is on can be talked to with the same tap or click
-        // that would otherwise strike; the aim is recomputed every frame so the
-        // hint tracks what the crosshair is over.
+        // An NPC or prop the crosshair is on can be talked to or used with the
+        // same tap or click that would otherwise strike; the aim is recomputed
+        // every frame so the hint tracks what the crosshair is over.
         const look = avatar.look();
-        const aimed = pickNpc(
-          [look.origin[0], look.origin[1], look.origin[2]] as [
-            number,
-            number,
-            number,
-          ],
-          [look.direction[0], look.direction[1], look.direction[2]] as [
-            number,
-            number,
-            number,
-          ],
-          scriptConsole?.npcs() ?? [],
-        );
+        const orbit = [look.origin[0], look.origin[1], look.origin[2]] as [
+          number,
+          number,
+          number,
+        ];
+        const heading = [
+          look.direction[0],
+          look.direction[1],
+          look.direction[2],
+        ] as [number, number, number];
+        const aimTargets: AimTarget[] = [];
+        for (const npc of scriptConsole?.npcs() ?? []) {
+          const box = npcFigures.aimBounds(npc.id);
+          aimTargets.push({
+            id: npc.id,
+            x: npc.x,
+            y: npc.y,
+            z: npc.z,
+            half: box?.half,
+            height: box?.height,
+          });
+        }
+        for (const prop of scriptConsole?.props() ?? []) {
+          const box = propFigures.aimBounds(prop.id);
+          aimTargets.push({
+            id: prop.id,
+            x: prop.x,
+            y: prop.y,
+            z: prop.z,
+            half: box?.half,
+            height: box?.height,
+          });
+        }
+        const aimed = pickFigure(orbit, heading, aimTargets);
+        const aimedNpc =
+          aimed === null ? null : (scriptConsole?.npc(aimed.id) ?? null);
+        const aimedProp =
+          aimed === null ? null : (scriptConsole?.prop(aimed.id) ?? null);
         if (aimed?.id !== lastAimId) {
           lastAimId = aimed?.id ?? null;
           setNpcAim(
             aimed === null
               ? null
-              : {
-                  id: aimed.id,
-                  name: scriptConsole?.npc(aimed.id)?.name ?? "NPC",
-                },
+              : aimedNpc !== null
+                ? { id: aimed.id, name: aimedNpc.name, action: "talk" }
+                : {
+                    id: aimed.id,
+                    name: aimedProp?.name ?? aimed.id,
+                    action: "use",
+                  },
           );
-        }
-        const talked =
-          dialog() === null &&
-          aimed !== null &&
-          (snapshot.tap || snapshot.click);
-        if (talked) {
-          npcTalk(aimed.id);
         }
         // The camera has not caught up yet, so this picks from last frame's eye
         // along this frame's look. Recomputed every frame, not just on edits, so
         // the crosshair tracks what it is over.
         const pick = tool.pick();
         setTarget(pick.primary);
-        if (snapshot.primary && !talked) {
+        const interacted =
+          dialog() === null &&
+          aimed !== null &&
+          (snapshot.tap || snapshot.click || snapshot.use);
+        if (interacted) {
+          if (aimedNpc !== null) {
+            npcTalk(aimed.id);
+          } else {
+            npcUse(aimed.id);
+          }
+        } else if (
+          // Over empty air, E uses the held item; on touch, a quick tap does
+          // too, which is what the HUD's "tap to use" promises. A tap that
+          // landed on a monster is left to strike below.
+          snapshot.use ||
+          (snapshot.tap && pick.primary?.kind !== "monster")
+        ) {
+          const held = scriptConsole?.heldItem() ?? null;
+          if (held !== null) {
+            itemUse(held.id);
+          }
+        }
+        if (snapshot.primary && !interacted) {
           const result = tool.primary(pick);
           if (result !== null) {
             setEditStatus(result);
@@ -1131,7 +1456,7 @@ export const createVoxelscape = ({
         // needs the hold that repeats `primary`, as a touch would otherwise
         // break whatever it started dragging from. The wielded tools never
         // pick a monster except the sword, so this call is a sword swing.
-        if (!talked && snapshot.tap && pick.primary?.kind === "monster") {
+        if (!interacted && snapshot.tap && pick.primary?.kind === "monster") {
           const result = tool.primary(pick);
           if (result !== null) {
             setEditStatus(result);
@@ -1178,7 +1503,20 @@ export const createVoxelscape = ({
       monsters.tick(dt);
       monsterRender.tick(dt);
       npcFigures.tick(dt);
+      propFigures.tick(dt);
+      fireFigures.tick(dt);
       probe.end(Phase.monsters);
+      setScriptItem(scriptConsole?.heldItem() ?? null);
+      // The script's zones are checked against where the player stands, so a
+      // step into a room is a fact the rules can fold over.
+      void scriptConsole?.updatePosition(
+        avatar.player.position.x,
+        avatar.player.position.y,
+        avatar.player.position.z,
+      );
+      // A script's timers fire off the shared clock: pumping is how the world
+      // tells the host time has passed even when no player action arrived.
+      void scriptConsole?.pump();
     }
     probe.begin(Phase.environment);
     const lighting = environment.tick(dt, camera);
@@ -1192,6 +1530,7 @@ export const createVoxelscape = ({
     // state the renderers apply to the terrain and the standard materials.
     monsterRender.applyLighting(lighting);
     npcFigures.applyLighting(lighting);
+    propFigures.applyLighting(lighting);
     hand.applyLighting(lighting);
     probe.end(Phase.environment);
     probe.begin(Phase.rendererTick);
@@ -1292,6 +1631,11 @@ export const createVoxelscape = ({
     target,
     npcAim,
     dialog,
+    scriptItem,
+    ending,
+    narration,
+    dismissNarration: () => setNarration(null),
+    restart: restartPlace,
     talkTo: npcTalk,
     choose: npcChoose,
     leaveDialog: npcLeave,
@@ -1310,6 +1654,8 @@ export const createVoxelscape = ({
       environment.dispose();
       monsterRender.clear();
       npcFigures.clear();
+      propFigures.clear();
+      fireFigures.clear();
       monsterSync.dispose();
       hand.dispose();
       input.dispose();

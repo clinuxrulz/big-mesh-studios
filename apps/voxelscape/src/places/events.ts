@@ -42,6 +42,28 @@ export type ScriptEventPayload =
       player: string;
     }
   | {
+      kind: "entity-used";
+      /** The id of the NPC or prop the player used. */
+      entityId: string;
+      /** The item id the player used on it, or "" for a bare use. */
+      item: string;
+    }
+  | {
+      kind: "item-used";
+      /** The id of the item the player used on its own. */
+      item: string;
+    }
+  | {
+      kind: "zone-entered";
+      /** The id of the zone a player stepped into. */
+      zoneId: string;
+    }
+  | {
+      kind: "zone-left";
+      /** The id of the zone a player stepped out of. */
+      zoneId: string;
+    }
+  | {
       kind: "npc-talk";
       /** The id of the NPC the player started talking to. */
       npcId: string;
@@ -57,6 +79,11 @@ export type ScriptEventPayload =
       kind: "npc-leave";
       /** The id of the NPC the player stopped talking to. */
       npcId: string;
+    }
+  | {
+      kind: "timer";
+      /** The id a script gave the deadline it set with a `timer` effect. */
+      timerId: string;
     };
 
 /** One immutable script fact, stamped with where it came from and when. */
@@ -75,6 +102,8 @@ export const MAX_EVENT_COORD = 100_000;
 export const MAX_EVENT_BLOCK_ID = 255;
 /** Longest event id and entity id a fact may name. */
 export const MAX_EVENT_ID = 64;
+/** Longest item id an event may name. */
+export const MAX_EVENT_ITEM = 64;
 /** Longest producer or player string an event may carry (a DID). */
 export const MAX_EVENT_PLAYER = 256;
 /** The highest option index an `npc-choose` may carry. */
@@ -133,8 +162,23 @@ export const isScriptEvent = (v: unknown): v is ScriptEvent => {
   if (r.kind === "player-joined" || r.kind === "player-left") {
     return isPlayer(r.player);
   }
+  if (r.kind === "entity-used") {
+    return (
+      isShortString(r.entityId, MAX_EVENT_ID) &&
+      (r.item === "" || isShortString(r.item, MAX_EVENT_ITEM))
+    );
+  }
+  if (r.kind === "item-used") {
+    return isShortString(r.item, MAX_EVENT_ITEM);
+  }
+  if (r.kind === "zone-entered" || r.kind === "zone-left") {
+    return isShortString(r.zoneId, MAX_EVENT_ID);
+  }
   if (r.kind === "npc-talk" || r.kind === "npc-leave") {
     return isShortString(r.npcId, MAX_EVENT_ID);
+  }
+  if (r.kind === "timer") {
+    return isShortString(r.timerId, MAX_EVENT_ID);
   }
   if (r.kind === "npc-choose") {
     return (

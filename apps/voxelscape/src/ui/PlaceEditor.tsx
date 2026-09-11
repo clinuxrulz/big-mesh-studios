@@ -215,6 +215,57 @@ export const PlaceEditor: Component = () => {
     }
   };
 
+  const modelNames = (): string[] => Object.keys(project()?.models ?? {});
+
+  /** Adds picked rm-stacker model files to the draft, refusing unsafe names. */
+  const addModels = async (picked: FileList | null): Promise<void> => {
+    const p = project();
+    if (p === null || picked === null) {
+      return;
+    }
+    const models = { ...p.models };
+    const refused: string[] = [];
+    for (const file of Array.from(picked)) {
+      if (/[/\\]|\.\./.test(file.name)) {
+        refused.push(file.name);
+        continue;
+      }
+      models[file.name] = new Uint8Array(await file.arrayBuffer());
+    }
+    const names = Object.keys(models);
+    commit({
+      ...p,
+      manifest: {
+        ...p.manifest,
+        models: names.length > 0 ? names : undefined,
+      },
+      models,
+    });
+    setStatus(
+      refused.length === 0
+        ? `added ${Object.keys(models).length} model(s)`
+        : `refused ${refused.join(", ")} — a model name cannot hold a path`,
+    );
+  };
+
+  const removeModel = (name: string): void => {
+    const p = project();
+    if (p === null) {
+      return;
+    }
+    const models = { ...p.models };
+    delete models[name];
+    const names = Object.keys(models);
+    commit({
+      ...p,
+      manifest: {
+        ...p.manifest,
+        models: names.length > 0 ? names : undefined,
+      },
+      models,
+    });
+  };
+
   const newProject = (): void => {
     commit(emptyPlaceProject(voxelscape.placeEditor.defaultSeed));
     setActive(MAIN_SCRIPT_FILE);
@@ -279,6 +330,7 @@ export const PlaceEditor: Component = () => {
         p.scripts,
         entry,
         p.manifest.seed,
+        p.models,
       );
       setStatus(line);
     } catch (err) {
@@ -438,6 +490,39 @@ export const PlaceEditor: Component = () => {
             <button class={styles.add} onClick={() => addScript()}>
               + script
             </button>
+          </nav>
+
+          <nav class={styles.tabs}>
+            <span class={styles.tabMain}>models</span>
+            <For each={modelNames()}>
+              {(name) => (
+                <div class={styles.tab}>
+                  <button class={styles.tabMain} title={name}>
+                    {name}
+                  </button>
+                  <button
+                    class={styles.tabRemove}
+                    title={`remove ${name}`}
+                    onClick={() => removeModel(name)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+            </For>
+            <label class={styles.add} title="add rm-stacker model files">
+              + model
+              <input
+                type="file"
+                accept=".zip,application/zip"
+                multiple
+                hidden
+                onChange={(e) => {
+                  void addModels(e.currentTarget.files);
+                  e.currentTarget.value = "";
+                }}
+              />
+            </label>
           </nav>
 
           <Show when={scriptFiles().length > 0}>

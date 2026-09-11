@@ -18,6 +18,7 @@ import { FillClient } from "./fill-client";
 import type { EditLayer } from "./edit-layer";
 import type { TerrainConfig } from "./noise";
 import type { BorderSizes, FillStoreFn } from "./voxel-store";
+import type { StructurePlan } from "./structure-fill";
 import type { VoxelTileConfig } from "../renderers/atlas";
 import type { BlockMeshes } from "../renderers/mesh";
 import type { WorldWorkerPool } from "./worker-pool";
@@ -193,6 +194,8 @@ export interface ChunkSphereParams {
   onBlockRelease?: (index: number) => void;
   customFillStore?: FillStoreFn;
   customFillStoreUrl?: string;
+  /** Structures every block is stamped with, over its generated terrain. */
+  structures?: StructurePlan;
   /** Applied to each block after its terrain is generated (see `FillClient`). */
   editLayer?: EditLayer;
   /**
@@ -297,6 +300,7 @@ export class ChunkSphere {
       editLayer: params.editLayer,
       customFillStore: params.customFillStore,
       customFillStoreUrl: params.customFillStoreUrl,
+      structures: params.structures,
       tileRects: params.tileRects,
       pool: params.pool,
       createWorker: params.createWorker,

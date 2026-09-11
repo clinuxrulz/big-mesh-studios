@@ -10,9 +10,11 @@ import {
   type MeshArrays,
 } from "./mesh";
 import {
+  VOXEL_BRICK,
   VOXEL_DIRT,
   VOXEL_GRASS,
   VOXEL_WATER,
+  VOXEL_WOOD,
   VoxelStore,
   fillStore,
 } from "../world/voxel-store";
@@ -180,6 +182,16 @@ describe("buildBlockMesh", () => {
     ]) {
       expect(hasNormal(mesh, normal[0], normal[1], normal[2])).toBe(true);
     }
+  });
+
+  it("meshes brick and wood as opaque solid faces", () => {
+    const store = smallStore();
+    store.set(0, 1, 1, VOXEL_BRICK);
+    store.set(3, 1, 1, VOXEL_WOOD);
+    const mesh = buildBlockMesh(store, []);
+    // Two voxels apart from each other: six faces each, nothing culled.
+    expect(faceCount(mesh)).toBe(12);
+    expect(windsOutward(mesh)).toBe(true);
   });
 
   it("winds every face on the side it is exposed on", () => {

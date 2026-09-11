@@ -9,9 +9,13 @@ import {
 } from "solid-js";
 import styles from "./App.module.css";
 import { createPlaceLibrary } from "./atproto/places";
-import { placeWorld } from "./places/place";
+import { builtinDemo, loadBuiltinDemo } from "./places/demos";
+import { readPlaceProject, type PlaceProject } from "./places/project";
+import { compilePlacePlan, planRegionAround } from "./places/plan";
 import { DEFAULT_TERRAIN, type TerrainConfig } from "./world/noise";
 import type { Dim3 } from "./world/level-data";
+import type { StructurePlan } from "./world/structure-fill";
+import type { PlaceBoot } from "./voxelscape/create-voxelscape";
 import CoarseControls from "./ui/CoarseControls";
 /** The place script editor, pulled in only when `/place:editor` first needs it,
  * so the code-mirror bundle is not loaded by every world. */
@@ -42,6 +46,10 @@ interface LaunchConfig {
   terrain?: TerrainConfig;
   /** A place's spawn point; omitted for the default world. */
   spawn?: Dim3;
+  /** The structures a place's script asks the filler to stamp into every chunk. */
+  structures?: StructurePlan;
+  /** The place's scripts to run from boot; omitted for the default world. */
+  place?: PlaceBoot;
   /** One line about how this world was chosen, toasted once it exists. */
   notice?: string;
 }
@@ -56,6 +64,8 @@ const World: Component<{ launch: LaunchConfig }> = (props) => {
   const voxelscape = createVoxelscape({
     terrain: props.launch.terrain,
     spawn: props.launch.spawn,
+    structures: props.launch.structures,
+    place: props.launch.place,
     chunkRadius: radiusInUrl(),
     antialias: antialiasInUrl(),
     onDebugStats: (line) => {
@@ -96,6 +106,7 @@ const World: Component<{ launch: LaunchConfig }> = (props) => {
         <EditHud />
         <HealthHud />
         <DialogOverlay />
+        <EndingOverlay />
         <Show when={voxelscape.placeEditor.open()}>
           <PlaceEditor />
         </Show>
@@ -148,6 +159,27 @@ const WorldCanvas: Component = () => {
   );
 };
 
+/** The screen a place's script shows when its game ends, with a way to start over. */
+const EndingOverlay: Component = () => {
+  const voxelscape = useVoxelscape();
+  return (
+    <Show when={voxelscape.ending() !== null}>
+      <div class={styles.ending} role="dialog" aria-label="ending">
+        <div class={styles["ending-panel"]}>
+          <h1 class={styles["ending-title"]}>{voxelscape.ending()!.title}</h1>
+          <p class={styles["ending-text"]}>{voxelscape.ending()!.text}</p>
+          <button
+            class={styles["ending-button"]}
+            onClick={() => voxelscape.restart()}
+          >
+            Play again
+          </button>
+        </div>
+      </div>
+    </Show>
+  );
+};
+
 /** What shows while a `?place=` address is resolving, if it ever takes a moment. */
 const Joining: Component<{ line: string }> = (props) => (
   <div class={styles.container}>
@@ -158,6 +190,10 @@ const Joining: Component<{ line: string }> = (props) => (
 /** The place the address bar names, or null when it names none. */
 const placeInUrl = (): string | null =>
   new URLSearchParams(window.location.search).get("place");
+
+/** The built-in demo the address bar names, or null when it names none. */
+const demoInUrl = (): string | null =>
+  new URLSearchParams(window.location.search).get("demo");
 
 /**
  * Whether the address bar turns multisampling off, or undefined when it says
@@ -194,30 +230,97 @@ const App: Component<{}> = () => {
 
   const places = createPlaceLibrary();
 
-  onSettled(() => {
-    const atUri = placeInUrl();
-    if (atUri === null) {
-      setLaunch({});
+  /**
+   * Boots the world a place project describes: its terrain seed, spawn, the
+   * structure plan its script compiles, and the scripts themselves.
+   */
+  const launchProject = async (
+    project: PlaceProject,
+    source: string,
+  ): Promise<void> => {
+    const entry = project.manifest.scripts?.[0];
+    if (entry === undefined) {
+      setLaunch({
+        terrain: { ...DEFAULT_TERRAIN, seed: project.manifest.seed },
+        spawn: project.manifest.spawn,
+        notice: `${source} names no scripts — playing its terrain`,
+      });
       return;
     }
-    setJoiningLine("joining the published place…");
-    void places.recordAtUri(atUri).then(
-      ({ record }) => {
-        const world = placeWorld(record);
-        setLaunch({
-          terrain: { ...DEFAULT_TERRAIN, seed: world.seed },
-          spawn: world.spawn,
-          notice: `joined "${record.name}" — playing its world`,
-        });
+    let structures: StructurePlan | undefined;
+    let planNote = "";
+    try {
+      structures = await compilePlacePlan({
+        files: project.scripts,
+        entry,
+        seed: project.manifest.seed,
+        region: planRegionAround(project.manifest.spawn),
+      });
+      planNote = ` · ${structures.length} structure shape(s)`;
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      planNote = ` · its plan did not compile (${detail})`;
+    }
+    setLaunch({
+      terrain: { ...DEFAULT_TERRAIN, seed: project.manifest.seed },
+      spawn: project.manifest.spawn,
+      structures,
+      place: {
+        files: project.scripts,
+        entry,
+        seed: project.manifest.seed,
+        models: project.models,
       },
-      (error) => {
+      notice: `${source}${planNote}`,
+    });
+  };
+
+  onSettled(() => {
+    void (async () => {
+      const demoId = demoInUrl();
+      if (demoId !== null) {
+        const demo = builtinDemo(demoId);
+        if (demo === null) {
+          setLaunch({
+            notice: `there is no demo "${demoId}" — /place:demos lists them`,
+          });
+          return;
+        }
+        setJoiningLine(`opening "${demo.name}"…`);
+        try {
+          await launchProject(
+            await loadBuiltinDemo(demo),
+            `playing the demo "${demo.name}"`,
+          );
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          setJoiningLine(`could not open the demo — ${detail}`);
+          setLaunch({ notice: `could not open the demo (${detail})` });
+        }
+        return;
+      }
+
+      const atUri = placeInUrl();
+      if (atUri === null) {
+        setLaunch({});
+        return;
+      }
+      setJoiningLine("joining the published place…");
+      try {
+        const place = await places.recordAtUri(atUri);
+        setJoiningLine("opening the place's scripts…");
+        await launchProject(
+          await readPlaceProject(await places.file(place)),
+          `joined "${place.record.name}" — playing its world`,
+        );
+      } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
         setJoiningLine(`could not join — ${detail}`);
         setLaunch({
           notice: `could not join that place (${detail}) — playing this world instead`,
         });
-      },
-    );
+      }
+    })();
   });
 
   return (

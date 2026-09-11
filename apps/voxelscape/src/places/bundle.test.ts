@@ -3,8 +3,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { bundlePlaceProject } from "./bundle";
 
 afterEach(() => {
-  // The bundle hands its entry's bmsTick to the global; the tests are not the app.
+  // The bundle hands its entry's exports to the globals; the tests are not the app.
   delete (globalThis as Record<string, unknown>).bmsTick;
+  delete (globalThis as Record<string, unknown>).bmsPlan;
 });
 
 /** Evaluates the bundle in Node, returning the entry's bmsTick as the sandbox would see it. */

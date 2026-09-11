@@ -35,7 +35,7 @@ import {
 } from "../world/voxel-store";
 import { surfaceFractionOfLevel } from "../world/fluid";
 import { LIGHT_TO_UNIT, type LightStore } from "../world/light-store";
-import { SlicePlane } from "./plane-merge";
+import { SlicePlane, type FaceLight } from "./plane-merge";
 import { faceIndexOf, halfOfWholeNumber } from "./vertex-format";
 
 /**
@@ -84,11 +84,17 @@ export class MeshBuilder {
   }
 
   /**
-   * Writes one vertex's lane group: the direction its face points, its baked
-   * light, and its tile of the sheet, each as the byte the shader decodes.
+   * Writes one vertex's lane group: the direction its face points, its two
+   * baked light channels, and its tile of the sheet, each as the byte the
+   * shader decodes.
    */
-  pushPacked(face: number, brightness: number, tile: number): void {
-    this.packed.pushQuad(face, Math.round(brightness * 255), tile, 0);
+  pushPacked(face: number, sky: number, block: number, tile: number): void {
+    this.packed.pushQuad(
+      face,
+      Math.round(sky * 255),
+      tile,
+      Math.round(block * 255),
+    );
   }
 
   /** Writes one vertex's texture coordinate, as the half floats it is held in. */
@@ -175,18 +181,27 @@ const TANGENT_AXES: Array<[number, number]> = [
 ];
 
 /**
- * The combined, normalized light (the brighter of sky and block light, as a
- * 0..1 fraction) that reaches a padded voxel, for shading a nearby face.
+ * The normalized sky light (0..1) that reaches a padded voxel, for shading a
+ * nearby face. This is the channel the day-night sun, moon, and ambient scale,
+ * so it is kept apart from block light rather than merged with it.
  */
-const cellLight = (
+const cellSkyLight = (
   light: LightStore,
   x: number,
   y: number,
   z: number,
-): number => {
-  const at = light.paddedIndex(x, y, z);
-  return LIGHT_TO_UNIT(Math.max(light.skylightAt(at), light.blocklightAt(at)));
-};
+): number => LIGHT_TO_UNIT(light.skylightAt(light.paddedIndex(x, y, z)));
+
+/**
+ * The normalized block light (0..1) that reaches a padded voxel: the emitters'
+ * own light, which does not change with the time of day.
+ */
+const cellBlockLight = (
+  light: LightStore,
+  x: number,
+  y: number,
+  z: number,
+): number => LIGHT_TO_UNIT(light.blocklightAt(light.paddedIndex(x, y, z)));
 
 /**
  * Whether a padded voxel blocks sight: anything that neither air nor water
@@ -210,18 +225,20 @@ const isOpaque = (
 const openToFace = (id: number): boolean => id === VOXEL_AIR || isFluidId(id);
 
 /**
- * The one smooth-lighting pass in this file: the four per-vertex brightness
- * values (0..1) of one exposed face, in `FACE_CORNERS` vertex order. Each
- * vertex samples the 2x2 voxel patch just outside the face along its normal
- * for light, and the three neighbours wrapping its corner (two sides and the
- * diagonal), also just outside the face, for ambient occlusion; multiplying
- * the two shades the face with smooth gradients and dark niches. Sampling the
- * occluders on the air side keeps a level surface bright across its whole
- * top — a same-height neighbour does not shade a coplanar corner — while a
- * neighbour that rises above it does. The sphere is voxel-centred — tangents
- * and normal stretch one voxel — so a seam face reads its neighbour's light
- * and occluders from the block's own generated border, exactly as it reads
- * its voxel.
+ * The one smooth-lighting pass in this file: the four per-vertex corner
+ * brightnesses (0..1) of one exposed face, in `FACE_CORNERS` vertex order, for
+ * each of the two light channels. Each vertex samples the 2x2 voxel patch just
+ * outside the face along its normal for light, and the three neighbours
+ * wrapping its corner (two sides and the diagonal), also just outside the face,
+ * for ambient occlusion; multiplying the two shades the face with smooth
+ * gradients and dark niches. Sampling the occluders on the air side keeps a
+ * level surface bright across its whole top — a same-height neighbour does not
+ * shade a coplanar corner — while a neighbour that rises above it does. The
+ * sphere is voxel-centred — tangents and normal stretch one voxel — so a seam
+ * face reads its neighbour's light and occluders from the block's own generated
+ * border, exactly as it reads its voxel. Sky and block light are sampled into
+ * separate arrays so the shader can scale the sky channel by the time of day
+ * while the block channel shines on its own.
  *
  * Returns `null` when no light store accompanies the mesh, which the caller
  * treats as a fully bright face.
@@ -234,25 +251,31 @@ const faceBrightness = (
   z: number,
   axis: number,
   sign: number,
-): number[] | null => {
+): FaceLight | null => {
   if (light === null) {
     return null;
   }
   const [a1, a2] = TANGENT_AXES[axis];
   const nax = [0, 0, 0] as [number, number, number];
   nax[axis] = sign;
-  const brightness: number[] = [];
+  const sky: number[] = [];
+  const block: number[] = [];
   for (const corner of FACE_CORNERS[axis]) {
     const c1 = corner[a1];
     const c2 = corner[a2];
-    let lit = 0;
+    let litSky = 0;
+    let litBlock = 0;
     for (const r of [c1, c1 - 1]) {
       for (const s of [c2, c2 - 1]) {
         const at = [x, y, z] as [number, number, number];
         at[a1] += r;
         at[a2] += s;
         at[axis] += sign;
-        lit = Math.max(lit, cellLight(light, at[0], at[1], at[2]));
+        litSky = Math.max(litSky, cellSkyLight(light, at[0], at[1], at[2]));
+        litBlock = Math.max(
+          litBlock,
+          cellBlockLight(light, at[0], at[1], at[2]),
+        );
       }
     }
     const d1 = c1 === 0 ? -1 : 1;
@@ -271,9 +294,11 @@ const faceBrightness = (
     diag[a2] += d2;
     diag[axis] += sign;
     occluded += isOpaque(store, diag[0], diag[1], diag[2]) ? 1 : 0;
-    brightness.push(lit * ((3 - occluded) / 3));
+    const shade = (3 - occluded) / 3;
+    sky.push(litSky * shade);
+    block.push(litBlock * shade);
   }
-  return brightness;
+  return { sky, block };
 };
 
 /**
@@ -337,7 +362,8 @@ const emitCubeFace = (
     ctx.into.pushUv(u, v);
     ctx.into.pushPacked(
       faceIndexOf(axis, sign),
-      cornerLight === null ? 1 : cornerLight[k],
+      cornerLight === null ? 1 : cornerLight.sky[k],
+      cornerLight === null ? 0 : cornerLight.block[k],
       tile,
     );
   }
@@ -364,7 +390,8 @@ const emitMergedFace = (
   wide: number,
   tall: number,
   tile: number,
-  shade: number,
+  sky: number,
+  block: number,
 ): void => {
   const { store } = ctx;
   const scale = store.scale;
@@ -383,7 +410,7 @@ const emitMergedFace = (
     point[a2] = (second + offsets[a2] * tall - voxels[a2] / 2) * scale;
     ctx.into.positions.pushTriple(point[0], point[1], point[2]);
     ctx.into.pushUv(u * alongU, v * alongV);
-    ctx.into.pushPacked(faceIndexOf(axis, sign), shade, tile);
+    ctx.into.pushPacked(faceIndexOf(axis, sign), sky, block, tile);
   }
   finishQuad(ctx, base, axis, sign);
 };
@@ -431,7 +458,8 @@ const emitFluidFace = (
     ctx.into.pushUv(u, v);
     ctx.into.pushPacked(
       faceIndexOf(axis, sign),
-      cornerLight === null ? 1 : cornerLight[k],
+      cornerLight === null ? 1 : cornerLight.sky[k],
+      cornerLight === null ? 0 : cornerLight.block[k],
       tile,
     );
   }
@@ -618,9 +646,9 @@ export const buildBlockMesh = (
           }
         }
         plane.eachRectangle((rectangle) => {
-          const { first, second, wide, tall, id, shade } = rectangle;
+          const { first, second, wide, tall, id, sky, block } = rectangle;
           const tile = tileFor(id, axis, sign);
-          if (shade === null) {
+          if (sky === null) {
             cell[axis] = slice;
             cell[a1] = first;
             cell[a2] = second;
@@ -648,7 +676,8 @@ export const buildBlockMesh = (
             wide,
             tall,
             tile,
-            shade,
+            sky,
+            block,
           );
         });
       }

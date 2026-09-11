@@ -21,6 +21,21 @@ import type {
 import QuickJSReleaseSync from "@jitl/quickjs-wasmfile-release-sync";
 import { mulberry32 } from "../monsters/monster";
 import {
+  VOXEL_AIR,
+  VOXEL_BRICK,
+  VOXEL_CLOUD,
+  VOXEL_DIRT,
+  VOXEL_GRASS,
+  VOXEL_GREYSTONE,
+  VOXEL_ICE,
+  VOXEL_LAVA,
+  VOXEL_LEAVES,
+  VOXEL_LOG,
+  VOXEL_STONE,
+  VOXEL_WATER,
+  VOXEL_WOOD,
+} from "../world/voxel-store";
+import {
   ScriptExecutionError,
   type ScriptErrorKind,
   type ScriptOutput,
@@ -91,6 +106,40 @@ class QuickJSSandbox implements ScriptSandbox {
     });
   }
 
+  plan(contextJson: string): string {
+    this.assertAlive();
+    let output = "";
+    this.withBudget(() => {
+      const context = this.context;
+      const fn = context.getProp(context.global, "bmsPlan");
+      if (context.typeof(fn) !== "function") {
+        // A place that asks for no structures defines no `bmsPlan`.
+        fn.dispose();
+        return;
+      }
+      const argument = context.newString(contextJson);
+      try {
+        const result = context.callFunction(fn, context.undefined, argument);
+        if (result.error !== undefined) {
+          const { name, message } = this.describeError(result.error);
+          result.dispose();
+          throw new ScriptExecutionError(
+            kindFor(name, message),
+            message === "" ? name : `${name}: ${message}`,
+          );
+        }
+        if (context.typeof(result.value) === "string") {
+          output = context.getString(result.value);
+        }
+        result.dispose();
+      } finally {
+        argument.dispose();
+        fn.dispose();
+      }
+    });
+    return output;
+  }
+
   drain(): ScriptOutput {
     return {
       effects: this.effects.splice(0, this.effects.length),
@@ -148,6 +197,31 @@ class QuickJSSandbox implements ScriptSandbox {
       return context.undefined;
     });
     bind("now", () => context.newNumber(time.now()));
+    // The block ids a plan or effect may name, keyed by the names the starter
+    // script's own `engine` type declares, so a creator never hard-codes one.
+    const blocks = context.newObject();
+    const ids: Record<string, number> = {
+      air: VOXEL_AIR,
+      grass: VOXEL_GRASS,
+      dirt: VOXEL_DIRT,
+      water: VOXEL_WATER,
+      stone: VOXEL_STONE,
+      cloud: VOXEL_CLOUD,
+      lava: VOXEL_LAVA,
+      log: VOXEL_LOG,
+      leaves: VOXEL_LEAVES,
+      brick: VOXEL_BRICK,
+      wood: VOXEL_WOOD,
+      ice: VOXEL_ICE,
+      greystone: VOXEL_GREYSTONE,
+    };
+    for (const [name, id] of Object.entries(ids)) {
+      const value = context.newNumber(id);
+      context.setProp(blocks, name, value);
+      value.dispose();
+    }
+    context.setProp(engine, "blocks", blocks);
+    blocks.dispose();
     context.setProp(context.global, "engine", engine);
     engine.dispose();
   }

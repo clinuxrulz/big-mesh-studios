@@ -14,6 +14,7 @@ import {
   type TerrainConfig,
 } from "./level-data";
 import type { BorderSizes, FillStoreFn } from "./voxel-store";
+import type { StructurePlan } from "./structure-fill";
 
 /**
  * The arrays a request lent for block `at`, or undefined where it lent none.
@@ -37,6 +38,8 @@ export const lentArrays = (
 export interface FillConfig {
   terrain: TerrainConfig;
   customFillStoreUrl?: string;
+  /** Structures every block of this world is stamped with, over its terrain. */
+  structures?: StructurePlan;
 }
 
 export interface FillBatchRequest {
@@ -130,6 +133,7 @@ export async function* buildFillResults(
       terrain: cfg.terrain,
       customFillStore,
       borderSizes: req.borderSizes?.[i],
+      structures: cfg.structures,
       into: lentArrays(req, i),
     });
     yield {

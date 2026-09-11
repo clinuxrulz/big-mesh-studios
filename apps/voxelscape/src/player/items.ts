@@ -5,10 +5,14 @@
 // `BlockTool` when an item becomes a voxel again. Declaration order here is
 // hotbar order.
 import {
+  VOXEL_BRICK,
   VOXEL_CLOUD,
   VOXEL_DIRT,
   VOXEL_GRASS,
+  VOXEL_LEAVES,
+  VOXEL_LOG,
   VOXEL_STONE,
+  VOXEL_WOOD,
 } from "../world/voxel-store";
 import { BlockTool } from "./tools/block-tool";
 import { SwordTool } from "./tools/sword-tool";
@@ -16,7 +20,8 @@ import { BucketTool } from "./tools/bucket-tool";
 import type { Tool, ToolContext } from "./tools/tool";
 
 /** Everything the player can hold, one id per hotbar slot. */
-export type ItemId = "dirt" | "stone" | "cloud" | "bucket" | "sword";
+export type ItemId =
+  "dirt" | "stone" | "cloud" | "brick" | "wood" | "bucket" | "sword";
 
 export interface ItemDefinition {
   /** The name the hotbar shows, and the one edit messages are phrased with. */
@@ -51,6 +56,18 @@ export const ITEMS: Record<ItemId, ItemDefinition> = {
     sprite: null,
     tool: (ctx) => new BlockTool(ctx, "cloud", VOXEL_CLOUD),
   },
+  brick: {
+    name: "Brick",
+    stackable: true,
+    sprite: null,
+    tool: (ctx) => new BlockTool(ctx, "brick", VOXEL_BRICK),
+  },
+  wood: {
+    name: "Wood",
+    stackable: true,
+    sprite: null,
+    tool: (ctx) => new BlockTool(ctx, "wood", VOXEL_WOOD),
+  },
   bucket: {
     name: "Bucket",
     stackable: false,
@@ -77,4 +94,8 @@ export const BREAK_YIELD: Record<number, ItemId> = {
   [VOXEL_DIRT]: "dirt",
   [VOXEL_STONE]: "stone",
   [VOXEL_CLOUD]: "cloud",
+  [VOXEL_LOG]: "wood",
+  [VOXEL_LEAVES]: "wood",
+  [VOXEL_BRICK]: "brick",
+  [VOXEL_WOOD]: "wood",
 };

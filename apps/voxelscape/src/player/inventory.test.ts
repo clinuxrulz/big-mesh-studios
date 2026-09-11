@@ -2,7 +2,15 @@
 import { describe, expect, it, vi } from "vitest";
 import { Inventory } from "./inventory";
 import { BREAK_YIELD, ITEM_ORDER } from "./items";
-import { VOXEL_CLOUD, VOXEL_DIRT, VOXEL_GRASS } from "../world/voxel-store";
+import {
+  VOXEL_BRICK,
+  VOXEL_CLOUD,
+  VOXEL_DIRT,
+  VOXEL_GRASS,
+  VOXEL_LEAVES,
+  VOXEL_LOG,
+  VOXEL_WOOD,
+} from "../world/voxel-store";
 
 describe("Inventory", () => {
   it("starts carrying the sword and defaults to dirt selected", () => {
@@ -42,6 +50,8 @@ describe("Inventory", () => {
       { id: "dirt", name: "Dirt", count: 2, stackable: true },
       { id: "stone", name: "Stone", count: 0, stackable: true },
       { id: "cloud", name: "Cloud", count: 0, stackable: true },
+      { id: "brick", name: "Brick", count: 0, stackable: true },
+      { id: "wood", name: "Wood", count: 0, stackable: true },
       { id: "bucket", name: "Bucket", count: 1, stackable: false },
       { id: "sword", name: "Sword", count: 1, stackable: false },
     ]);
@@ -54,6 +64,10 @@ describe("Inventory", () => {
     expect(inv.selectedId).toBe("stone");
     expect(inv.selectStep(1)).toBe(true);
     expect(inv.selectedId).toBe("cloud");
+    expect(inv.selectStep(1)).toBe(true);
+    expect(inv.selectedId).toBe("brick");
+    expect(inv.selectStep(1)).toBe(true);
+    expect(inv.selectedId).toBe("wood");
     expect(inv.selectStep(1)).toBe(true);
     expect(inv.selectedId).toBe("bucket");
     expect(inv.selectStep(1)).toBe(true);
@@ -73,8 +87,12 @@ describe("Inventory", () => {
     expect(inv.selectSlot(2)).toBe(true);
     expect(inv.selectedId).toBe("cloud");
     expect(inv.selectSlot(3)).toBe(true);
-    expect(inv.selectedId).toBe("bucket");
+    expect(inv.selectedId).toBe("brick");
     expect(inv.selectSlot(4)).toBe(true);
+    expect(inv.selectedId).toBe("wood");
+    expect(inv.selectSlot(5)).toBe(true);
+    expect(inv.selectedId).toBe("bucket");
+    expect(inv.selectSlot(6)).toBe(true);
     expect(inv.selectedId).toBe("sword");
     expect(inv.selectSlot(ITEM_ORDER.length)).toBe(false);
   });
@@ -98,8 +116,12 @@ describe("Inventory", () => {
   });
 });
 
-it("yields a single dirt item from grass and dirt, and cloud from cloud", () => {
+it("yields the item each breakable voxel turns into", () => {
   expect(BREAK_YIELD[VOXEL_GRASS]).toBe("dirt");
   expect(BREAK_YIELD[VOXEL_DIRT]).toBe("dirt");
   expect(BREAK_YIELD[VOXEL_CLOUD]).toBe("cloud");
+  expect(BREAK_YIELD[VOXEL_BRICK]).toBe("brick");
+  expect(BREAK_YIELD[VOXEL_WOOD]).toBe("wood");
+  expect(BREAK_YIELD[VOXEL_LOG]).toBe("wood");
+  expect(BREAK_YIELD[VOXEL_LEAVES]).toBe("wood");
 });

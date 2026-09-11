@@ -3,7 +3,7 @@
 // console drives the dialog — starting a talk, picking an option, walking away —
 // while the script's toasts go wherever the caller sends them. Everything the
 // methods return is one line-shaped answer for a console to print.
-import { ScriptHost, type DialogState } from "./script-host";
+import { ScriptHost, type DialogState, type ScriptedFire } from "./script-host";
 import { SAMPLE_PLACE_SCRIPT } from "./sample";
 import { MAIN_SCRIPT_FILE } from "./project";
 
@@ -14,6 +14,30 @@ export interface ScriptConsoleParams {
   report?: (line: string) => void;
   /** Called whenever a player's dialog changes, so the world can show it. */
   onDialog?: (player: string, state: DialogState | null) => void;
+  /** Called when a player's game reaches an ending, or null to close it. */
+  onEnding?: (
+    player: string,
+    state: { title: string; text: string } | null,
+  ) => void;
+  /** Called when a player's game asks to start over. */
+  onRestart?: (player: string) => void;
+  /** Called when the script pins, jumps, or releases the day-night clock. */
+  onTime?: (command: {
+    seconds?: number;
+    speed?: number;
+    clear?: boolean;
+  }) => void;
+  /** Called when a player is shown a line with no figure speaking it. */
+  onNarrate?: (player: string, line: { name: string; text: string }) => void;
+  /** Called when the script moves a player, optionally turning them. */
+  onPlayerPlace?: (
+    player: string,
+    at: { x: number; z: number; y?: number; yaw?: number },
+  ) => void;
+  /** Called when the script turns a player to look at a world point. */
+  onPlayerFace?: (player: string, at: { x: number; z: number }) => void;
+  /** Called when the script lights a fire; the world seeds its ember light. */
+  onFire?: (fire: ScriptedFire) => void;
 }
 
 /** The option a console prints for a dialog, numbered for `/script:choose`. */
@@ -28,12 +52,48 @@ export class ScriptConsole {
     player: string,
     state: DialogState | null,
   ) => void;
+  private readonly onEnding: (
+    player: string,
+    state: { title: string; text: string } | null,
+  ) => void;
+  private readonly onRestart: (player: string) => void;
+  private readonly onTime: (command: {
+    seconds?: number;
+    speed?: number;
+    clear?: boolean;
+  }) => void;
+  private readonly onNarrate: (
+    player: string,
+    line: { name: string; text: string },
+  ) => void;
+  private readonly onPlayerPlace: (
+    player: string,
+    at: { x: number; z: number; y?: number; yaw?: number },
+  ) => void;
+  private readonly onPlayerFace: (
+    player: string,
+    at: { x: number; z: number },
+  ) => void;
+  private readonly onFire: (fire: ScriptedFire) => void;
   private host: ScriptHost | null = null;
+  /** The last project loaded, so `restart` can run it once more from scratch. */
+  private last: {
+    files: Record<string, string>;
+    entry: string;
+    seed: number;
+  } | null = null;
 
   constructor(params: ScriptConsoleParams) {
     this.heightAt = params.heightAt;
     this.report = params.report ?? (() => {});
     this.onDialog = params.onDialog ?? (() => {});
+    this.onEnding = params.onEnding ?? (() => {});
+    this.onRestart = params.onRestart ?? (() => {});
+    this.onTime = params.onTime ?? (() => {});
+    this.onNarrate = params.onNarrate ?? (() => {});
+    this.onPlayerPlace = params.onPlayerPlace ?? (() => {});
+    this.onPlayerFace = params.onPlayerFace ?? (() => {});
+    this.onFire = params.onFire ?? (() => {});
   }
 
   /** Whether a script is loaded and running. */
@@ -49,6 +109,54 @@ export class ScriptConsole {
   /** The NPC with `id`, or null when the script has not placed one. */
   npc(id: string) {
     return this.host?.npc(id) ?? null;
+  }
+
+  /** The props the loaded script has placed, for the world to draw. */
+  props() {
+    return this.host?.propList ?? [];
+  }
+
+  /** The prop with `id`, or null when the script has not placed one. */
+  prop(id: string) {
+    return this.host?.prop(id) ?? null;
+  }
+
+  /** The fires the loaded script has lit, for the world to draw. */
+  fires() {
+    return this.host?.fireList ?? [];
+  }
+
+  /** The blaze with `id`, or null when the script has not lit one. */
+  fire(id: string) {
+    return this.host?.fire(id) ?? null;
+  }
+
+  /**
+   * The local player uses the prop with `id` — a tap or click on it — with
+   * `item` the id of whatever they are holding, or "" for bare hands.
+   */
+  async use(id: string, item = ""): Promise<void> {
+    await this.host?.use(id, "", item);
+  }
+
+  /** Tells the script where the local player now stands, for its zones. */
+  async updatePosition(x: number, y: number, z: number): Promise<void> {
+    await this.host?.movePlayer("", x, y, z);
+  }
+
+  /** Fires any timer the shared clock has reached; cheap when none is set. */
+  async pump(): Promise<void> {
+    await this.host?.pump();
+  }
+
+  /** The local player uses the item they are holding, away from any object. */
+  async useItem(id: string): Promise<void> {
+    await this.host?.useItem(id, "");
+  }
+
+  /** The item the local player is holding, or null when they hold none. */
+  heldItem() {
+    return this.host?.inventory.heldItem() ?? null;
   }
 
   /** Starts a talk straight away — the world's tap-and-click path, no console. */
@@ -96,9 +204,21 @@ export class ScriptConsole {
     entry: string,
     seed: number,
   ): Promise<string> {
+    this.last = { files, entry, seed };
     const host = await this.freshHost(seed);
     await host.loadProject(files, entry);
     return `script loaded — ${this.loadedLine()}`;
+  }
+
+  /**
+   * Runs the last loaded project once more from a fresh interpreter, so a
+   * place's own state starts over while the world it built stays standing.
+   */
+  async restart(): Promise<void> {
+    if (this.last === null) {
+      return;
+    }
+    await this.loadProject(this.last.files, this.last.entry, this.last.seed);
   }
 
   /** What the script has made so far: NPCs, dialogs, and any last problem. */
@@ -181,6 +301,13 @@ export class ScriptConsole {
       },
       onDialog: (player, state) => this.onDialog(player, state),
       onNotice: this.report,
+      onEnding: (player, state) => this.onEnding(player, state),
+      onRestart: (player) => this.onRestart(player),
+      onTime: (command) => this.onTime(command),
+      onNarrate: (player, line) => this.onNarrate(player, line),
+      onPlayerPlace: (player, at) => this.onPlayerPlace(player, at),
+      onPlayerFace: (player, at) => this.onPlayerFace(player, at),
+      onFire: (fire) => this.onFire(fire),
     });
     return this.host;
   }

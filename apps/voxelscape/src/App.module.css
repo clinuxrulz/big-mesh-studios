@@ -23,3 +23,32 @@
   color: #fff;
   background: #87ceeb;
 }
+.ending {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  z-index: 20;
+}
+.ending-panel {
+  max-width: 32rem;
+  padding: 2rem;
+  text-align: center;
+  font-family: monospace;
+}
+.ending-title {
+  margin: 0 0 1rem;
+  font-size: 1.6rem;
+}
+.ending-text {
+  margin: 0 0 1.5rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.ending-button {
+  font: inherit;
+  padding: 0.5rem 1.25rem;
+  cursor: pointer;
+}

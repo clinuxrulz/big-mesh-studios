@@ -124,6 +124,9 @@ export class TriangleMaterial extends NodeMaterial {
   protected setup(b: Builder, _scene: Scene): void {
     void b.attribute("packed", "vec4");
     void b.varying("brightness", "float");
+    // The emitters' own light, carried beside the sky light so the fragment can
+    // add it after the day-night term instead of scaling it with the sun.
+    void b.varying("blockLight", "float");
     // A quad covers as many cells as its faces merged into it, and its texture
     // coordinates count those cells, so the fragment wraps them back into the
     // one tile this vertex names.
@@ -195,6 +198,7 @@ export class TriangleMaterial extends NodeMaterial {
     // byte scaled into 0..1; `vertex-format.ts` says which lane is which.
     const packed = b.attribute("packed", "vec4");
     b.varying("brightness", "float").assign(packed.y);
+    b.varying("blockLight", "float").assign(packed.w);
     b.varying("tileIndex", "float").assign(packed.z.mul(255).round());
     const position4 = vec4(b.position, 1);
     const localPosition = b.instancing
@@ -216,6 +220,7 @@ export class TriangleMaterial extends NodeMaterial {
     const positionWorld = b.positionWorld.toVar();
     const uv = b.uvVarying.toVar();
     const brightness = b.varying("brightness", "float").toVar();
+    const blockBright = b.varying("blockLight", "float").toVar();
 
     const lightDir =
       this.sunDirectionUniform ?? vec3(0.4, 0.7, 0.4).normalize();
@@ -259,7 +264,10 @@ export class TriangleMaterial extends NodeMaterial {
     // baked per-vertex light + ambient occlusion, floored so unlit niches are
     // still a whisper of shape rather than pure black
     const floorBright = brightness.max(float(0.1)).min(float(1)).toVar();
-    const lit = albedo.mul(lighting).mul(floorBright).toVar();
+    // Sky light is what the sun, moon and ambient scale. Block light is added
+    // on top after that, unmultiplied, so a fire or a lava pool lights its
+    // surroundings at midnight exactly as it does at noon.
+    const lit = albedo.mul(lighting.mul(floorBright).max(blockBright)).toVar();
 
     const dist = positionWorld.sub(b.cameraPosition).length().toVar();
     const fogFactor = dist.smoothstep(fogNear, maxDist).toVar();
@@ -298,6 +306,7 @@ export class TriangleWaterMaterial extends NodeMaterial {
   protected setup(b: Builder, _scene: Scene): void {
     void b.attribute("packed", "vec4");
     void b.varying("brightness", "float");
+    void b.varying("blockLight", "float");
     this.fogColorUniform = b.materialUniform(
       "fogColor",
       "vec3",
@@ -318,6 +327,7 @@ export class TriangleWaterMaterial extends NodeMaterial {
   protected buildVertexBody(b: Builder): Node<"vec4"> {
     const packed = b.attribute("packed", "vec4");
     b.varying("brightness", "float").assign(packed.y);
+    b.varying("blockLight", "float").assign(packed.w);
     const position4 = vec4(b.position, 1);
     const localPosition = b.instancing
       ? b.instanceMatrix.mul(position4)
@@ -337,7 +347,12 @@ export class TriangleWaterMaterial extends NodeMaterial {
     const skyColour = this.fogColorUniform ?? vec3(0.53, 0.81, 0.92);
     const waterColour = this.waterColorUniform ?? vec3(0.1, 0.35, 0.55);
     const waterOpacity = this.waterOpacityUniform ?? float(0.5);
-    const brightness = b.varying("brightness", "float").toVar();
+    // Water draws by the brighter of its two light channels, as the merged
+    // terrain brightness used to read.
+    const brightness = b
+      .varying("brightness", "float")
+      .max(b.varying("blockLight", "float"))
+      .toVar();
 
     const positionWorld = b.positionWorld.toVar();
     const rayDirection = positionWorld.sub(b.cameraPosition).normalize();

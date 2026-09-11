@@ -77,8 +77,62 @@ describe("script event validation", () => {
         kind: "npc-leave",
         npcId: "sable",
       } as ScriptEvent,
+      {
+        ...stamp("e9", 1_000, "did:plc:bob"),
+        kind: "entity-used",
+        entityId: "fridge",
+        item: "cola",
+      } as ScriptEvent,
+      {
+        ...stamp("e10", 1_000, "did:plc:bob"),
+        kind: "entity-used",
+        entityId: "fridge",
+        item: "",
+      } as ScriptEvent,
+      {
+        ...stamp("e11", 1_000, "did:plc:bob"),
+        kind: "item-used",
+        item: "chips",
+      } as ScriptEvent,
+      {
+        ...stamp("e12", 1_000, "did:plc:bob"),
+        kind: "zone-entered",
+        zoneId: "kitchen",
+      } as ScriptEvent,
+      {
+        ...stamp("e13", 1_000, "did:plc:bob"),
+        kind: "zone-left",
+        zoneId: "kitchen",
+      } as ScriptEvent,
+      {
+        ...stamp("e14", 1_000, "did:plc:bob"),
+        kind: "timer",
+        timerId: "cook",
+      } as ScriptEvent,
     ]) {
       expect(isScriptEvent(e)).toBe(true);
+    }
+  });
+
+  it("rejects a malformed entity-used event", () => {
+    const cases: Array<unknown> = [
+      { ...stamp("e1", 1, "p"), kind: "entity-used", item: "" },
+      { ...stamp("e1", 1, "p"), kind: "entity-used", entityId: "", item: "" },
+      {
+        ...stamp("e1", 1, "p"),
+        kind: "entity-used",
+        entityId: "fridge",
+        item: "x".repeat(65),
+      },
+      { ...stamp("e1", 1, "p"), kind: "item-used" },
+      { ...stamp("e1", 1, "p"), kind: "item-used", item: "" },
+      { ...stamp("e1", 1, "p"), kind: "zone-entered" },
+      { ...stamp("e1", 1, "p"), kind: "zone-entered", zoneId: "" },
+      { ...stamp("e1", 1, "p"), kind: "zone-left", zoneId: "x".repeat(65) },
+      { ...stamp("e1", 1, "p"), kind: "item-used", item: "x".repeat(65) },
+    ];
+    for (const bad of cases) {
+      expect(isScriptEvent(bad), JSON.stringify(bad)).toBe(false);
     }
   });
 
@@ -107,6 +161,9 @@ describe("script event validation", () => {
         option: 1.5,
       },
       { ...stamp("e1", 1, "p"), kind: "npc-leave" },
+      { ...stamp("e1", 1, "p"), kind: "timer" },
+      { ...stamp("e1", 1, "p"), kind: "timer", timerId: "" },
+      { ...stamp("e1", 1, "p"), kind: "timer", timerId: "x".repeat(65) },
     ];
     for (const bad of cases) {
       expect(isScriptEvent(bad), JSON.stringify(bad)).toBe(false);

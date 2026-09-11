@@ -101,3 +101,24 @@ describe("the bundled NPC models", () => {
     },
   );
 });
+
+describe("the built-in demo prop models", () => {
+  it.each([
+    "fridge.zip",
+    "vending.zip",
+    "bed.zip",
+    "chips.zip",
+    "friedegg.zip",
+  ])(
+    "%s loads as a one-part indexed figure with a full palette",
+    async (file) => {
+      const figure = await model(file);
+      expect(figure.migrated).toBe(false);
+      expect(figure.parts).toHaveLength(1);
+      // The ray marcher samples the palette at (index + 0.5) / 32, so a
+      // shorter palette would draw every colour from its first texel — black.
+      expect(figure.palette).toHaveLength(32);
+      expect(painted(figure.parts[0], "front")).toBeGreaterThan(0);
+    },
+  );
+});

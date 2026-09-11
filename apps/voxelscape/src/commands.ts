@@ -16,6 +16,7 @@ import type { PlayerHealth } from "./player/health";
 import type { AdaptiveResolution } from "./render/adaptive";
 import type { PlaceLibrary, PlacePublisher } from "./atproto/places";
 import { placeAtUri } from "./places/place";
+import { BUILTIN_DEMOS, builtinDemo } from "./places/demos";
 
 /**
  * Declares every debug console command as a single object literal, keyed by
@@ -881,6 +882,31 @@ export const createCommands = ({
         } catch (err) {
           return `no "${name}" from ${account} — ${describeError(err)}`;
         }
+      },
+    },
+    "/place:demos": {
+      description: "list the built-in demo places",
+      run: async () =>
+        BUILTIN_DEMOS.map((demo) => `${demo.id} — ${demo.name}`).join("\n") ||
+        "no built-in demos",
+    },
+    "/place:demo": {
+      description: "play a built-in demo place",
+      args: "[id]",
+      run: async (rest) => {
+        const id = rest[0] ?? BUILTIN_DEMOS[0]?.id;
+        if (id === undefined) {
+          return "no built-in demos";
+        }
+        const demo = builtinDemo(id);
+        if (demo === null) {
+          return `no demo "${id}" — /place:demos lists them`;
+        }
+        const url = new URL(window.location.href);
+        url.searchParams.delete("place");
+        url.searchParams.set("demo", demo.id);
+        window.location.assign(url.toString());
+        return `opening the demo "${demo.name}" — reloading into its world`;
       },
     },
     "/script:demo": {

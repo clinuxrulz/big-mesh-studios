@@ -59,6 +59,16 @@ export interface ScriptSandbox {
    * budget, or exceeds the memory limit.
    */
   tick(clockMs: number, eventsJson: string): void;
+  /**
+   * Runs the script's optional `bmsPlan(contextJson)` and returns the string it
+   * returns — the structure plan a world is generated with. A script that
+   * defines no `bmsPlan` returns an empty string, which the caller reads as no
+   * structures.
+   *
+   * @throws {ScriptExecutionError} When `bmsPlan` throws, overruns the step
+   * budget, or exceeds the memory limit.
+   */
+  plan(contextJson: string): string;
   /** Whatever the script emitted since the last drain, cleared by the call. */
   drain(): ScriptOutput;
   /** Releases the interpreter and its memory. A disposed sandbox is unusable. */

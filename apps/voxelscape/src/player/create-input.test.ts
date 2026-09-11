@@ -210,3 +210,20 @@ describe("canvas touch gestures", () => {
     expect(snapshot.primary).toBe(false);
   });
 });
+
+describe("the interact (use) edge", () => {
+  it("fires once from the queued request, as a touch button would", () => {
+    input.queueUse();
+    expect(input.consume().use).toBe(true);
+    expect(input.consume().use).toBe(false);
+  });
+
+  it("fires once from the E key and not again while it repeats", () => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyE" }));
+    expect(input.consume().use).toBe(true);
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { code: "KeyE", repeat: true }),
+    );
+    expect(input.consume().use).toBe(false);
+  });
+});

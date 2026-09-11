@@ -8,10 +8,22 @@
 // bytes not built, not merged, not sent to the graphics card and not
 // transformed while drawing.
 //
-// A face only joins a rectangle when it is shaded flat — all four of its
-// corners equally lit. A face that varies across itself is left on its own,
+// A face carries two light channels — sky and block — and only joins a
+// rectangle when both are shaded flat: all four of its corners equally lit in
+// each. A face that varies across itself in either channel is left on its own,
 // because stretching it would ramp its shading across the whole rectangle
 // instead of repeating it cell by cell, which is a different picture.
+
+/**
+ * A face's four corner brightnesses in each light channel, 0..1, in the
+ * mesher's `FACE_CORNERS` order. Sky light is the time-of-day-lit channel and
+ * block light the emitters' own, kept apart so the shader can shade them
+ * differently.
+ */
+export interface FaceLight {
+  sky: number[];
+  block: number[];
+}
 
 /** What one rectangle of merged faces covers, and what it shows. */
 export interface MergedRectangle {
@@ -24,11 +36,13 @@ export interface MergedRectangle {
   /** The voxel id every cell in it shows. */
   id: number;
   /**
-   * The brightness every corner of it carries, or null for a face that is not
-   * shaded flat — which is always a rectangle of one cell, left for the caller
-   * to draw with its own corners.
+   * The sky brightness every corner of it carries, or null for a face that is
+   * not shaded flat — which is always a rectangle of one cell, left for the
+   * caller to draw with its own corners.
    */
-  shade: number | null;
+  sky: number | null;
+  /** The block brightness every corner of it carries; zero when `sky` is null. */
+  block: number;
 }
 
 /** Nothing is at this cell. */
@@ -36,13 +50,18 @@ const EMPTY = -1;
 /** This cell holds a face that must not be merged with anything. */
 const ALONE = Number.NaN;
 
+/** The common value of four corners, or null when they are not all equal. */
+const flatValue = (corners: number[]): number | null =>
+  corners.every((one) => one === corners[0]) ? corners[0] : null;
+
 /**
  * One plane of a chunk's faces: the faces exposed in one direction, from one
  * slice of the volume. Reused across slices, so a sweep allocates one.
  */
 export class SlicePlane {
   private readonly ids: Int32Array;
-  private readonly shades: Float64Array;
+  private readonly skies: Float64Array;
+  private readonly blocks: Float64Array;
   private readonly taken: Uint8Array;
 
   /**
@@ -54,7 +73,8 @@ export class SlicePlane {
     readonly tall: number,
   ) {
     this.ids = new Int32Array(wide * tall);
-    this.shades = new Float64Array(wide * tall);
+    this.skies = new Float64Array(wide * tall);
+    this.blocks = new Float64Array(wide * tall);
     this.taken = new Uint8Array(wide * tall);
     this.clear();
   }
@@ -71,22 +91,30 @@ export class SlicePlane {
    * @param first Its position along the plane's first axis.
    * @param second Its position along the second.
    * @param id The voxel id it shows.
-   * @param corners Its four corner brightnesses, or null where nothing is lit.
+   * @param light Its four corner brightnesses in each channel, or null where
+   *   nothing is lit — which merges as full sky and no block light.
    */
   set(
     first: number,
     second: number,
     id: number,
-    corners: number[] | null,
+    light: FaceLight | null,
   ): void {
     const at = second * this.wide + first;
     this.ids[at] = id;
-    this.shades[at] =
-      corners === null
-        ? 1
-        : corners.every((one) => one === corners[0])
-          ? corners[0]
-          : ALONE;
+    if (light === null) {
+      this.skies[at] = 1;
+      this.blocks[at] = 0;
+      return;
+    }
+    const sky = flatValue(light.sky);
+    const block = flatValue(light.block);
+    if (sky === null || block === null) {
+      this.skies[at] = ALONE;
+      return;
+    }
+    this.skies[at] = sky;
+    this.blocks[at] = block;
   }
 
   /**
@@ -104,14 +132,18 @@ export class SlicePlane {
         if (id === EMPTY || this.taken[at] === 1) {
           continue;
         }
-        const shade = this.shades[at];
-        if (Number.isNaN(shade)) {
+        const sky = this.skies[at];
+        if (Number.isNaN(sky)) {
           this.taken[at] = 1;
-          report({ first, second, wide: 1, tall: 1, id, shade: null });
+          report({ first, second, wide: 1, tall: 1, id, sky: null, block: 0 });
           continue;
         }
+        const block = this.blocks[at];
         let wide = 1;
-        while (first + wide < this.wide && this.matches(at + wide, id, shade)) {
+        while (
+          first + wide < this.wide &&
+          this.matches(at + wide, id, sky, block)
+        ) {
           wide++;
         }
         let tall = 1;
@@ -119,7 +151,7 @@ export class SlicePlane {
           const row = at + tall * this.wide;
           let whole = true;
           for (let step = 0; step < wide; step++) {
-            if (!this.matches(row + step, id, shade)) {
+            if (!this.matches(row + step, id, sky, block)) {
               whole = false;
               break;
             }
@@ -132,15 +164,18 @@ export class SlicePlane {
         for (let row = 0; row < tall; row++) {
           this.taken.fill(1, at + row * this.wide, at + row * this.wide + wide);
         }
-        report({ first, second, wide, tall, id, shade });
+        report({ first, second, wide, tall, id, sky, block });
       }
     }
   }
 
   /** Whether the cell at `at` is a free face showing the same thing. */
-  private matches(at: number, id: number, shade: number): boolean {
+  private matches(at: number, id: number, sky: number, block: number): boolean {
     return (
-      this.taken[at] === 0 && this.ids[at] === id && this.shades[at] === shade
+      this.taken[at] === 0 &&
+      this.ids[at] === id &&
+      this.skies[at] === sky &&
+      this.blocks[at] === block
     );
   }
 }

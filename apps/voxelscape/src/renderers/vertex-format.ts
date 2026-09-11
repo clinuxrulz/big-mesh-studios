@@ -7,9 +7,11 @@
 // place that knows which lane holds which.
 //
 // The lane group exists because a buffer carrying one attribute has to have a
-// stride that is a multiple of four. A face index, a light level and a tile
-// index are one byte each and could not fill a buffer between them; sharing a
-// `unorm8x4` they fit exactly, with one byte to spare.
+// stride that is a multiple of four. A face index, the two light channels and
+// a tile index are one byte each and fill a `unorm8x4` exactly: the face in
+// `x`, the sky light in `y`, the tile index in `z`, and the block light in
+// `w`. Sky and block light are separate lanes because the shader scales the
+// former by the time of day while the latter shines on its own.
 import { float, vec3, type Node } from "@random-mesh/rmsl";
 
 /** Bytes one vertex of merged geometry occupies, position and both lanes. */
