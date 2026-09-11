@@ -34,17 +34,45 @@ const ConsoleInput: Component<{
   const [candidateIndex, setCandidateIndex] = createSignal(0);
 
   /**
-   * The command names `typed` could still become, in the order `names` lists
-   * them. Only a name is completed, so a line that has reached its arguments
-   * — or that already spells a name out — has none.
+   * The command names that fuzzy-match what is typed — every one of its
+   * characters appearing in the name in the same order — ranked best match
+   * first, shorter names first among equal matches. Only a name is
+   * completed, so a line that has reached its arguments has none; one that
+   * already spells a name out has none either, unless a longer sibling name
+   * extends it too and is worth offering alongside it.
    */
   const candidatesFor = (typed: string): string[] => {
     if (!typed.startsWith("/") || typed.includes(" ")) {
       return [];
     }
-    return props.commands
+    const ranked = props.commands
       .map((command) => command.name)
-      .filter((name) => name.startsWith(typed) && name !== typed);
+      .map((name) => [name, fuzzyScore(typed, name)] as const)
+      .filter((scored): scored is [string, number] => scored[1] !== undefined)
+      .sort(([nameA, a], [nameB, b]) => b - a || nameA.length - nameB.length)
+      .map(([name]) => name);
+    return ranked.length > 1 ? ranked : ranked.filter((name) => name !== typed);
+  };
+
+  /**
+   * How well `typed` fuzzy-matches `name`: every character of `typed` has to
+   * appear in `name` in the same order, and matches that run together or
+   * land earlier score higher. `undefined` when `typed` doesn't match at all.
+   */
+  const fuzzyScore = (typed: string, name: string): number | undefined => {
+    let cursor = 0;
+    let streak = 0;
+    let score = 0;
+    for (const char of typed) {
+      const found = name.indexOf(char, cursor);
+      if (found === -1) {
+        return undefined;
+      }
+      streak = found === cursor ? streak + 1 : 0;
+      score += streak - (found - cursor);
+      cursor = found + 1;
+    }
+    return score;
   };
 
   /**
@@ -80,6 +108,23 @@ const ConsoleInput: Component<{
   const candidates = (): string[] => candidatesFor(typed());
   /** The candidate the arrow keys have landed on, if any is left to show. */
   const candidate = (): string | undefined => candidates()[candidateIndex()];
+  /** Whether `line` already spells out a command's name in full. */
+  const isCommand = (line: string): boolean =>
+    props.commands.some((command) => command.name === line);
+  /**
+   * `candidate`, only when it continues what is typed as a prefix and what is
+   * typed isn't already a complete command in its own right — a fuzzy match
+   * that skips ahead of the caret has no trailing remainder that can be
+   * ghosted after it, and a name that already stands on its own defers to
+   * `hint` instead of ghosting a longer sibling on top of it.
+   */
+  const ghost = (): string | undefined => {
+    if (isCommand(typed())) {
+      return undefined;
+    }
+    const name = candidate();
+    return name?.startsWith(typed()) ? name : undefined;
+  };
 
   // Showing the list again whenever the panel reopens puts it back on top of
   // the panel in the top layer, which is stacked in the order things were
@@ -117,9 +162,11 @@ const ConsoleInput: Component<{
     switch (event.key) {
       case "Enter": {
         const line = event.currentTarget.value.trim();
-        // What is shown in front of the caret is what runs, so a name still
+        // A line that already names a command runs as itself; one still
         // being completed runs as the completion standing behind it.
-        const command = candidatesFor(line)[candidateIndex()] ?? line;
+        const command = isCommand(line)
+          ? line
+          : (candidatesFor(line)[candidateIndex()] ?? line);
 
         if (command === "") {
           return;
@@ -138,7 +185,9 @@ const ConsoleInput: Component<{
           return;
         }
         event.preventDefault();
-        const scope = toScopeBoundary(completion, typed());
+        const scope = completion.startsWith(typed())
+          ? toScopeBoundary(completion, typed())
+          : completion;
         fill(scope);
         // The name the arrows had landed on is still the one being completed,
         // so the highlight follows it to the place it takes in the shorter
@@ -200,7 +249,7 @@ const ConsoleInput: Component<{
         placeholder="type a command (/help)"
         class={styles.input}
       />
-      <Show when={candidate()}>
+      <Show when={ghost()}>
         {(completion) => (
           <div class={styles.completion} aria-hidden="true">
             <span class={styles.typed}>{typed()}</span>
