@@ -37,6 +37,12 @@ export interface AvatarTerrain {
   groundHeightAt(x: number, y: number, z: number): number;
   inWaterAt(x: number, y: number, z: number): boolean;
   solidAt(x: number, y: number, z: number): boolean;
+  /** The velocity of a moving surface under the player's feet, or null. */
+  surfaceVelocityAt?: (
+    x: number,
+    y: number,
+    z: number,
+  ) => [number, number, number] | null;
 }
 
 export interface PlayerAvatarConfig {
@@ -117,6 +123,9 @@ export const createPlayerAvatar = ({
     inWaterAt: (x, y, z) => terrain.inWaterAt(x, y, z),
     solidAt: (x, y, z) => terrain.solidAt(x, y, z),
     halfExtent: SAFE_EXTENT,
+    ...(terrain.surfaceVelocityAt !== undefined
+      ? { surfaceVelocityAt: terrain.surfaceVelocityAt }
+      : {}),
   };
 
   const skin = createPlayerSkin(CUBE_COLOR);

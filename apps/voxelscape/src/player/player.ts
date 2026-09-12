@@ -47,6 +47,16 @@ export interface PlayerWorld {
   solidAt: (x: number, y: number, z: number) => boolean;
   /** Half the playable extent, in world units; horizontal movement clamps to it. */
   halfExtent: number;
+  /**
+   * The velocity of the surface holding the player up at (`x`, feetY, `z`), in
+   * world units per second, or null where nothing moving is under them. A
+   * platform's motion is added to the player so they ride it.
+   */
+  surfaceVelocityAt?: (
+    x: number,
+    y: number,
+    z: number,
+  ) => [number, number, number] | null;
 }
 
 export interface PlayerConfig {
@@ -576,6 +586,21 @@ export const updatePlayer = (
   const blockedX = moveHorizontally(player, world, "x", dx);
   const blockedZ = moveHorizontally(player, world, "z", dz);
   const stoppedByWall = blockedX || blockedZ;
+
+  // A platform the player was standing on last frame carries them: its velocity
+  // for this frame is added, so they ride it rather than slide off the back.
+  if (player.onGround && world.surfaceVelocityAt !== undefined) {
+    const support = world.surfaceVelocityAt(
+      player.position.x,
+      player.position.y - config.halfSize,
+      player.position.z,
+    );
+    if (support !== null) {
+      player.position.x += support[0] * dt;
+      player.position.y += support[1] * dt;
+      player.position.z += support[2] * dt;
+    }
+  }
 
   // Holding jump while walking into a wall climbs it, which is how a player
   // gets back out of a shaft they dug straight down. Never lower than the

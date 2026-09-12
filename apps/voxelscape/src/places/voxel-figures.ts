@@ -6,7 +6,7 @@
 // has to its controller. Each model file is baked once and shared by every
 // figure wearing it; a figure stands with its feet on the entity's grounded
 // `y`, drawn at whatever height the entity asks for.
-import { Group } from "@random-mesh/rmsl/scene";
+import { Group, Quaternion, Vector3 } from "@random-mesh/rmsl/scene";
 import type { DayNightState } from "../environment/day-night";
 import {
   BakedFigure,
@@ -30,6 +30,8 @@ export interface RenderedFigure {
   yaw?: number;
   /** Drawn height in world units; defaults to `FIGURE_HEIGHT`. */
   height?: number;
+  /** A spin about a world axis, applied after `yaw`; absent when it does not spin. */
+  spin?: { axis: [number, number, number]; angle: number };
 }
 
 /** The upright box the crosshair ray tests a figure against, in world units. */
@@ -63,6 +65,10 @@ export class VoxelFigures {
   private readonly meshes = new Map<string, FigureCopy>();
   /** The drawn height each figure's aim box and copy were last given. */
   private readonly heights = new Map<string, number>();
+  /** Scratch for the per-figure orientation, so drawing a frame allocates none. */
+  private readonly spinAxis = new Vector3();
+  private readonly upAxis = new Vector3(0, 1, 0);
+  private readonly yawTurn = new Quaternion();
 
   constructor(params: VoxelFiguresParams) {
     this.getFigures = params.getFigures;
@@ -161,7 +167,22 @@ export class VoxelFigures {
       const scale = height / baked.modelHeight;
       mesh.group.scale.set(scale, scale, scale);
       mesh.group.position.set(figure.x, figure.y + height / 2, figure.z);
-      mesh.group.rotation.y = figure.yaw ?? 0;
+      const yaw = figure.yaw ?? 0;
+      if (figure.spin === undefined) {
+        mesh.group.rotation.set(0, yaw, 0);
+      } else {
+        // The spin turns about a world axis after the figure has been turned to
+        // its heading, so the two compose as `spin * yaw`.
+        this.spinAxis
+          .set(figure.spin.axis[0], figure.spin.axis[1], figure.spin.axis[2])
+          .normalize();
+        mesh.group.quaternion.setFromAxisAngle(
+          this.spinAxis,
+          figure.spin.angle,
+        );
+        this.yawTurn.setFromAxisAngle(this.upAxis, yaw);
+        mesh.group.quaternion.multiply(this.yawTurn);
+      }
     }
     for (const [id, mesh] of this.meshes) {
       if (!current.has(id)) {

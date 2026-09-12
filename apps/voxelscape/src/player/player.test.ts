@@ -394,3 +394,29 @@ describe("deathCameraPose", () => {
     );
   });
 });
+
+describe("updatePlayer on a moving platform", () => {
+  it("rides a surface that carries it along", () => {
+    const player = createPlayer(0, 0, 0);
+    const world: PlayerWorld = {
+      groundHeightAt: () => 0,
+      inWaterAt: NO_WATER,
+      solidAt: () => false,
+      halfExtent: 1e9,
+      surfaceVelocityAt: () => [5, 0, 0],
+    };
+    // The first frame lands the player; only then does the carry apply.
+    updatePlayer(player, 1 / 60, NO_INPUT, world);
+    const landed = player.position.x;
+    updatePlayer(player, 1 / 60, NO_INPUT, world);
+    expect(player.position.x).toBeCloseTo(landed + 5 / 60, 5);
+  });
+
+  it("stays put when no surface under it moves", () => {
+    const player = createPlayer(0, 0, 0);
+    updatePlayer(player, 1 / 60, NO_INPUT, FLAT);
+    const landed = player.position.x;
+    updatePlayer(player, 1 / 60, NO_INPUT, FLAT);
+    expect(player.position.x).toBe(landed);
+  });
+});

@@ -9,6 +9,7 @@ import { MAIN_SCRIPT_FILE, type PlaceProject } from "./project";
 import type { PlaceManifest } from "./place";
 import GASA4_SCRIPT from "./demo-scripts/gasa4.ts?raw";
 import LATE_TO_SCHOOL_SCRIPT from "./demo-scripts/late-to-school.ts?raw";
+import DONT_POOP_SCRIPT from "./demo-scripts/dont-poop-yourself-at-school.ts?raw";
 
 /** One built-in demo: the world it names, its scripts, and the models they wear. */
 export interface BuiltinDemo {
@@ -192,8 +193,45 @@ const LATE_TO_SCHOOL: BuiltinDemo = {
   },
 };
 
+/**
+ * The models the "Don't Poop Yourself at School" demo wears: the lobby pickup,
+ * the hazard sign, and the two staff figures.
+ */
+const DONT_POOP_MODELS = [
+  "soap.zip",
+  "wet-floor.zip",
+  "platform.zip",
+  "toilet-roll.zip",
+  "npc-sable.zip",
+  "npc-rook.zip",
+];
+
+/**
+ * The "Don't Poop Yourself at School" demo: a school lobby lifted high over the
+ * yard, a staircase and a run of floating pads climbing to the principal's
+ * office, a hazard sign that kills on contact, a kill plane that returns a
+ * fallen player to the last checkpoint, and moving planks and props that ride
+ * the shared clock. It is the proof that a place's script can set checkpoints,
+ * kill and respawn the player, hear a hazard touch, and animate its world.
+ */
+const DONT_POOP: BuiltinDemo = {
+  id: "dont-poop-yourself-at-school",
+  name: "Don't Poop Yourself at School",
+  manifest: {
+    name: "Don't Poop Yourself at School",
+    seed: 4_202,
+    // The player starts on the yard; the script lifts them to the lobby.
+    spawn: [0, 0, 0],
+    models: DONT_POOP_MODELS,
+  },
+  modelFiles: DONT_POOP_MODELS,
+  scripts: {
+    [MAIN_SCRIPT_FILE]: DONT_POOP_SCRIPT,
+  },
+};
+
 /** Every built-in demo, in the order a list shows them. */
-export const BUILTIN_DEMOS: BuiltinDemo[] = [GASA4, LATE_TO_SCHOOL];
+export const BUILTIN_DEMOS: BuiltinDemo[] = [GASA4, LATE_TO_SCHOOL, DONT_POOP];
 
 /** The built-in demo with `id`, or null when there is none. */
 export const builtinDemo = (id: string): BuiltinDemo | null =>

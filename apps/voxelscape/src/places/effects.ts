@@ -4,6 +4,8 @@
 // where a tag's shape and its bounds are decided, the same way
 // `multiplayer/messages.ts` bounds every wire field. Anything a script asks for
 // that is not a well-formed effect here is dropped, never applied.
+import type { CameraShot } from "./cutscene";
+import type { MotionSpec } from "./motion";
 import type { ScriptEffect } from "./sandbox";
 
 /** Every effect tag a place script may dispatch. */
@@ -31,6 +33,15 @@ export type EffectTag =
   | "player-face"
   | "player-speed"
   | "player-jump"
+  | "player-checkpoint"
+  | "player-kill"
+  | "player-respawn"
+  | "void"
+  | "cutscene"
+  | "camera"
+  | "player-control"
+  | "hud"
+  | "hud-remove"
   | "explosion";
 
 /** The furthest an NPC or prop may stand from the origin, in world units. */
@@ -41,6 +52,22 @@ export const MAX_NPC_NAME = 40;
 export const MAX_PROP_MODEL = 128;
 /** The tallest a prop may be drawn, in world units. */
 export const MAX_PROP_HEIGHT = 64;
+/** The most waypoints one motion's path may hold. */
+export const MAX_MOTION_POINTS = 64;
+/** The longest one motion traversal may take, in milliseconds. */
+export const MAX_MOTION_MS = 86_400_000;
+/** The largest spin rate a motion may ask for, per second or per metre. */
+export const MAX_SPIN_RATE = 1_000;
+/** The most shots one cutscene may hold. */
+export const MAX_CUTSCENE_SHOTS = 64;
+/** The longest one camera move or hold may last, in milliseconds. */
+export const MAX_CAMERA_MS = 86_400_000;
+/** The longest one HUD readout's id or label may be. */
+export const MAX_HUD_LABEL = 64;
+/** The longest one HUD readout's text may be. */
+export const MAX_HUD_TEXT = 200;
+/** The largest HUD value or maximum may read. */
+export const MAX_HUD_VALUE = 1_000_000_000;
 /** The longest a script item's id or name may be. */
 export const MAX_ITEM_NAME = 40;
 /** The longest an items-spritesheet sprite name may be. */
@@ -92,6 +119,8 @@ export type ParsedEffect =
         model?: string;
         /** Heading in radians, turning the figure to face somewhere. */
         yaw?: number;
+        /** A path and spin the NPC follows over the shared clock. */
+        motion?: MotionSpec;
       };
     }
   | { tag: "npc-remove"; payload: { id: string } }
@@ -113,6 +142,10 @@ export type ParsedEffect =
         height?: number;
         /** Whether the prop blocks the player; defaults to false. */
         solid?: boolean;
+        /** Whether touching the prop counts as a hazard the script hears about. */
+        hazard?: boolean;
+        /** A path and spin the prop follows over the shared clock. */
+        motion?: MotionSpec;
       };
     }
   | { tag: "prop-remove"; payload: { id: string } }
@@ -232,6 +265,84 @@ export type ParsedEffect =
       };
     }
   | {
+      tag: "player-checkpoint";
+      payload: {
+        player: string;
+        /** Where this player respawns, in world units. */
+        x: number;
+        z: number;
+        /** The feet height to respawn at; the current height is kept when absent. */
+        y?: number;
+        /** The heading to respawn facing, in radians. */
+        yaw?: number;
+      };
+    }
+  | {
+      tag: "player-kill";
+      payload: {
+        player: string;
+        /** A label the `player-died` event carries, or "" for none. */
+        cause?: string;
+      };
+    }
+  | { tag: "player-respawn"; payload: { player: string } }
+  | {
+      tag: "void";
+      payload: {
+        /** The height below which the player is killed, in world units. */
+        y: number;
+      };
+    }
+  | {
+      tag: "cutscene";
+      payload: {
+        player: string;
+        /** The camera moves to play in order. */
+        shots: CameraShot[];
+      };
+    }
+  | {
+      tag: "camera";
+      payload: {
+        player: string;
+        /** Where the camera moves to, in world units. */
+        at: [number, number, number];
+        /** The world point to look at; the current look is kept when absent. */
+        look?: [number, number, number];
+        /** How long the move takes, in milliseconds; 0 snaps. */
+        durationMs?: number;
+        /** How long to hold after arriving, in milliseconds. */
+        holdMs?: number;
+        ease?: "linear" | "smooth";
+      };
+    }
+  | {
+      tag: "player-control";
+      payload: {
+        player: string;
+        /** Whether the script takes the player's movement and tools away. */
+        locked: boolean;
+      };
+    }
+  | {
+      tag: "hud";
+      payload: {
+        player: string;
+        /** Names the readout, so a later `hud` or `hud-remove` reaches it. */
+        id: string;
+        kind: "bar" | "text";
+        /** The readout's caption, or "" for none. */
+        label?: string;
+        /** A bar's filled amount. */
+        value?: number;
+        /** A bar's full amount; required for a bar. */
+        max?: number;
+        /** A text readout's body. */
+        text?: string;
+      };
+    }
+  | { tag: "hud-remove"; payload: { player: string; id: string } }
+  | {
       tag: "explosion";
       payload: {
         id: string;
@@ -257,6 +368,93 @@ const isCoord = (v: unknown): boolean =>
 const isVector = (v: unknown): v is [number, number, number] =>
   Array.isArray(v) && v.length === 3 && v.every(isCoord);
 
+const isNumberIn = (v: unknown, min: number, max: number): boolean =>
+  typeof v === "number" && Number.isFinite(v) && v >= min && v <= max;
+
+/** Whether a value is a path and spin this world can sample. */
+const isMotion = (v: unknown): boolean => {
+  if (typeof v !== "object" || v === null) {
+    return false;
+  }
+  const m = v as Record<string, unknown>;
+  if (
+    !Array.isArray(m.path) ||
+    m.path.length < 1 ||
+    m.path.length > MAX_MOTION_POINTS ||
+    !m.path.every(isVector)
+  ) {
+    return false;
+  }
+  if (m.loop !== "once" && m.loop !== "loop" && m.loop !== "pingpong") {
+    return false;
+  }
+  if (!isNumberIn(m.durationMs, 1, MAX_MOTION_MS)) {
+    return false;
+  }
+  if (
+    m.startAfterMs !== undefined &&
+    !isNumberIn(m.startAfterMs, 0, MAX_MOTION_MS)
+  ) {
+    return false;
+  }
+  if (m.ease !== undefined && m.ease !== "linear" && m.ease !== "smooth") {
+    return false;
+  }
+  if (m.spin === undefined) {
+    return true;
+  }
+  if (typeof m.spin !== "object" || m.spin === null) {
+    return false;
+  }
+  const s = m.spin as Record<string, unknown>;
+  if (!isVector(s.axis)) {
+    return false;
+  }
+  if (s.turnsPerSecond === undefined && s.degreesPerMeter === undefined) {
+    return false;
+  }
+  if (
+    s.turnsPerSecond !== undefined &&
+    !isNumberIn(s.turnsPerSecond, -MAX_SPIN_RATE, MAX_SPIN_RATE)
+  ) {
+    return false;
+  }
+  if (
+    s.degreesPerMeter !== undefined &&
+    !isNumberIn(s.degreesPerMeter, -MAX_SPIN_RATE, MAX_SPIN_RATE)
+  ) {
+    return false;
+  }
+  return true;
+};
+
+/** Whether a value is one camera move this world can play. */
+const isShot = (v: unknown): boolean => {
+  if (typeof v !== "object" || v === null) {
+    return false;
+  }
+  const s = v as Record<string, unknown>;
+  if (!isVector(s.at)) {
+    return false;
+  }
+  if (s.look !== undefined && !isVector(s.look)) {
+    return false;
+  }
+  if (
+    s.durationMs !== undefined &&
+    !isNumberIn(s.durationMs, 0, MAX_CAMERA_MS)
+  ) {
+    return false;
+  }
+  if (s.holdMs !== undefined && !isNumberIn(s.holdMs, 0, MAX_CAMERA_MS)) {
+    return false;
+  }
+  if (s.ease !== undefined && s.ease !== "linear" && s.ease !== "smooth") {
+    return false;
+  }
+  return true;
+};
+
 /** Whether a JSON-parsed payload fits the shape of its tag. */
 const isPayload = (tag: EffectTag, value: unknown): boolean => {
   if (typeof value !== "object" || value === null) {
@@ -272,7 +470,8 @@ const isPayload = (tag: EffectTag, value: unknown): boolean => {
         (p.y === undefined || isCoord(p.y)) &&
         (p.name === undefined || isShort(p.name, MAX_NPC_NAME)) &&
         (p.model === undefined || isShort(p.model, MAX_PROP_MODEL)) &&
-        (p.yaw === undefined || isCoord(p.yaw))
+        (p.yaw === undefined || isCoord(p.yaw)) &&
+        (p.motion === undefined || isMotion(p.motion))
       );
     case "npc-remove":
       return isShort(p.id, 64);
@@ -290,7 +489,9 @@ const isPayload = (tag: EffectTag, value: unknown): boolean => {
             Number.isFinite(p.height) &&
             p.height > 0 &&
             p.height <= MAX_PROP_HEIGHT)) &&
-        (p.solid === undefined || typeof p.solid === "boolean")
+        (p.solid === undefined || typeof p.solid === "boolean") &&
+        (p.hazard === undefined || typeof p.hazard === "boolean") &&
+        (p.motion === undefined || isMotion(p.motion))
       );
     case "prop-remove":
       return isShort(p.id, 64);
@@ -407,6 +608,61 @@ const isPayload = (tag: EffectTag, value: unknown): boolean => {
         p.multiplier > 0 &&
         p.multiplier <= MAX_PLAYER_MULTIPLIER
       );
+    case "player-checkpoint":
+      return (
+        isPlayer(p.player) &&
+        isCoord(p.x) &&
+        isCoord(p.z) &&
+        (p.y === undefined || isCoord(p.y)) &&
+        (p.yaw === undefined || isCoord(p.yaw))
+      );
+    case "player-kill":
+      return (
+        isPlayer(p.player) &&
+        (p.cause === undefined || p.cause === "" || isShort(p.cause, 64))
+      );
+    case "player-respawn":
+      return isPlayer(p.player);
+    case "void":
+      return isCoord(p.y);
+    case "cutscene":
+      return (
+        isPlayer(p.player) &&
+        Array.isArray(p.shots) &&
+        p.shots.length >= 1 &&
+        p.shots.length <= MAX_CUTSCENE_SHOTS &&
+        p.shots.every(isShot)
+      );
+    case "camera":
+      return (
+        isPlayer(p.player) &&
+        isVector(p.at) &&
+        (p.look === undefined || isVector(p.look)) &&
+        (p.durationMs === undefined ||
+          isNumberIn(p.durationMs, 0, MAX_CAMERA_MS)) &&
+        (p.holdMs === undefined || isNumberIn(p.holdMs, 0, MAX_CAMERA_MS)) &&
+        (p.ease === undefined || p.ease === "linear" || p.ease === "smooth")
+      );
+    case "player-control":
+      return isPlayer(p.player) && typeof p.locked === "boolean";
+    case "hud":
+      return (
+        isPlayer(p.player) &&
+        isShort(p.id, MAX_HUD_LABEL) &&
+        (p.kind === "bar" || p.kind === "text") &&
+        (p.label === undefined ||
+          p.label === "" ||
+          isShort(p.label, MAX_HUD_LABEL)) &&
+        (p.value === undefined ||
+          isNumberIn(p.value, -MAX_HUD_VALUE, MAX_HUD_VALUE)) &&
+        (p.max === undefined || isNumberIn(p.max, 1, MAX_HUD_VALUE)) &&
+        (p.text === undefined ||
+          p.text === "" ||
+          isShort(p.text, MAX_HUD_TEXT)) &&
+        (p.kind !== "bar" || p.max !== undefined)
+      );
+    case "hud-remove":
+      return isPlayer(p.player) && isShort(p.id, MAX_HUD_LABEL);
     case "explosion":
       return (
         isShort(p.id, 64) &&

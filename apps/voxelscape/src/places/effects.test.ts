@@ -132,6 +132,132 @@ describe("effect parsing", () => {
     ).toEqual({ tag: "player-jump", payload: { player: "", multiplier: 0.5 } });
     expect(
       parseEffect(
+        effect("player-checkpoint", { player: "", x: 4, z: 8, y: 62, yaw: 1 }),
+      ),
+    ).toEqual({
+      tag: "player-checkpoint",
+      payload: { player: "", x: 4, z: 8, y: 62, yaw: 1 },
+    });
+    expect(
+      parseEffect(effect("player-kill", { player: "", cause: "spikes" })),
+    ).toEqual({
+      tag: "player-kill",
+      payload: { player: "", cause: "spikes" },
+    });
+    expect(parseEffect(effect("player-kill", { player: "" }))).not.toBeNull();
+    expect(
+      parseEffect(effect("player-respawn", { player: "" })),
+    ).not.toBeNull();
+    expect(parseEffect(effect("void", { y: 20 }))).toEqual({
+      tag: "void",
+      payload: { y: 20 },
+    });
+    expect(
+      parseEffect(
+        effect("cutscene", {
+          player: "",
+          shots: [
+            { at: [0, 10, 0], durationMs: 1_000 },
+            { at: [10, 10, 0], look: [10, 0, 0], durationMs: 0, holdMs: 500 },
+          ],
+        }),
+      ),
+    ).not.toBeNull();
+    expect(
+      parseEffect(
+        effect("camera", {
+          player: "",
+          at: [1, 2, 3],
+          look: [4, 5, 6],
+          durationMs: 2_000,
+          ease: "smooth",
+        }),
+      ),
+    ).not.toBeNull();
+    expect(
+      parseEffect(effect("player-control", { player: "", locked: true })),
+    ).toEqual({
+      tag: "player-control",
+      payload: { player: "", locked: true },
+    });
+    expect(
+      parseEffect(
+        effect("hud", {
+          player: "",
+          id: "bladder",
+          kind: "bar",
+          label: "Bladder",
+          value: 3,
+          max: 10,
+        }),
+      ),
+    ).not.toBeNull();
+    expect(
+      parseEffect(
+        effect("hud", {
+          player: "",
+          id: "pad",
+          kind: "text",
+          text: "Checkpoint: stairs",
+        }),
+      ),
+    ).not.toBeNull();
+    expect(
+      parseEffect(effect("hud-remove", { player: "", id: "bladder" })),
+    ).not.toBeNull();
+    expect(
+      parseEffect(
+        effect("prop", {
+          id: "spikes",
+          model: "spikes.zip",
+          x: 0,
+          z: 0,
+          solid: true,
+          hazard: true,
+        }),
+      ),
+    ).not.toBeNull();
+    expect(
+      parseEffect(
+        effect("prop", {
+          id: "log",
+          model: "log.zip",
+          x: 0,
+          z: 0,
+          solid: true,
+          motion: {
+            path: [
+              [0, 0, 0],
+              [0, 0, 20],
+            ],
+            loop: "pingpong",
+            durationMs: 4_000,
+            ease: "smooth",
+            spin: { axis: [1, 0, 0], degreesPerMeter: 36 },
+          },
+        }),
+      ),
+    ).not.toBeNull();
+    expect(
+      parseEffect(
+        effect("npc", {
+          id: "walker",
+          x: 0,
+          z: 0,
+          motion: {
+            path: [
+              [0, 0, 0],
+              [8, 0, 0],
+            ],
+            loop: "loop",
+            durationMs: 2_000,
+            spin: { axis: [0, 1, 0], turnsPerSecond: 0.25 },
+          },
+        }),
+      ),
+    ).not.toBeNull();
+    expect(
+      parseEffect(
         effect("explosion", { id: "boom", x: 10, z: 18, y: 62, radius: 6 }),
       ),
     ).toEqual({
@@ -182,6 +308,105 @@ describe("effect parsing", () => {
       ["player-speed", { player: "", multiplier: "2" }],
       ["player-speed", { player: "" }],
       ["player-jump", { player: "", multiplier: -1 }],
+      ["player-checkpoint", { player: "", x: 4 }],
+      ["player-checkpoint", { player: "", x: 4, z: 8, yaw: "n" }],
+      ["player-kill", {}],
+      ["player-kill", { player: "", cause: "x".repeat(65) }],
+      ["player-respawn", {}],
+      ["void", { y: "down" }],
+      ["void", {}],
+      ["cutscene", { player: "", shots: [] }],
+      ["cutscene", { player: "", shots: [{ at: [0, 0, 0], ease: "bouncy" }] }],
+      ["cutscene", { player: "", shots: [{ at: [0, 0, 0], durationMs: -1 }] }],
+      ["cutscene", { player: "", shots: [{ at: [0, 0] }] }],
+      ["camera", { player: "", at: [0, 0] }],
+      ["camera", { player: "", at: [0, 0, 0], holdMs: "long" }],
+      ["player-control", { player: "" }],
+      ["player-control", { player: "", locked: "yes" }],
+      ["hud", { player: "", id: "bladder", kind: "bar" }],
+      ["hud", { player: "", id: "bladder", kind: "pie" }],
+      ["hud", { player: "", id: "bladder", kind: "bar", max: 0 }],
+      ["hud", { player: "", id: "", kind: "text" }],
+      ["hud", { player: "", id: "note", kind: "text", text: "x".repeat(201) }],
+      ["hud-remove", { player: "" }],
+      [
+        "prop",
+        { id: "spikes", model: "spikes.zip", x: 0, z: 0, hazard: "yes" },
+      ],
+      [
+        "prop",
+        {
+          id: "log",
+          model: "log.zip",
+          x: 0,
+          z: 0,
+          motion: { path: [], loop: "loop", durationMs: 1_000 },
+        },
+      ],
+      [
+        "prop",
+        {
+          id: "log",
+          model: "log.zip",
+          x: 0,
+          z: 0,
+          motion: { path: [[0, 0, 0]], loop: "spiral", durationMs: 1_000 },
+        },
+      ],
+      [
+        "prop",
+        {
+          id: "log",
+          model: "log.zip",
+          x: 0,
+          z: 0,
+          motion: { path: [[0, 0, 0]], loop: "loop", durationMs: 0 },
+        },
+      ],
+      [
+        "prop",
+        {
+          id: "log",
+          model: "log.zip",
+          x: 0,
+          z: 0,
+          motion: {
+            path: [[0, 0, 0]],
+            loop: "loop",
+            durationMs: 1_000,
+            spin: { axis: [0, 1, 0] },
+          },
+        },
+      ],
+      [
+        "prop",
+        {
+          id: "log",
+          model: "log.zip",
+          x: 0,
+          z: 0,
+          motion: {
+            path: [[0, 0, 0]],
+            loop: "loop",
+            durationMs: 1_000,
+            spin: { axis: [0, 1, 0], turnsPerSecond: 2_000 },
+          },
+        },
+      ],
+      [
+        "npc",
+        {
+          id: "walker",
+          x: 0,
+          z: 0,
+          motion: {
+            path: [[0, 0, 0]],
+            loop: "loop",
+            durationMs: 1_000,
+            ease: "bouncy",
+          },
+        },
+      ],
       ["explosion", { id: "", x: 0, z: 0 }],
       ["explosion", { id: "boom", x: 0 }],
       ["explosion", { id: "boom", x: 0, z: 0, radius: 0 }],

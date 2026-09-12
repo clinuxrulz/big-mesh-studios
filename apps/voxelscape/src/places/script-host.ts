@@ -10,6 +10,8 @@ import { createQuickJSSandbox } from "./quickjs-sandbox";
 import { EventLog } from "./event-log";
 import { parseEffect, type ParsedEffect } from "./effects";
 import { ScriptInventory } from "./script-items";
+import { poseAt, type MotionPose, type MotionSpec } from "./motion";
+import type { CameraShot, CutsceneState } from "./cutscene";
 import { bundlePlaceProject } from "./bundle";
 import type { ScriptSandbox } from "./sandbox";
 import type { ScriptEventPayload } from "./events";
@@ -20,6 +22,13 @@ import type { ScriptEventPayload } from "./events";
  * one is dropped rather than kept for the life of a run.
  */
 const EXPLOSION_MEMORY_MS = 5_000;
+
+/**
+ * How many times a step may re-run for facts authored while applying the last
+ * one's effects. A script that answers a death with another death settles here
+ * instead of stepping forever.
+ */
+const MAX_CASCADE_STEPS = 8;
 
 /** One scripted NPC: where it stands, how it faces, and what it is called. */
 export interface ScriptedNpc {
@@ -33,6 +42,8 @@ export interface ScriptedNpc {
   z: number;
   /** Heading in radians; the renderer turns the figure to it. */
   yaw: number;
+  /** A path and spin the NPC follows over the shared clock. */
+  motion?: MotionSpec;
 }
 
 /** One scripted prop: where it stands, and which place model it wears. */
@@ -49,6 +60,10 @@ export interface ScriptedProp {
   height: number;
   /** Whether the prop blocks the player rather than being walked through. */
   solid: boolean;
+  /** Whether touching the prop is a hazard the script hears about. */
+  hazard: boolean;
+  /** A path and spin the prop follows over the shared clock. */
+  motion?: MotionSpec;
 }
 
 // The blaze record the host reports lives in the world area, whose types both
@@ -68,6 +83,19 @@ export interface ScriptZone {
   name: string;
   min: [number, number, number];
   max: [number, number, number];
+}
+
+/** One readout a place script shows in a player's HUD. */
+export interface HudReadout {
+  id: string;
+  kind: "bar" | "text";
+  label: string;
+  /** A bar's filled amount; 0 for a text readout. */
+  value: number;
+  /** A bar's full amount; 0 for a text readout. */
+  max: number;
+  /** A text readout's body; "" for a bar. */
+  text: string;
 }
 
 /** The dialog one player is currently in, as the script last set it. */
@@ -118,6 +146,17 @@ export interface ScriptHostParams {
   onPlayerSpeed?: (player: string, multiplier: number) => void;
   /** Called when the script scales a player's jump. */
   onPlayerJump?: (player: string, multiplier: number) => void;
+  /** Called when the script sets where `player` respawns. */
+  onCheckpoint?: (
+    player: string,
+    at: { x: number; z: number; y?: number; yaw?: number },
+  ) => void;
+  /** Called when the script kills `player`; the world plays the fall and respawns. */
+  onKill?: (player: string, cause: string) => void;
+  /** Called when the script respawns `player` outright, with no fall. */
+  onRespawn?: (player: string) => void;
+  /** Called when the script sets the height below which the player is killed. */
+  onVoid?: (y: number) => void;
   /** Called when the script lights a fire; the world seeds its ember light. */
   onFire?: (fire: ScriptedFire) => void;
   /** Called when the script sets off a blast; the world draws the burst. */
@@ -165,6 +204,13 @@ export class ScriptHost {
   ) => void;
   private readonly onPlayerSpeed?: (player: string, multiplier: number) => void;
   private readonly onPlayerJump?: (player: string, multiplier: number) => void;
+  private readonly onCheckpoint?: (
+    player: string,
+    at: { x: number; z: number; y?: number; yaw?: number },
+  ) => void;
+  private readonly onKill?: (player: string, cause: string) => void;
+  private readonly onRespawn?: (player: string) => void;
+  private readonly onVoid?: (y: number) => void;
   private readonly onFire?: (fire: ScriptedFire) => void;
   private readonly onExplosion?: (explosion: ScriptedExplosion) => void;
 
@@ -182,6 +228,14 @@ export class ScriptHost {
   private readonly dialogs = new Map<string, DialogState>();
   /** Timer ids waiting to fire, each against the shared clock it is due at. */
   private readonly pendingTimers = new Map<string, number>();
+  /** The height below which the script kills the player, or null when unset. */
+  private voidHeight: number | null = null;
+  /** The HUD readouts each player is showing, keyed by player then readout id. */
+  private readonly readouts = new Map<string, Map<string, HudReadout>>();
+  /** The camera sequence each player is watching, keyed by player. */
+  private readonly cutscenes = new Map<string, CutsceneState>();
+  /** Whether each player's movement and tools are taken away, keyed by player. */
+  private readonly controlLocks = new Map<string, boolean>();
   private pumping = false;
   private loaded = false;
   private sequence = 0;
@@ -202,6 +256,10 @@ export class ScriptHost {
     this.onPlayerFace = params.onPlayerFace;
     this.onPlayerSpeed = params.onPlayerSpeed;
     this.onPlayerJump = params.onPlayerJump;
+    this.onCheckpoint = params.onCheckpoint;
+    this.onKill = params.onKill;
+    this.onRespawn = params.onRespawn;
+    this.onVoid = params.onVoid;
     this.onFire = params.onFire;
     this.onExplosion = params.onExplosion;
     this.ready = createQuickJSSandbox({
@@ -231,6 +289,18 @@ export class ScriptHost {
     return this.props.get(id) ?? null;
   }
 
+  /** Where the NPC `id` is at the shared clock, or null when it does not move. */
+  npcPose(id: string): MotionPose | null {
+    const motion = this.npcs.get(id)?.motion;
+    return motion === undefined ? null : poseAt(motion, this.now());
+  }
+
+  /** Where the prop `id` is at the shared clock, or null when it does not move. */
+  propPose(id: string): MotionPose | null {
+    const motion = this.props.get(id)?.motion;
+    return motion === undefined ? null : poseAt(motion, this.now());
+  }
+
   /** Every blaze the script has lit in the world. */
   get fireList(): ScriptedFire[] {
     return [...this.fires.values()];
@@ -254,6 +324,31 @@ export class ScriptHost {
   /** The dialog `player` is in, or null when they are not talking. */
   dialogFor(player: string): DialogState | null {
     return this.dialogs.get(player) ?? null;
+  }
+
+  /** The height below which the script kills the player, or null when unset. */
+  get voidY(): number | null {
+    return this.voidHeight;
+  }
+
+  /** The readouts `player`'s HUD shows, in the order the script set them. */
+  hudFor(player: string): HudReadout[] {
+    return [...(this.readouts.get(player)?.values() ?? [])];
+  }
+
+  /** The cutscene `player` is watching, or null when none is running. */
+  cutsceneFor(player: string): CutsceneState | null {
+    return this.cutscenes.get(player) ?? null;
+  }
+
+  /** Clears `player`'s cutscene, called once the world has played it out. */
+  clearCutscene(player: string): void {
+    this.cutscenes.delete(player);
+  }
+
+  /** Whether the script has taken `player`'s movement and tools away. */
+  controlsLocked(player: string): boolean {
+    return this.controlLocks.get(player) === true || this.cutscenes.has(player);
   }
 
   /** What the last step said, if anything — a script error or a log line. */
@@ -322,6 +417,26 @@ export class ScriptHost {
   async useItem(itemId: string, player: string): Promise<void> {
     this.assertAlive();
     this.author({ kind: "item-used", item: itemId }, player);
+    await this.step();
+  }
+
+  /**
+   * The world reports `player` came into contact with the hazardous prop
+   * `entityId` — a fact the script's rules answer, the way an `entity-used` is.
+   */
+  async touched(player: string, entityId: string): Promise<void> {
+    this.assertAlive();
+    this.author({ kind: "player-touched", entityId }, player);
+    await this.step();
+  }
+
+  /**
+   * The world reports `player` died from a cause it observed — a fall or a
+   * hazard — so the script can fold the death into its rules.
+   */
+  async died(player: string, cause = ""): Promise<void> {
+    this.assertAlive();
+    this.author({ kind: "player-died", cause }, player);
     await this.step();
   }
 
@@ -411,7 +526,7 @@ export class ScriptHost {
   }
 
   /** Advances the script one step: new facts in, effects out and applied. */
-  private async step(): Promise<void> {
+  private async step(depth = 0): Promise<void> {
     if (!this.loaded) {
       return;
     }
@@ -431,6 +546,17 @@ export class ScriptHost {
     } finally {
       await this.drain(sandbox);
     }
+    // An effect applied during the drain can author a fact of its own — a kill
+    // is the case this exists for. Step again so the script sees it this turn
+    // rather than whenever some unrelated action next pumps it.
+    if (depth < MAX_CASCADE_STEPS && this.hasUnsentEvents()) {
+      await this.step(depth + 1);
+    }
+  }
+
+  /** Whether any fact in the log has not yet been handed to the script. */
+  private hasUnsentEvents(): boolean {
+    return this.log.inOrder().some((event) => !this.sent.has(event.id));
   }
 
   /** Applies whatever the script queued since the last drain. */
@@ -462,7 +588,7 @@ export class ScriptHost {
   private apply(effect: ParsedEffect): void {
     switch (effect.tag) {
       case "npc": {
-        const { id, x, y, z, name, model, yaw } = effect.payload;
+        const { id, x, y, z, name, model, yaw, motion } = effect.payload;
         this.npcs.set(id, {
           id,
           name: name ?? "NPC",
@@ -471,6 +597,7 @@ export class ScriptHost {
           y: y ?? this.heightAt(x, z),
           z,
           yaw: yaw ?? 0,
+          ...(motion !== undefined ? { motion } : {}),
         });
         break;
       }
@@ -478,7 +605,8 @@ export class ScriptHost {
         this.npcs.delete(effect.payload.id);
         break;
       case "prop": {
-        const { id, model, x, y, z, name, yaw, height, solid } = effect.payload;
+        const { id, model, x, y, z, name, yaw, height, solid, hazard, motion } =
+          effect.payload;
         this.props.set(id, {
           id,
           model,
@@ -489,6 +617,8 @@ export class ScriptHost {
           yaw: yaw ?? 0,
           height: height ?? 2,
           solid: solid ?? false,
+          hazard: hazard ?? false,
+          ...(motion !== undefined ? { motion } : {}),
         });
         break;
       }
@@ -613,6 +743,71 @@ export class ScriptHost {
       case "player-jump":
         this.onPlayerJump?.(effect.payload.player, effect.payload.multiplier);
         break;
+      case "player-checkpoint": {
+        const { player, x, z, y, yaw } = effect.payload;
+        this.onCheckpoint?.(player, { x, z, y, yaw });
+        break;
+      }
+      case "player-kill": {
+        const { player, cause } = effect.payload;
+        this.author({ kind: "player-died", cause: cause ?? "" }, player);
+        this.onKill?.(player, cause ?? "");
+        break;
+      }
+      case "player-respawn":
+        this.onRespawn?.(effect.payload.player);
+        break;
+      case "void":
+        this.voidHeight = effect.payload.y;
+        this.onVoid?.(effect.payload.y);
+        break;
+      case "cutscene":
+        this.cutscenes.set(effect.payload.player, {
+          startMs: this.now(),
+          shots: effect.payload.shots,
+        });
+        break;
+      case "camera": {
+        const { player, at, look, durationMs, holdMs, ease } = effect.payload;
+        const shot: CameraShot = {
+          at,
+          ...(look !== undefined ? { look } : {}),
+          ...(durationMs !== undefined ? { durationMs } : {}),
+          ...(holdMs !== undefined ? { holdMs } : {}),
+          ...(ease !== undefined ? { ease } : {}),
+        };
+        this.cutscenes.set(player, { startMs: this.now(), shots: [shot] });
+        break;
+      }
+      case "player-control":
+        this.controlLocks.set(effect.payload.player, effect.payload.locked);
+        break;
+      case "hud": {
+        const { player, id, kind, label, value, max, text } = effect.payload;
+        let readouts = this.readouts.get(player);
+        if (readouts === undefined) {
+          readouts = new Map();
+          this.readouts.set(player, readouts);
+        }
+        readouts.set(id, {
+          id,
+          kind,
+          label: label ?? "",
+          value: value ?? 0,
+          max: max ?? 0,
+          text: text ?? "",
+        });
+        break;
+      }
+      case "hud-remove": {
+        const { player, id } = effect.payload;
+        const readouts = this.readouts.get(player);
+        readouts?.delete(id);
+        if (readouts !== undefined && readouts.size === 0) {
+          this.readouts.delete(player);
+        }
+        break;
+      }
     }
   }
 

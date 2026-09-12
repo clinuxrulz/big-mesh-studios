@@ -45,6 +45,17 @@ export interface ScriptConsoleParams {
   onPlayerSpeed?: (player: string, multiplier: number) => void;
   /** Called when the script scales a player's jump. */
   onPlayerJump?: (player: string, multiplier: number) => void;
+  /** Called when the script sets where `player` respawns. */
+  onCheckpoint?: (
+    player: string,
+    at: { x: number; z: number; y?: number; yaw?: number },
+  ) => void;
+  /** Called when the script kills `player`; the world plays the fall and respawns. */
+  onKill?: (player: string, cause: string) => void;
+  /** Called when the script respawns `player` outright, with no fall. */
+  onRespawn?: (player: string) => void;
+  /** Called when the script sets the height below which the player is killed. */
+  onVoid?: (y: number) => void;
   /** Called when the script lights a fire; the world seeds its ember light. */
   onFire?: (fire: ScriptedFire) => void;
   /** Called when the script sets off a blast; the world draws the burst. */
@@ -89,6 +100,13 @@ export class ScriptConsole {
   ) => void;
   private readonly onPlayerSpeed: (player: string, multiplier: number) => void;
   private readonly onPlayerJump: (player: string, multiplier: number) => void;
+  private readonly onCheckpoint: (
+    player: string,
+    at: { x: number; z: number; y?: number; yaw?: number },
+  ) => void;
+  private readonly onKill: (player: string, cause: string) => void;
+  private readonly onRespawn: (player: string) => void;
+  private readonly onVoid: (y: number) => void;
   private readonly onFire: (fire: ScriptedFire) => void;
   private readonly onExplosion: (explosion: ScriptedExplosion) => void;
   private readonly endings: () => string[];
@@ -112,6 +130,10 @@ export class ScriptConsole {
     this.onPlayerFace = params.onPlayerFace ?? (() => {});
     this.onPlayerSpeed = params.onPlayerSpeed ?? (() => {});
     this.onPlayerJump = params.onPlayerJump ?? (() => {});
+    this.onCheckpoint = params.onCheckpoint ?? (() => {});
+    this.onKill = params.onKill ?? (() => {});
+    this.onRespawn = params.onRespawn ?? (() => {});
+    this.onVoid = params.onVoid ?? (() => {});
     this.onFire = params.onFire ?? (() => {});
     this.onExplosion = params.onExplosion ?? (() => {});
     this.endings = params.endings ?? (() => []);
@@ -140,6 +162,41 @@ export class ScriptConsole {
   /** The prop with `id`, or null when the script has not placed one. */
   prop(id: string) {
     return this.host?.prop(id) ?? null;
+  }
+
+  /** Where the NPC `id` is at the shared clock, or null when it does not move. */
+  npcPose(id: string) {
+    return this.host?.npcPose(id) ?? null;
+  }
+
+  /** Where the prop `id` is at the shared clock, or null when it does not move. */
+  propPose(id: string) {
+    return this.host?.propPose(id) ?? null;
+  }
+
+  /** The HUD readouts the local player is showing, in the script's order. */
+  hud() {
+    return this.host?.hudFor("") ?? [];
+  }
+
+  /** The shared clock the host's deadlines and cutscenes are measured against. */
+  now(): number {
+    return Date.now();
+  }
+
+  /** The cutscene `player` is watching, or null when none is running. */
+  cutsceneFor(player: string) {
+    return this.host?.cutsceneFor(player) ?? null;
+  }
+
+  /** Clears `player`'s cutscene once the world has played it out. */
+  clearCutscene(player: string): void {
+    this.host?.clearCutscene(player);
+  }
+
+  /** Whether the script has taken `player`'s movement and tools away. */
+  controlsLocked(player: string): boolean {
+    return this.host?.controlsLocked(player) ?? false;
   }
 
   /** The fires the loaded script has lit, for the world to draw. */
@@ -188,6 +245,16 @@ export class ScriptConsole {
   /** The item the local player is holding, or null when they hold none. */
   heldItem() {
     return this.host?.inventory.heldItem() ?? null;
+  }
+
+  /** Reports the local player touching the hazardous prop `id`. */
+  async touched(id: string): Promise<void> {
+    await this.host?.touched("", id);
+  }
+
+  /** Reports the local player dying from a cause the world observed. */
+  async died(cause = ""): Promise<void> {
+    await this.host?.died("", cause);
   }
 
   /** Starts a talk straight away — the world's tap-and-click path, no console. */
@@ -342,6 +409,10 @@ export class ScriptConsole {
         this.onPlayerSpeed(player, multiplier),
       onPlayerJump: (player, multiplier) =>
         this.onPlayerJump(player, multiplier),
+      onCheckpoint: (player, at) => this.onCheckpoint(player, at),
+      onKill: (player, cause) => this.onKill(player, cause),
+      onRespawn: (player) => this.onRespawn(player),
+      onVoid: (y) => this.onVoid(y),
       onFire: (fire) => this.onFire(fire),
       onExplosion: (explosion) => this.onExplosion(explosion),
       endings: () => this.endings(),
