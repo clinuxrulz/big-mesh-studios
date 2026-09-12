@@ -62,6 +62,11 @@ export interface ScriptConsoleParams {
   onExplosion?: (explosion: ScriptedExplosion) => void;
   /** The ending titles the place has already reached, read back by the script. */
   endings?: () => string[];
+  /**
+   * The shared clock the host's deadlines, motions, and cutscenes are measured
+   * against: the place clock while multiplayer is up, `Date.now` otherwise.
+   */
+  now?: () => number;
 }
 
 /** The option a console prints for a dialog, numbered for `/script:choose`. */
@@ -110,6 +115,7 @@ export class ScriptConsole {
   private readonly onFire: (fire: ScriptedFire) => void;
   private readonly onExplosion: (explosion: ScriptedExplosion) => void;
   private readonly endings: () => string[];
+  private readonly now_: () => number;
   private host: ScriptHost | null = null;
   /** The last project loaded, so `restart` can run it once more from scratch. */
   private last: {
@@ -137,6 +143,7 @@ export class ScriptConsole {
     this.onFire = params.onFire ?? (() => {});
     this.onExplosion = params.onExplosion ?? (() => {});
     this.endings = params.endings ?? (() => []);
+    this.now_ = params.now ?? (() => Date.now());
   }
 
   /** Whether a script is loaded and running. */
@@ -164,6 +171,16 @@ export class ScriptConsole {
     return this.host?.prop(id) ?? null;
   }
 
+  /** The fields the loaded script has declared, for the world's physics. */
+  fields() {
+    return this.host?.fieldList ?? [];
+  }
+
+  /** The field with `id`, or null when the script has not declared one. */
+  field(id: string) {
+    return this.host?.field(id) ?? null;
+  }
+
   /** Where the NPC `id` is at the shared clock, or null when it does not move. */
   npcPose(id: string) {
     return this.host?.npcPose(id) ?? null;
@@ -181,7 +198,7 @@ export class ScriptConsole {
 
   /** The shared clock the host's deadlines and cutscenes are measured against. */
   now(): number {
-    return Date.now();
+    return this.now_();
   }
 
   /** The cutscene `player` is watching, or null when none is running. */
@@ -390,7 +407,7 @@ export class ScriptConsole {
     this.host?.dispose();
     this.host = new ScriptHost({
       seed,
-      now: () => Date.now(),
+      now: this.now_,
       heightAt: this.heightAt,
       onToast: (player, text) => {
         if (player === "") {

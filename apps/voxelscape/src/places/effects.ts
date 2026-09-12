@@ -15,6 +15,8 @@ export type EffectTag =
   | "prop"
   | "prop-remove"
   | "fire"
+  | "field"
+  | "field-remove"
   | "zone"
   | "zone-remove"
   | "item-define"
@@ -103,6 +105,12 @@ export const MAX_TIMER_MS = 86_400_000;
 export const MAX_PLAYER_MULTIPLIER = 100;
 /** The widest an explosion may read, in world units. */
 export const MAX_EXPLOSION_RADIUS = 64;
+/** The furthest a field's push may pull a player, per axis, in units per second. */
+export const MAX_FIELD_SPEED = 100;
+/** The fastest a field's quicksand may sink a player, in units per second. */
+export const MAX_FIELD_SINK = 100;
+/** The fastest a conveyor may carry a player, per axis, in units per second. */
+export const MAX_CONVEYOR_SPEED = 100;
 
 export type ParsedEffect =
   | {
@@ -146,6 +154,12 @@ export type ParsedEffect =
         hazard?: boolean;
         /** A path and spin the prop follows over the shared clock. */
         motion?: MotionSpec;
+        /**
+         * The horizontal velocity the prop's surface carries a player standing
+         * on it, in units per second. It takes the place of a `motion` — a
+         * static treadmill, a rolling walkway — so the two may not both be set.
+         */
+        conveyor?: { vx: number; vz: number };
       };
     }
   | { tag: "prop-remove"; payload: { id: string } }
@@ -162,6 +176,34 @@ export type ParsedEffect =
         height?: number;
       };
     }
+  | {
+      tag: "field";
+      payload: {
+        id: string;
+        /** What the box does to a player inside it. */
+        kind: "push" | "quicksand";
+        /** The box a player must stand in, in world units, inclusive. */
+        min: [number, number, number];
+        max: [number, number, number];
+        /**
+         * For a push: the target horizontal velocity the box pulls a player's
+         * movement toward, in units per second each axis; at least one of
+         * `vx`, `vy`, `vz` must be present.
+         */
+        vx?: number;
+        /** For a push: the target upward velocity pulled toward; absent leaves falling alone. */
+        vy?: number;
+        vz?: number;
+        /**
+         * For quicksand: what a player's walk speed is multiplied by while
+         * stuck, from just above 0 (unmoving) to 1 (no effect).
+         */
+        speedScale?: number;
+        /** For quicksand: the fastest a player may fall through it, units per second. */
+        sink?: number;
+      };
+    }
+  | { tag: "field-remove"; payload: { id: string } }
   | {
       tag: "zone";
       payload: {
@@ -455,6 +497,75 @@ const isShot = (v: unknown): boolean => {
   return true;
 };
 
+/** Whether a value is a surface velocity a prop carries its rider at. */
+const isConveyor = (v: unknown): boolean => {
+  if (typeof v !== "object" || v === null) {
+    return false;
+  }
+  const c = v as Record<string, unknown>;
+  return (
+    isNumberIn(c.vx, -MAX_CONVEYOR_SPEED, MAX_CONVEYOR_SPEED) &&
+    isNumberIn(c.vz, -MAX_CONVEYOR_SPEED, MAX_CONVEYOR_SPEED)
+  );
+};
+
+/** Whether a value is a field box this world can sample on a player. */
+const isField = (v: unknown): boolean => {
+  if (typeof v !== "object" || v === null) {
+    return false;
+  }
+  const p = v as Record<string, unknown>;
+  if (isShort(p.id, 64) === false) {
+    return false;
+  }
+  if (p.kind === "push") {
+    if (p.speedScale !== undefined || p.sink !== undefined) {
+      return false;
+    }
+    if (p.vx === undefined && p.vy === undefined && p.vz === undefined) {
+      return false;
+    }
+    return (
+      (p.vx === undefined ||
+        isNumberIn(p.vx, -MAX_FIELD_SPEED, MAX_FIELD_SPEED)) &&
+      (p.vy === undefined ||
+        isNumberIn(p.vy, -MAX_FIELD_SPEED, MAX_FIELD_SPEED)) &&
+      (p.vz === undefined ||
+        isNumberIn(p.vz, -MAX_FIELD_SPEED, MAX_FIELD_SPEED)) &&
+      ((p.vx ?? 0) !== 0 || (p.vy ?? 0) !== 0 || (p.vz ?? 0) !== 0)
+    );
+  }
+  if (p.kind === "quicksand") {
+    if (p.vx !== undefined || p.vy !== undefined || p.vz !== undefined) {
+      return false;
+    }
+    const scaleOk =
+      p.speedScale === undefined ||
+      (typeof p.speedScale === "number" &&
+        Number.isFinite(p.speedScale) &&
+        p.speedScale > 0 &&
+        p.speedScale <= 1);
+    const sinkOk =
+      p.sink === undefined || isNumberIn(p.sink, 0, MAX_FIELD_SINK);
+    return (
+      scaleOk && sinkOk && (p.speedScale !== undefined || p.sink !== undefined)
+    );
+  }
+  return false;
+};
+
+/** Whether a value is a box its two corners bound, small corner first. */
+const isFieldBox = (v: unknown): boolean => {
+  if (typeof v !== "object" || v === null) {
+    return false;
+  }
+  const p = v as Record<string, unknown>;
+  if (!isVector(p.min) || !isVector(p.max)) {
+    return false;
+  }
+  return p.min[0] <= p.max[0] && p.min[1] <= p.max[1] && p.min[2] <= p.max[2];
+};
+
 /** Whether a JSON-parsed payload fits the shape of its tag. */
 const isPayload = (tag: EffectTag, value: unknown): boolean => {
   if (typeof value !== "object" || value === null) {
@@ -491,7 +602,9 @@ const isPayload = (tag: EffectTag, value: unknown): boolean => {
             p.height <= MAX_PROP_HEIGHT)) &&
         (p.solid === undefined || typeof p.solid === "boolean") &&
         (p.hazard === undefined || typeof p.hazard === "boolean") &&
-        (p.motion === undefined || isMotion(p.motion))
+        (p.motion === undefined || isMotion(p.motion)) &&
+        (p.conveyor === undefined ||
+          (p.motion === undefined && isConveyor(p.conveyor)))
       );
     case "prop-remove":
       return isShort(p.id, 64);
@@ -520,6 +633,10 @@ const isPayload = (tag: EffectTag, value: unknown): boolean => {
       );
     }
     case "zone-remove":
+      return isShort(p.id, 64);
+    case "field":
+      return isField(p) && isFieldBox(p);
+    case "field-remove":
       return isShort(p.id, 64);
     case "item-define":
       return (

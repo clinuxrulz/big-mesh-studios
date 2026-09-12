@@ -263,6 +263,7 @@ export {
 } from "./atproto/places";
 
 // Multiplayer (cluster-based WebRTC mesh over atproto)
+export { PeerClock, type PeerClockParams } from "./multiplayer/clock";
 export { MeshPeer, type MeshPeerParams } from "./multiplayer/mesh-peer";
 export {
   decodeMessage,
@@ -274,6 +275,7 @@ export {
   type EditWire,
   type MeshMessage,
   type PoseWire,
+  type TimeWire,
 } from "./multiplayer/messages";
 export {
   MultiplayerController,

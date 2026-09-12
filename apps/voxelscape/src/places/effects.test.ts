@@ -288,6 +288,197 @@ describe("effect parsing", () => {
     ).not.toBeNull();
   });
 
+  it("accepts a field and a conveyor-prop", () => {
+    expect(
+      parseEffect(
+        effect("field", {
+          id: "fan",
+          kind: "push",
+          min: [-4, 0, -4],
+          max: [4, 8, 4],
+          vx: 12,
+          vy: 6,
+        }),
+      ),
+    ).not.toBeNull();
+    expect(
+      parseEffect(
+        effect("field", {
+          id: "fan-flat",
+          kind: "push",
+          min: [0, 0, 0],
+          max: [4, 4, 4],
+          vz: -8,
+        }),
+      ),
+    ).not.toBeNull();
+    expect(
+      parseEffect(
+        effect("field", {
+          id: "pit",
+          kind: "quicksand",
+          min: [0, 0, 0],
+          max: [4, 4, 4],
+          speedScale: 0.3,
+          sink: 2,
+        }),
+      ),
+    ).not.toBeNull();
+    expect(
+      parseEffect(
+        effect("field", {
+          id: "slow",
+          kind: "quicksand",
+          min: [0, 0, 0],
+          max: [4, 4, 4],
+          speedScale: 0.5,
+        }),
+      ),
+    ).not.toBeNull();
+    expect(parseEffect(effect("field-remove", { id: "fan" }))).not.toBeNull();
+    expect(
+      parseEffect(
+        effect("prop", {
+          id: "walkway",
+          model: "walkway.zip",
+          x: 0,
+          z: 0,
+          solid: true,
+          conveyor: { vx: 5, vz: 0 },
+        }),
+      ),
+    ).not.toBeNull();
+  });
+
+  it("refuses a malformed field or conveyor-prop", () => {
+    const cases: Array<[string, unknown]> = [
+      ["field", { id: "" }],
+      ["field", { id: "fan", kind: "gust", min: [0, 0, 0], max: [1, 1, 1] }],
+      ["field", { id: "fan", kind: "push", min: [0, 0, 0], max: [1, 1, 1] }],
+      [
+        "field",
+        {
+          id: "fan",
+          kind: "push",
+          min: [0, 0, 0],
+          max: [1, 1, 1],
+          vx: 0,
+          vy: 0,
+          vz: 0,
+        },
+      ],
+      [
+        "field",
+        {
+          id: "fan",
+          kind: "push",
+          min: [0, 0, 0],
+          max: [1, 1, 1],
+          vx: 101,
+        },
+      ],
+      [
+        "field",
+        {
+          id: "fan",
+          kind: "push",
+          min: [0, 0, 0],
+          max: [1, 1, 1],
+          vx: 5,
+          sink: 2,
+        },
+      ],
+      [
+        "field",
+        {
+          id: "pit",
+          kind: "quicksand",
+          min: [0, 0, 0],
+          max: [1, 1, 1],
+        },
+      ],
+      [
+        "field",
+        {
+          id: "pit",
+          kind: "quicksand",
+          min: [0, 0, 0],
+          max: [1, 1, 1],
+          vx: 5,
+        },
+      ],
+      [
+        "field",
+        {
+          id: "pit",
+          kind: "quicksand",
+          min: [0, 0, 0],
+          max: [1, 1, 1],
+          speedScale: 0,
+        },
+      ],
+      [
+        "field",
+        {
+          id: "pit",
+          kind: "quicksand",
+          min: [0, 0, 0],
+          max: [1, 1, 1],
+          sink: 101,
+        },
+      ],
+      [
+        "field",
+        { id: "fan", kind: "push", min: [2, 0, 0], max: [1, 1, 1], vx: 1 },
+      ],
+      ["field-remove", {}],
+      [
+        "prop",
+        {
+          id: "walkway",
+          model: "walkway.zip",
+          x: 0,
+          z: 0,
+          motion: {
+            path: [
+              [0, 0, 0],
+              [4, 0, 0],
+            ],
+            loop: "loop",
+            durationMs: 1_000,
+          },
+          conveyor: { vx: 5, vz: 0 },
+        },
+      ],
+      [
+        "prop",
+        {
+          id: "walkway",
+          model: "walkway.zip",
+          x: 0,
+          z: 0,
+          conveyor: { vx: 101, vz: 0 },
+        },
+      ],
+      [
+        "prop",
+        {
+          id: "walkway",
+          model: "walkway.zip",
+          x: 0,
+          z: 0,
+          conveyor: { vx: 5 },
+        },
+      ],
+    ];
+    for (const [tag, payload] of cases) {
+      expect(
+        parseEffect(effect(tag, payload)),
+        `${tag} ${JSON.stringify(payload)}`,
+      ).toBeNull();
+    }
+  });
+
   it("refuses a payload that does not fit its tag", () => {
     const cases: Array<[string, unknown]> = [
       ["npc", { id: "" }],

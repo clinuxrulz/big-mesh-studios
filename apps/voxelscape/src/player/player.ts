@@ -57,6 +57,25 @@ export interface PlayerWorld {
     y: number,
     z: number,
   ) => [number, number, number] | null;
+  /**
+   * The field a script has declared at (`x`, `y`, `z`), or null where none
+   * sits — a box that pushes the player's velocity toward a target, or a
+   * quicksand that slows and sinks them. Sampled at the player's centre.
+   */
+  mediumAt?: (x: number, y: number, z: number) => Medium | null;
+}
+
+/** What a scripted field does to a player inside it, sampled once a frame. */
+export interface Medium {
+  /** A push field's horizontal target-velocity pull, in units per second. */
+  pushVx: number;
+  pushVz: number;
+  /** A push field's vertical target-velocity pull (up positive), or null when none. */
+  pushVy: number | null;
+  /** What quicksand multiplies a player's walk speed by; 1 when none. */
+  speedScale: number;
+  /** The fastest quicksand lets a player fall, in units per second; 0 when none. */
+  sink: number;
 }
 
 export interface PlayerConfig {
@@ -544,6 +563,11 @@ export const updatePlayer = (
   // rather than snapping to it, so starting and stopping isn't instantaneous
   const mx = input.moveX;
   const my = input.moveY;
+  // The field standing at the player's centre, read once so the horizontal and
+  // vertical branches of this frame agree on what is acting on them.
+  const medium =
+    world.mediumAt?.(player.position.x, player.position.y, player.position.z) ??
+    null;
   let targetVx = 0;
   let targetVz = 0;
   if (mx !== 0 || my !== 0) {
@@ -552,6 +576,16 @@ export const updatePlayer = (
     const ny = my / len;
     targetVx = (forwardX * ny + rightX * nx) * config.speed;
     targetVz = (forwardZ * ny + rightZ * nx) * config.speed;
+  }
+  if (medium !== null) {
+    if (medium.speedScale !== 1) {
+      targetVx *= medium.speedScale;
+      targetVz *= medium.speedScale;
+    }
+    if (medium.pushVx !== 0 || medium.pushVz !== 0) {
+      targetVx += medium.pushVx;
+      targetVz += medium.pushVz;
+    }
   }
   const maxDelta = config.acceleration * dt;
   player.vx = moveTowards(player.vx, targetVx, maxDelta);
@@ -576,6 +610,17 @@ export const updatePlayer = (
     }
   } else {
     player.vy -= config.gravity * dt;
+    if (medium !== null) {
+      // An updraft or downdraft ramps the fall velocity toward the field's
+      // target the way horizontal movement ramps toward its input's; a
+      // quicksand clamps how fast the player may sink at all.
+      if (medium.pushVy !== null) {
+        player.vy = moveTowards(player.vy, medium.pushVy, maxDelta);
+      }
+      if (medium.sink > 0) {
+        player.vy = Math.max(player.vy, -medium.sink);
+      }
+    }
   }
   if (!inWater && player.onGround && input.jump) {
     player.vy = config.jumpSpeed;

@@ -64,6 +64,29 @@ export interface ScriptedProp {
   hazard: boolean;
   /** A path and spin the prop follows over the shared clock. */
   motion?: MotionSpec;
+  /**
+   * The horizontal velocity the prop's surface carries a player standing on
+   * it, in units per second — a conveyor, standing in where a motion would.
+   */
+  conveyor?: { vx: number; vz: number };
+}
+
+/** One scripted field: a box that acts on a player standing inside it. */
+export interface ScriptedField {
+  id: string;
+  kind: "push" | "quicksand";
+  /** The box a player must stand in, in world units, inclusive. */
+  min: [number, number, number];
+  max: [number, number, number];
+  /** A push's horizontal and vertical target pulls, in units per second. */
+  vx: number;
+  vz: number;
+  /** A push's vertical target pull; undefined when the script set none. */
+  vy: number | undefined;
+  /** Quicksand's scale on a player's walk speed; 1 when the script set none. */
+  speedScale: number;
+  /** Quicksand's fastest fall, in units per second; 0 when the script set none. */
+  sink: number;
 }
 
 // The blaze record the host reports lives in the world area, whose types both
@@ -223,6 +246,8 @@ export class ScriptHost {
   private readonly fires = new Map<string, ScriptedFire>();
   private readonly explosions = new Map<string, ScriptedExplosion>();
   private readonly zones = new Map<string, ScriptZone>();
+  /** The fields the script has declared, acting on players inside them. */
+  private readonly fields = new Map<string, ScriptedField>();
   /** Which zones each player currently stands in, keyed by player. */
   private readonly playerZones = new Map<string, Set<string>>();
   private readonly dialogs = new Map<string, DialogState>();
@@ -287,6 +312,16 @@ export class ScriptHost {
   /** The prop with `id`, or null when the script has not placed one. */
   prop(id: string): ScriptedProp | null {
     return this.props.get(id) ?? null;
+  }
+
+  /** Every field the script has declared in the world. */
+  get fieldList(): ScriptedField[] {
+    return [...this.fields.values()];
+  }
+
+  /** The field with `id`, or null when the script has not declared one. */
+  field(id: string): ScriptedField | null {
+    return this.fields.get(id) ?? null;
   }
 
   /** Where the NPC `id` is at the shared clock, or null when it does not move. */
@@ -512,7 +547,7 @@ export class ScriptHost {
 
   /** One line about the script and what it has created, for a debug console. */
   describe(): string {
-    return `script: ${this.loaded ? "loaded" : "not loaded"} · ${this.npcs.size} NPC(s), ${this.props.size} prop(s), ${this.fires.size} fire(s), ${this.explosions.size} blast(s), ${this.dialogs.size} dialog(s)${
+    return `script: ${this.loaded ? "loaded" : "not loaded"} · ${this.npcs.size} NPC(s), ${this.props.size} prop(s), ${this.fires.size} fire(s), ${this.fields.size} field(s), ${this.explosions.size} blast(s), ${this.dialogs.size} dialog(s)${
       this.problem === undefined ? "" : ` — ${this.problem}`
     }`;
   }
@@ -605,8 +640,20 @@ export class ScriptHost {
         this.npcs.delete(effect.payload.id);
         break;
       case "prop": {
-        const { id, model, x, y, z, name, yaw, height, solid, hazard, motion } =
-          effect.payload;
+        const {
+          id,
+          model,
+          x,
+          y,
+          z,
+          name,
+          yaw,
+          height,
+          solid,
+          hazard,
+          motion,
+          conveyor,
+        } = effect.payload;
         this.props.set(id, {
           id,
           model,
@@ -619,11 +666,31 @@ export class ScriptHost {
           solid: solid ?? false,
           hazard: hazard ?? false,
           ...(motion !== undefined ? { motion } : {}),
+          ...(conveyor !== undefined ? { conveyor } : {}),
         });
         break;
       }
       case "prop-remove":
         this.props.delete(effect.payload.id);
+        break;
+      case "field": {
+        const { id, kind, min, max, vx, vy, vz, speedScale, sink } =
+          effect.payload;
+        this.fields.set(id, {
+          id,
+          kind,
+          min,
+          max,
+          vx: vx ?? 0,
+          vz: vz ?? 0,
+          vy,
+          speedScale: speedScale ?? 1,
+          sink: sink ?? 0,
+        });
+        break;
+      }
+      case "field-remove":
+        this.fields.delete(effect.payload.id);
         break;
       case "fire": {
         const { id, x, y, z, height } = effect.payload;

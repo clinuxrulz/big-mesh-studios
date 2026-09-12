@@ -6,6 +6,7 @@ import {
   DEFAULT_PLAYER_CONFIG,
   deathCameraPose,
   updatePlayer,
+  type Medium,
   type Player,
   type PlayerWorld,
 } from "./player";
@@ -418,5 +419,118 @@ describe("updatePlayer on a moving platform", () => {
     const landed = player.position.x;
     updatePlayer(player, 1 / 60, NO_INPUT, FLAT);
     expect(player.position.x).toBe(landed);
+  });
+});
+
+describe("updatePlayer inside a scripted field", () => {
+  const fieldWorld = (
+    mediumAt: (x: number, y: number, z: number) => Medium | null,
+    ground: number = 0,
+  ): PlayerWorld => ({
+    groundHeightAt: () => ground,
+    inWaterAt: NO_WATER,
+    solidAt: () => false,
+    halfExtent: 1e9,
+    mediumAt,
+  });
+
+  it("ramps a standing player toward a push field's horizontal target", () => {
+    const player = createPlayer(0, 0, 0);
+    const world = fieldWorld(() => ({
+      pushVx: 10,
+      pushVz: 0,
+      pushVy: null,
+      speedScale: 1,
+      sink: 0,
+    }));
+    updatePlayer(player, 1 / 60, NO_INPUT, world);
+    expect(player.vx).toBeGreaterThan(0);
+    expect(player.vx).toBeLessThan(10);
+    for (let i = 0; i < 60; i++) {
+      updatePlayer(player, 1 / 60, NO_INPUT, world);
+    }
+    expect(player.vx).toBeCloseTo(10, 5);
+    expect(player.position.x).toBeGreaterThan(0);
+  });
+
+  it("leaves falling alone under a horizontal push", () => {
+    const player = createPlayer(0, 50, 0);
+    const world = fieldWorld(
+      () => ({
+        pushVx: 10,
+        pushVz: 0,
+        pushVy: null,
+        speedScale: 1,
+        sink: 0,
+      }),
+      -1000,
+    );
+    for (let i = 0; i < 60; i++) {
+      updatePlayer(player, 1 / 60, NO_INPUT, world);
+    }
+    expect(player.vy).toBeCloseTo(-DEFAULT_PLAYER_CONFIG.gravity, 0);
+    expect(player.vx).toBeGreaterThan(0);
+  });
+
+  it("holds a player up in an updraft and lets them fall when it ends", () => {
+    const player = createPlayer(0, 0, 0);
+    let inField = true;
+    const world = fieldWorld(() =>
+      inField
+        ? { pushVx: 0, pushVz: 0, pushVy: 6, speedScale: 1, sink: 0 }
+        : null,
+    );
+    updatePlayer(player, 1 / 60, NO_INPUT, world);
+    for (let i = 0; i < 60; i++) {
+      updatePlayer(player, 1 / 60, NO_INPUT, world);
+    }
+    expect(player.position.y).toBeGreaterThan(DEFAULT_PLAYER_CONFIG.halfSize);
+    inField = false;
+    for (let i = 0; i < 120; i++) {
+      updatePlayer(player, 1 / 60, NO_INPUT, world);
+    }
+    expect(player.position.y).toBeCloseTo(DEFAULT_PLAYER_CONFIG.halfSize, 5);
+    expect(player.onGround).toBe(true);
+  });
+
+  it("scales a walking player's speed down in quicksand", () => {
+    const player = createPlayer(0, 0, 0);
+    const world = fieldWorld(() => ({
+      pushVx: 0,
+      pushVz: 0,
+      pushVy: null,
+      speedScale: 0.25,
+      sink: 3,
+    }));
+    walkEast(player, world, 120);
+    expect(Math.hypot(player.vx, player.vz)).toBeCloseTo(
+      DEFAULT_PLAYER_CONFIG.speed * 0.25,
+      5,
+    );
+  });
+
+  it("sinks at the quicksand's rate instead of falling at full gravity", () => {
+    const player = createPlayer(0, 0, 0);
+    const world = fieldWorld(
+      () => ({
+        pushVx: 0,
+        pushVz: 0,
+        pushVy: null,
+        speedScale: 1,
+        sink: 3,
+      }),
+      -1000,
+    );
+    for (let i = 0; i < 60; i++) {
+      updatePlayer(player, 1 / 60, NO_INPUT, world);
+    }
+    expect(player.vy).toBeCloseTo(-3, 5);
+  });
+
+  it("does not act when no field reaches the player's centre", () => {
+    const player = createPlayer(0, 0, 0);
+    const world = fieldWorld(() => null);
+    updatePlayer(player, 1 / 60, NO_INPUT, world);
+    expect(player.vx).toBe(0);
   });
 });

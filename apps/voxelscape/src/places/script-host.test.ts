@@ -314,6 +314,87 @@ describe("a script host", () => {
     host.dispose();
   });
 
+  it("holds the fields a script declares and the conveyor a prop carries", async () => {
+    const { host } = await fresh();
+    await loadProject(
+      host,
+      `
+      var started = false;
+      export function bmsTick(clockMs, eventsJson) {
+        if (!started) {
+          started = true;
+          engine.dispatch("field", JSON.stringify({
+            id: "fan", kind: "push",
+            min: [-4, 0, -4], max: [4, 8, 4], vx: 12, vy: 6,
+          }));
+          engine.dispatch("field", JSON.stringify({
+            id: "pit", kind: "quicksand",
+            min: [0, 0, 0], max: [4, 4, 4], speedScale: 0.3, sink: 2,
+          }));
+          engine.dispatch("prop", JSON.stringify({
+            id: "walkway", model: "walkway.zip", x: 0, z: 0,
+            solid: true, conveyor: { vx: 5, vz: 0 },
+          }));
+        }
+      }
+      `,
+    );
+    expect(host.field("fan")).toMatchObject({
+      id: "fan",
+      kind: "push",
+      min: [-4, 0, -4],
+      max: [4, 8, 4],
+      vx: 12,
+      vy: 6,
+      vz: 0,
+    });
+    expect(host.field("pit")).toMatchObject({
+      id: "pit",
+      kind: "quicksand",
+      speedScale: 0.3,
+      sink: 2,
+    });
+    expect(host.fieldList.map((f) => f.id).sort()).toEqual(["fan", "pit"]);
+    expect(host.prop("walkway")).toMatchObject({
+      id: "walkway",
+      solid: true,
+      conveyor: { vx: 5, vz: 0 },
+    });
+    host.dispose();
+  });
+
+  it("forgets a field the script removes", async () => {
+    const { host } = await fresh();
+    await loadProject(
+      host,
+      `
+      var started = false;
+      var retract = false;
+      export function bmsTick(clockMs, eventsJson) {
+        if (!started) {
+          started = true;
+          engine.dispatch("field", JSON.stringify({
+            id: "fan", kind: "push",
+            min: [-4, 0, -4], max: [4, 8, 4], vx: 12,
+          }));
+        }
+        var events = JSON.parse(eventsJson);
+        for (var i = 0; i < events.length; i++) {
+          if (!retract && events[i].kind === "player-touched") {
+            retract = true;
+            engine.dispatch("field-remove", JSON.stringify({ id: "fan" }));
+          }
+        }
+      }
+      `,
+    );
+    expect(host.field("fan")).not.toBeNull();
+    await host.touched("", "anything");
+    expect(host.field("fan")).toBeNull();
+    expect(host.fieldList).toEqual([]);
+    host.dispose();
+  });
+
   it("shows a narration line with no figure speaking it", async () => {
     const { host, narrations } = await fresh();
     await loadProject(

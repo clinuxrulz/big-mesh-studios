@@ -13,6 +13,7 @@ import {
   lookDirection,
   placeCamera,
   updatePlayer,
+  type Medium,
   type Player,
   type PlayerConfig,
   type PlayerWorld,
@@ -43,6 +44,8 @@ export interface AvatarTerrain {
     y: number,
     z: number,
   ) => [number, number, number] | null;
+  /** The field acting on the player at a point, or null where none sits. */
+  mediumAt?: (x: number, y: number, z: number) => Medium | null;
 }
 
 export interface PlayerAvatarConfig {
@@ -126,6 +129,7 @@ export const createPlayerAvatar = ({
     ...(terrain.surfaceVelocityAt !== undefined
       ? { surfaceVelocityAt: terrain.surfaceVelocityAt }
       : {}),
+    ...(terrain.mediumAt !== undefined ? { mediumAt: terrain.mediumAt } : {}),
   };
 
   const skin = createPlayerSkin(CUBE_COLOR);

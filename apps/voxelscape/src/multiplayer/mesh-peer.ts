@@ -43,9 +43,20 @@ export interface MeshPeerParams {
   onDamage: (did: string, damage: DamageWire) => void;
   /** One zombie swing's damage from the peer, for the hit player to apply. */
   onPlayerDamage: (did: string, damage: PlayerDamageWire) => void;
+  /**
+   * One clock-exchange answer from the peer: `t1`-`t2` names the leg that
+   * came back, so the receiver can pair it with its own send and account the
+   * round trip.
+   */
+  onTime: (did: string, t1: number, t2: number) => void;
   onClose: (did: string) => void;
   /** Reports a fatal failure; `code` is the transport's `ERR_*` when there is one. */
   onError: (did: string, message: string, code?: string) => void;
+  /**
+   * The local wall clock, injected by the harness so one peer can be skewed
+   * against another; the shared mesh timestamps stay on the real clock.
+   */
+  wallNow?: () => number;
 }
 
 export class MeshPeer {
@@ -60,12 +71,14 @@ export class MeshPeer {
     did: string,
     damage: PlayerDamageWire,
   ) => void;
+  private readonly onTime: (did: string, t1: number, t2: number) => void;
   private readonly onClose: (did: string) => void;
   private readonly onError: (
     did: string,
     message: string,
     code?: string,
   ) => void;
+  private readonly wallNow: () => number;
   private readonly role: "initiator" | "responder";
 
   private transport: PeerTransport | undefined;
@@ -84,8 +97,10 @@ export class MeshPeer {
     this.onMonsters = params.onMonsters;
     this.onDamage = params.onDamage;
     this.onPlayerDamage = params.onPlayerDamage;
+    this.onTime = params.onTime;
     this.onClose = params.onClose;
     this.onError = params.onError;
+    this.wallNow = params.wallNow ?? (() => Date.now());
     this.role = this.selfDid < this.did ? "initiator" : "responder";
 
     if (params.transport !== undefined) {
@@ -189,6 +204,29 @@ export class MeshPeer {
     }
   }
 
+  /**
+   * Sends one clock exchange leg: a ping naming `t1` (local wall time when
+   * sent), or an answer that also carries `t2`, the wall time the ping was
+   * answered at. No-op until the data channel is open.
+   */
+  sendTime(t1: number, t2?: number): void {
+    if (this.destroyed || this.phase !== "open") {
+      return;
+    }
+    try {
+      this.transport?.send(
+        encodeMessage({
+          v: 1,
+          type: "time",
+          t1,
+          ...(t2 !== undefined ? { t2 } : {}),
+        }),
+      );
+    } catch (err) {
+      this.fail(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   /** Tears the connection down and releases its resources. */
   close(reason = "closed"): void {
     if (this.destroyed) {
@@ -266,6 +304,13 @@ export class MeshPeer {
       this.onDamage(this.did, message);
     } else if (message.type === "player-damage") {
       this.onPlayerDamage(this.did, message);
+    } else if (message.type === "time") {
+      if (message.t2 === undefined) {
+        // A ping asks the receiver's wall time at receipt; answer in kind.
+        this.sendTime(message.t1, this.wallNow());
+      } else {
+        this.onTime(this.did, message.t1, message.t2);
+      }
     } else {
       this.onMonsters(this.did, message.updates);
     }

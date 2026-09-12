@@ -28,7 +28,11 @@ import { FireFigures } from "../renderers/fire-figures";
 import { ExplosionFigures } from "../renderers/explosion-figures";
 import { FireEmbers } from "../world/fire-ember";
 import { pickFigure, type AimTarget } from "../places/figure-pick";
-import type { DialogState, HudReadout } from "../places/script-host";
+import type {
+  DialogState,
+  HudReadout,
+  ScriptedField,
+} from "../places/script-host";
 import type { ScriptItemDefinition } from "../places/effects";
 import type { Commander } from "../commands";
 import { createCommands } from "../commands";
@@ -488,6 +492,12 @@ export const createVoxelscape = ({
    * walked through — so these are collected separately.
    */
   const hazardBoxes: Array<{ id: string; box: SolidBox }> = [];
+  /**
+   * The fields the place's script has declared, refreshed each frame like the
+   * boxes. Each holds a box that acts on a player standing inside it — a push
+   * toward a target velocity, or a quicksand that slows and sinks them.
+   */
+  const fieldBoxes: ScriptedField[] = [];
   const playerTerrain: AvatarTerrain = {
     heightAt: (x, z) => world.heightAt(x, z),
     groundHeightAt: (x, y, z) =>
@@ -496,6 +506,47 @@ export const createVoxelscape = ({
     solidAt: (x, y, z) =>
       world.solidAt(x, y, z) || solidBoxAt(propBoxes, x, y, z),
     surfaceVelocityAt: (x, y, z) => boxVelocityAt(propBoxes, x, y, z),
+    mediumAt: (x, y, z) => {
+      // Sums the pushes and takes the worst quicksand, so the answer is
+      // order-independent the way the rest of the shared clock is.
+      let pushVx = 0;
+      let pushVz = 0;
+      let pushVy: number | null = null;
+      let speedScale = 1;
+      let sink = 0;
+      let found = false;
+      for (const field of fieldBoxes) {
+        if (
+          x < field.min[0] ||
+          x > field.max[0] ||
+          y < field.min[1] ||
+          y > field.max[1] ||
+          z < field.min[2] ||
+          z > field.max[2]
+        ) {
+          continue;
+        }
+        found = true;
+        if (field.kind === "push") {
+          pushVx += field.vx;
+          pushVz += field.vz;
+          if (field.vy !== undefined) {
+            pushVy = (pushVy ?? 0) + field.vy;
+          }
+        } else {
+          if (field.speedScale < speedScale) {
+            speedScale = field.speedScale;
+          }
+          if (field.sink > sink) {
+            sink = field.sink;
+          }
+        }
+      }
+      if (!found) {
+        return null;
+      }
+      return { pushVx, pushVz, pushVy, speedScale, sink };
+    },
   };
   const avatar = createPlayerAvatar({
     camera,
@@ -700,7 +751,9 @@ export const createVoxelscape = ({
               vy: pose.vy,
               vz: pose.vz,
             }
-          : {}),
+          : prop.conveyor !== undefined
+            ? { vx: prop.conveyor.vx, vz: prop.conveyor.vz }
+            : {}),
       };
       if (prop.solid) {
         propBoxes.push(box);
@@ -708,6 +761,19 @@ export const createVoxelscape = ({
       if (prop.hazard) {
         hazardBoxes.push({ id: prop.id, box });
       }
+    }
+  };
+
+  /**
+   * Fills the fields a script has declared into the physics sampler, so one
+   * boxed region can push a player or hold them like quicksand. Refreshed each
+   * frame alongside the prop boxes, because a script may retire a field the
+   * way it retires a prop.
+   */
+  const refreshFields = (): void => {
+    fieldBoxes.length = 0;
+    for (const field of scriptConsole?.fields() ?? []) {
+      fieldBoxes.push(field);
     }
   };
 
@@ -1020,6 +1086,7 @@ export const createVoxelscape = ({
         await import("../places/script-console");
       scriptConsole = new ScriptConsoleClass({
         heightAt: (x, z) => world.heightAt(x, z),
+        now: () => multiplayer.now(),
         report: (line) => onNotice?.(line),
         onDialog: (player, state) => {
           if (player === "") {
@@ -1701,6 +1768,7 @@ export const createVoxelscape = ({
         const snapshot = input.consume();
         const locked = scriptConsole?.controlsLocked("") ?? false;
         refreshPropBoxes();
+        refreshFields();
         avatar.move(dt, locked ? CUTSCENE_INPUT : snapshot);
         checkHazardTouch();
         probe.end(Phase.player);

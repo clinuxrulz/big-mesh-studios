@@ -156,6 +156,22 @@ _Avoid_: void (the effect's tag, not the thing), death floor
 A typed value a place script shows to one player over the world — a bar with a value and a maximum, or a line of text — set by a `hud` effect and taken away by `hud-remove`. It is voice-tier, and its value changes only when the script says so.
 _Avoid_: widget, overlay (that is the DOM layer it is drawn in)
 
+**Field**:
+A box in feet coordinates a place script fills with one movement behaviour: a **push** carries the player toward a target velocity (`vx`/`vz`/`vy`, any subset), a **quicksand** slows their walk and caps their sink. The world's trusted side samples the field standing at the player's centre once a frame (`mediumAt`), so the horizontal and vertical physics agree on what acts on them; overlapping fields compose, with pushes summed and the worst quicksand taking the walk. Set by a `field` effect and taken away by `field-remove`. Authorable but never carveable: fields are scripted, not voxels.
+_Avoid_: fan, wind tunnel (those are one script's story about a push, not the thing), zone (a zone is a prop's touch-in region; a Field is a whole volume)
+
+**Quicksand**:
+A **Field** kind that slows the player's walking toward a `speedScale` (down to zero) and clamps how fast they sink at all (`sink`). It changes how the player moves under their own power rather than pushing them, which is why it composes with (and keeps its grip against) an overlapping push.
+_Avoid_: mire, sludge (that's another script's dressing), water (water is swim physics — drag, swim up, buoyancy — not a Field)
+
+**Conveyor**:
+A sideways surface velocity a place script sets on a **Scripted prop** (`{ vx, vz }` on the `prop` payload): the standing surface carries the player's feet with that speed the way a moving **Solid platform** does, while the prop itself stays where it was placed. Mutually exclusive with the prop's own **Motion**. The player physics never knows the floor is a conveyor — it only ever reads the surface velocity, the same seam a platform rides on.
+_Avoid_: moving floor (a platform moves its own box; a Conveyor moves only what stands on it), belt (that's the drawn dressing of one)
+
+**Place clock**:
+The moment every peer in a place reads a script's `now` from: the wall-clock time of the lowest DID among the players in the place, offset-corrected per player by a one-round-trip time exchange over their link to that peer. Every peer derives the same timekeeper from the same roster by the same total rule — no election, no broadcast, ADR 0045 — and falls back to the local wall clock while alone, offline, or before a measurement lands. Scripts' **Motion**, timers, and cutscenes run off it, so a **Solid platform** a player stands on moves the same way for every peer.
+_Avoid_: shared/world clock (that's the day-night clock **DayNightController** owns and a different thing), server time (there is no server)
+
 ## Relationships
 
 - A **Sphere** holds a fixed-size ball of **WorldBlock**s, indexed by pool slot.
@@ -184,6 +200,9 @@ _Avoid_: widget, overlay (that is the DOM layer it is drawn in)
 - A **Scripted figure**'s **Motion** is a pure function of its spec and the shared clock, so every peer computes the same pose without the pose being replicated; a solid figure's pose reaches the player's physics through the collision box and its velocity.
 - A **Cutscene** and a **HUD readout** are voice-tier: the world samples them for one player and never shares them, the way it already treats narration and player placement.
 - A **Hazard** reports a touch and stops there; the script decides whether the touch is a death, and a `player-kill` death is authored as a fact the rules fold over.
+- A **Field** pushes and grips through the same `mediumAt` seam the way the world already hands the player ground and air; the script says where the air behaves, the physics resolves it.
+- A **Conveyor** reaches the player's feet through the same surface velocity that carries them on a moving **Solid platform**, so a conveyed prop needs no physics state of its own.
+- A **Place clock** is what one player's scripts and **Motion** sample: it is the lowest DID's wall time, so every peer's deadlines and platform poses agree without a single pose or deadline being replicated (ADR 0045).
 
 ## Example dialogue
 
