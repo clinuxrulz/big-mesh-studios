@@ -90,19 +90,18 @@ const flags: Record<string, boolean> = {};
 //   Mud Room voxel:   z=110..122  → world z=220..244
 //   Final Pads voxel: z=124..132  → world z=248..264
 //   Bathroom voxel:   z=134..154  → world z=268..308
-const ZONES: Array<[string, number, number, number, number, number, number]> =
-  [
-    [YARD, -120, 0, -120, 120, 120, 120],
-    [LOBBY_ZONE, -30, 200, -80, 30, 210, -16],
-    [STAIRS, -16, 200, -20, 16, 222, 34],    // wide enough to catch z=-18 test
-    [HALLWAY, -14, 214, 36, 14, 224, 62],
-    [CAFETERIA, -22, 214, 64, 22, 224, 114],
-    [GYM, -18, 214, 116, 18, 224, 174],
-    [LIBRARY, -16, 214, 176, 16, 224, 218],
-    [MUD_ROOM, -16, 214, 220, 16, 226, 246],
-    [FINAL, -14, 214, 248, 14, 230, 266],
-    [BATHROOM, -20, 214, 268, 20, 230, 310],
-  ];
+const ZONES: Array<[string, number, number, number, number, number, number]> = [
+  [YARD, -120, 0, -120, 120, 120, 120],
+  [LOBBY_ZONE, -30, 200, -80, 30, 210, -16],
+  [STAIRS, -16, 200, -20, 16, 222, 34], // wide enough to catch z=-18 test
+  [HALLWAY, -14, 214, 36, 14, 224, 62],
+  [CAFETERIA, -22, 214, 64, 22, 224, 114],
+  [GYM, -18, 214, 116, 18, 224, 174],
+  [LIBRARY, -16, 214, 176, 16, 224, 218],
+  [MUD_ROOM, -16, 214, 220, 16, 226, 246],
+  [FINAL, -14, 214, 248, 14, 230, 266],
+  [BATHROOM, -20, 214, 268, 20, 230, 310],
+];
 
 const CHECKPOINT_LABELS: Record<string, string> = {
   [LOBBY_ZONE]: "Stage 1: Classroom 1A",
@@ -148,11 +147,15 @@ function hold(item: string): void {
 function give(item: string, text: string): void {
   dispatch("item-give", { player: "", item, count: 1 });
   hold(item);
-  if (text !== "") { say(text); }
+  if (text !== "") {
+    say(text);
+  }
 }
 function take(item: string, count: number): void {
   dispatch("item-take", { player: "", item, count });
-  if (held === item) { hold(""); }
+  if (held === item) {
+    hold("");
+  }
 }
 function ending(title: string, text: string): void {
   flags.finished = true;
@@ -160,16 +163,25 @@ function ending(title: string, text: string): void {
 }
 function showBladder(): void {
   dispatch("hud", {
-    player: "", id: "bladder", kind: "bar",
-    label: "Bladder", value: bladder, max: BLADDER_MAX,
+    player: "",
+    id: "bladder",
+    kind: "bar",
+    label: "Bladder",
+    value: bladder,
+    max: BLADDER_MAX,
   });
 }
 function bladderBeat(): void {
-  if (flags.finished === true || bladder >= BLADDER_MAX) { return; }
+  if (flags.finished === true || bladder >= BLADDER_MAX) {
+    return;
+  }
   bladder += 1;
   showBladder();
   if (bladder >= BLADDER_MAX) {
-    ending("Accident", "You did not make it to the restroom in time. The whole school saw.");
+    ending(
+      "Accident",
+      "You did not make it to the restroom in time. The whole school saw.",
+    );
     return;
   }
   if (bladder === Math.floor(BLADDER_MAX * 0.75)) {
@@ -179,8 +191,11 @@ function bladderBeat(): void {
 }
 function showCheckpoint(name: string): void {
   dispatch("hud", {
-    player: "", id: "checkpoint", kind: "text",
-    label: "Checkpoint", text: CHECKPOINT_LABELS[name] ?? name,
+    player: "",
+    id: "checkpoint",
+    kind: "text",
+    label: "Checkpoint",
+    text: CHECKPOINT_LABELS[name] ?? name,
   });
 }
 
@@ -188,8 +203,12 @@ function showCheckpoint(name: string): void {
 // Plan (voxel coordinates)
 // ---------------------------------------------------------------------------
 function box(
-  minX: number, minY: number, minZ: number,
-  maxX: number, maxY: number, maxZ: number,
+  minX: number,
+  minY: number,
+  minZ: number,
+  maxX: number,
+  maxY: number,
+  maxZ: number,
   id: number,
 ): unknown {
   return { kind: "box", min: [minX, minY, minZ], max: [maxX, maxY, maxZ], id };
@@ -227,7 +246,11 @@ export function bmsPlan(): string {
     {
       kind: "stairs",
       at: [-7, LOBBY_VOXEL + 1, -8],
-      along: "z", steps: 8, rise: 1, run: 2, width: 15,
+      along: "z",
+      steps: 8,
+      rise: 1,
+      run: 2,
+      width: 15,
       id: b.greystone,
     },
     // Staircase pedestal (voxel z=8..16, world z=16..32)
@@ -254,23 +277,23 @@ export function bmsPlan(): string {
     box(-12, 115, 32, 12, 115, 56, b.greystone), // cafeteria roof ceiling
 
     // Gym (voxel z=58..86, world z=116..172)
-    box(-8, 108, 58, 8, 108, 62, b.greystone),  // entry pad
-    box(-5, 109, 65, 5, 109, 70, b.wood),        // first pillar
-    box(-5, 110, 74, 5, 110, 79, b.wood),        // second pillar
-    box(-5, 109, 83, 5, 109, 87, b.wood),        // third pillar — gym-bounce prop above it
-    box(-7, 108, 82, 7, 108, 87, b.greystone),   // gym checkpoint pedestal
-    box(-9, 109, 58, -9, 114, 87, b.greystone),  // gym left wall
-    box(9, 109, 58, 9, 114, 87, b.greystone),   // gym right wall
-    box(-9, 115, 58, 9, 115, 87, b.greystone),   // gym roof ceiling
+    box(-8, 108, 58, 8, 108, 62, b.greystone), // entry pad
+    box(-5, 109, 65, 5, 109, 70, b.wood), // first pillar
+    box(-5, 110, 74, 5, 110, 79, b.wood), // second pillar
+    box(-5, 109, 83, 5, 109, 87, b.wood), // third pillar — gym-bounce prop above it
+    box(-7, 108, 82, 7, 108, 87, b.greystone), // gym checkpoint pedestal
+    box(-9, 109, 58, -9, 114, 87, b.greystone), // gym left wall
+    box(9, 109, 58, 9, 114, 87, b.greystone), // gym right wall
+    box(-9, 115, 58, 9, 115, 87, b.greystone), // gym roof ceiling
 
     // Library (voxel z=88..108, world z=176..216)
     box(-5, 108, 90, 5, 108, 94, b.wood),
     box(-4, 109, 98, 4, 109, 103, b.wood),
-    box(-5, 110, 107, 5, 110, 110, b.wood),     // globe hovering at top
+    box(-5, 110, 107, 5, 110, 110, b.wood), // globe hovering at top
     box(-6, 108, 102, 6, 108, 108, b.greystone), // library checkpoint
-    box(-7, 109, 88, -7, 114, 108, b.greystone),  // library left wall
-    box(7, 109, 88, 7, 114, 108, b.greystone),   // library right wall
-    box(-7, 115, 88, 7, 115, 108, b.greystone),   // library roof ceiling
+    box(-7, 109, 88, -7, 114, 108, b.greystone), // library left wall
+    box(7, 109, 88, 7, 114, 108, b.greystone), // library right wall
+    box(-7, 115, 88, 7, 115, 108, b.greystone), // library roof ceiling
 
     // Mud Room (voxel z=110..122, world z=220..244) — dirt floor
     box(-7, 108, 110, 7, 108, 122, b.dirt),
@@ -304,12 +327,32 @@ export function bmsPlan(): string {
 function open(): void {
   dispatch("time", { seconds: 480, speed: 0 });
 
-  dispatch("item-define", { id: "soap", name: "Soap", sprite: "", stackable: false });
-  dispatch("item-define", { id: "hall-pass", name: "Hall Pass", sprite: "", stackable: false });
-  dispatch("item-define", { id: "toilet-paper", name: "Toilet Paper", sprite: "", stackable: false });
+  dispatch("item-define", {
+    id: "soap",
+    name: "Soap",
+    sprite: "",
+    stackable: false,
+  });
+  dispatch("item-define", {
+    id: "hall-pass",
+    name: "Hall Pass",
+    sprite: "",
+    stackable: false,
+  });
+  dispatch("item-define", {
+    id: "toilet-paper",
+    name: "Toilet Paper",
+    sprite: "",
+    stackable: false,
+  });
 
   for (const [id, minX, minY, minZ, maxX, maxY, maxZ] of ZONES) {
-    dispatch("zone", { id, name: id, min: [minX, minY, minZ], max: [maxX, maxY, maxZ] });
+    dispatch("zone", {
+      id,
+      name: id,
+      min: [minX, minY, minZ],
+      max: [maxX, maxY, maxZ],
+    });
   }
 
   // Quicksand over the Mud Room floor (world z=220..244, world y=218..226)
@@ -324,142 +367,261 @@ function open(): void {
 
   // Soap pickup on lobby floor (world y=202)
   dispatch("prop", {
-    id: "soap", model: "soap.zip",
-    x: -10, z: -50, y: LOBBY,
-    name: "Soap", height: 0.4, solid: false,
+    id: "soap",
+    model: "soap.zip",
+    x: -10,
+    z: -50,
+    y: LOBBY,
+    name: "Soap",
+    height: 0.4,
+    solid: false,
   });
 
   // Wet-floor sign in the hallway (world z=48 = roughly mid-hallway)
   dispatch("prop", {
-    id: "wet-floor", model: "wet-floor.zip",
-    x: 3, z: 48, y: 218,
-    name: "Wet Floor", height: 1.5, solid: false, hazard: true,
+    id: "wet-floor",
+    model: "wet-floor.zip",
+    x: 3,
+    z: 48,
+    y: 218,
+    name: "Wet Floor",
+    height: 1.5,
+    solid: false,
+    hazard: true,
   });
 
   // RESTROOM Sign above the bathroom doorway (world z=268, y=225)
   dispatch("prop", {
-    id: "restroom-sign", model: "platform.zip",
-    x: 0, z: 268, y: 225,
-    name: "RESTROOM Sign", height: 1.2, solid: false,
+    id: "restroom-sign",
+    model: "platform.zip",
+    x: 0,
+    z: 268,
+    y: 225,
+    name: "RESTROOM Sign",
+    height: 1.2,
+    solid: false,
   });
 
   // First toilet roll tumbling down the stairs (world z=14, y=220)
   dispatch("prop", {
-    id: "toilet-roll", model: "toilet-roll.zip",
-    x: 2, z: 14, y: 220,
-    name: "Toilet Roll", height: 1, solid: false,
+    id: "toilet-roll",
+    model: "toilet-roll.zip",
+    x: 2,
+    z: 14,
+    y: 220,
+    name: "Toilet Roll",
+    height: 1,
+    solid: false,
     motion: {
-      path: [[0, 0, 0], [0, -14, -52]],
-      loop: "loop", durationMs: 5_000, ease: "smooth",
+      path: [
+        [0, 0, 0],
+        [0, -14, -52],
+      ],
+      loop: "loop",
+      durationMs: 5_000,
+      ease: "smooth",
       spin: { axis: [1, 0, 0], degreesPerMeter: 120 },
     },
   });
 
   // Second toilet roll — offset 2.5s so they come in waves
   dispatch("prop", {
-    id: "toilet-roll-2", model: "toilet-roll.zip",
-    x: -2, z: 14, y: 220,
-    name: "Toilet Roll", height: 1, solid: false,
+    id: "toilet-roll-2",
+    model: "toilet-roll.zip",
+    x: -2,
+    z: 14,
+    y: 220,
+    name: "Toilet Roll",
+    height: 1,
+    solid: false,
     motion: {
-      path: [[0, 0, 0], [0, -14, -52]],
-      loop: "loop", durationMs: 5_000, startAfterMs: 2_500, ease: "smooth",
+      path: [
+        [0, 0, 0],
+        [0, -14, -52],
+      ],
+      loop: "loop",
+      durationMs: 5_000,
+      startAfterMs: 2_500,
+      ease: "smooth",
       spin: { axis: [1, 0, 0], degreesPerMeter: 120 },
     },
   });
 
   // Moving plank bridging pedestal to hallway (world z=22..32, ping-pong)
   dispatch("prop", {
-    id: "moving-plank", model: "platform.zip",
-    x: 0, z: 26, y: 216,
-    name: "Moving Plank", height: 2, solid: true,
+    id: "moving-plank",
+    model: "platform.zip",
+    x: 0,
+    z: 26,
+    y: 216,
+    name: "Moving Plank",
+    height: 2,
+    solid: true,
     motion: {
-      path: [[0, 0, 0], [0, 0, 10]],
-      loop: "pingpong", durationMs: 3_500, ease: "smooth",
+      path: [
+        [0, 0, 0],
+        [0, 0, 10],
+      ],
+      loop: "pingpong",
+      durationMs: 3_500,
+      ease: "smooth",
     },
   });
 
   // Cafeteria: three conveyor-belt lunch trays (world z=70, 86, 102)
   dispatch("prop", {
-    id: "tray-a", model: "platform.zip",
-    x: 0, z: 70, y: 218,
-    name: "Lunch Tray", height: 0.5, solid: true,
+    id: "tray-a",
+    model: "platform.zip",
+    x: 0,
+    z: 70,
+    y: 218,
+    name: "Lunch Tray",
+    height: 0.5,
+    solid: true,
     conveyor: { vx: 0, vz: 6 },
   });
   dispatch("prop", {
-    id: "tray-b", model: "platform.zip",
-    x: 0, z: 86, y: 218,
-    name: "Lunch Tray", height: 0.5, solid: true,
+    id: "tray-b",
+    model: "platform.zip",
+    x: 0,
+    z: 86,
+    y: 218,
+    name: "Lunch Tray",
+    height: 0.5,
+    solid: true,
     conveyor: { vx: 0, vz: 6 },
   });
   dispatch("prop", {
-    id: "tray-c", model: "platform.zip",
-    x: 0, z: 102, y: 218,
-    name: "Lunch Tray", height: 0.5, solid: true,
+    id: "tray-c",
+    model: "platform.zip",
+    x: 0,
+    z: 102,
+    y: 218,
+    name: "Lunch Tray",
+    height: 0.5,
+    solid: true,
     conveyor: { vx: 0, vz: 6 },
   });
 
   // Gym: side-sliding platform (world z=130)
   dispatch("prop", {
-    id: "gym-slide", model: "platform.zip",
-    x: 0, z: 130, y: 220,
-    name: "Gym Platform", height: 2, solid: true,
+    id: "gym-slide",
+    model: "platform.zip",
+    x: 0,
+    z: 130,
+    y: 220,
+    name: "Gym Platform",
+    height: 2,
+    solid: true,
     motion: {
-      path: [[0, 0, 0], [10, 0, 0]],
-      loop: "pingpong", durationMs: 2_800, ease: "smooth",
+      path: [
+        [0, 0, 0],
+        [10, 0, 0],
+      ],
+      loop: "pingpong",
+      durationMs: 2_800,
+      ease: "smooth",
     },
   });
 
   // Gym: classic spinning turntable (world z=148)
   dispatch("prop", {
-    id: "turntable", model: "platform.zip",
-    x: 0, z: 148, y: 220,
-    name: "Turntable", height: 2, solid: true,
+    id: "turntable",
+    model: "platform.zip",
+    x: 0,
+    z: 148,
+    y: 220,
+    name: "Turntable",
+    height: 2,
+    solid: true,
     motion: {
       path: [[0, 0, 0]],
-      loop: "loop", durationMs: 1_000,
+      loop: "loop",
+      durationMs: 1_000,
       spin: { axis: [0, 1, 0], turnsPerSecond: 0.1 },
     },
   });
 
   // Gym: falling-rising platform (world z=166)
   dispatch("prop", {
-    id: "gym-bounce", model: "platform.zip",
-    x: 0, z: 166, y: 220,
-    name: "Falling Platform", height: 2, solid: true,
+    id: "gym-bounce",
+    model: "platform.zip",
+    x: 0,
+    z: 166,
+    y: 220,
+    name: "Falling Platform",
+    height: 2,
+    solid: true,
     motion: {
-      path: [[0, 0, 0], [0, -6, 0]],
-      loop: "pingpong", durationMs: 2_000, ease: "smooth",
+      path: [
+        [0, 0, 0],
+        [0, -6, 0],
+      ],
+      loop: "pingpong",
+      durationMs: 2_000,
+      ease: "smooth",
     },
   });
 
   // Library: rolling globe hazard (world z=196)
   dispatch("prop", {
-    id: "globe", model: "toilet-roll.zip",
-    x: 0, z: 196, y: 222,
-    name: "Globe", height: 1.2, solid: false, hazard: true,
+    id: "globe",
+    model: "toilet-roll.zip",
+    x: 0,
+    z: 196,
+    y: 222,
+    name: "Globe",
+    height: 1.2,
+    solid: false,
+    hazard: true,
     motion: {
-      path: [[-5, 0, 0], [5, 0, 0]],
-      loop: "pingpong", durationMs: 3_000, ease: "smooth",
+      path: [
+        [-5, 0, 0],
+        [5, 0, 0],
+      ],
+      loop: "pingpong",
+      durationMs: 3_000,
+      ease: "smooth",
       spin: { axis: [0, 0, 1], turnsPerSecond: 0.5 },
     },
   });
 
   // NPCs
   dispatch("npc", {
-    id: JANITOR, x: -18, z: -50, y: LOBBY,
-    name: "Janitor", model: "npc-sable.zip", yaw: Math.PI / 2,
+    id: JANITOR,
+    x: -18,
+    z: -50,
+    y: LOBBY,
+    name: "Janitor",
+    model: "npc-sable.zip",
+    yaw: Math.PI / 2,
   });
   dispatch("npc", {
-    id: BULLY, x: 0, z: 40, y: 218,
-    name: "Bully", model: "npc-bully.zip", yaw: Math.PI,
+    id: BULLY,
+    x: 0,
+    z: 40,
+    y: 218,
+    name: "Bully",
+    model: "npc-bully.zip",
+    yaw: Math.PI,
   });
   dispatch("npc", {
-    id: PRINCIPAL, x: -14, z: 88, y: 218,
-    name: "Principal", model: "npc-brad.zip", yaw: Math.PI / 2,
+    id: PRINCIPAL,
+    x: -14,
+    z: 88,
+    y: 218,
+    name: "Principal",
+    model: "npc-brad.zip",
+    yaw: Math.PI / 2,
   });
   dispatch("npc", {
-    id: TEACHER, x: 0, z: 278, y: 220,
-    name: "Teacher", model: "npc-teacher.zip", yaw: Math.PI,
+    id: TEACHER,
+    x: 0,
+    z: 278,
+    y: 220,
+    name: "Teacher",
+    model: "npc-teacher.zip",
+    yaw: Math.PI,
   });
 
   dispatch("player-place", { player: "", x: 0, z: -50, y: LOBBY });
@@ -472,13 +634,20 @@ function open(): void {
     player: "",
     shots: [
       { at: [-60, 268, -140], look: [0, 210, 0], durationMs: 0, holdMs: 1_200 },
-      { at: [0, 236, -80], look: [0, 210, 30], durationMs: 3_500, holdMs: 600, ease: "smooth" },
+      {
+        at: [0, 236, -80],
+        look: [0, 210, 30],
+        durationMs: 3_500,
+        holdMs: 600,
+        ease: "smooth",
+      },
     ],
   });
 
-  narrate("You",
+  narrate(
+    "You",
     "I drank three juice boxes at lunch and the teacher won't give me a hall pass. " +
-    "The bathroom is all the way at the other end of the school. I have to make it."
+      "The bathroom is all the way at the other end of the school. I have to make it.",
   );
 }
 
@@ -487,19 +656,40 @@ function open(): void {
 // ---------------------------------------------------------------------------
 function hintFor(zone: string): void {
   if (zone === LOBBY_ZONE) {
-    narrate("You", "Stage 1: Classroom 1A. The staircase is at the end of the lobby. Watch out — toilet paper rolls tumble down!");
+    narrate(
+      "You",
+      "Stage 1: Classroom 1A. The staircase is at the end of the lobby. Watch out — toilet paper rolls tumble down!",
+    );
   } else if (zone === STAIRS) {
-    narrate("You", "Stage 2: Grand Staircase. Climbing up! There is a moving plank at the top — wait for it to swing.");
+    narrate(
+      "You",
+      "Stage 2: Grand Staircase. Climbing up! There is a moving plank at the top — wait for it to swing.",
+    );
   } else if (zone === HALLWAY) {
-    narrate("You", "Stage 3: Locker Corridor! The janitor left the floor wet. Do NOT touch the wet floor sign.");
+    narrate(
+      "You",
+      "Stage 3: Locker Corridor! The janitor left the floor wet. Do NOT touch the wet floor sign.",
+    );
   } else if (zone === CAFETERIA) {
-    narrate("You", "Stage 4: Cafeteria! Lunch trays are moving on conveyor belts — ride them across.");
+    narrate(
+      "You",
+      "Stage 4: Cafeteria! Lunch trays are moving on conveyor belts — ride them across.",
+    );
   } else if (zone === GYM) {
-    narrate("You", "Stage 5: Gymnasium! Spinning turntables and moving platforms ahead.");
+    narrate(
+      "You",
+      "Stage 5: Gymnasium! Spinning turntables and moving platforms ahead.",
+    );
   } else if (zone === LIBRARY) {
-    narrate("You", "Stage 6: Library! Hop across book stacks and dodge the rolling globe hazard.");
+    narrate(
+      "You",
+      "Stage 6: Library! Hop across book stacks and dodge the rolling globe hazard.",
+    );
   } else if (zone === MUD_ROOM) {
-    narrate("You", "Stage 7: Mud Room! The floor is thick quicksand. Use soap to slide across.");
+    narrate(
+      "You",
+      "Stage 7: Mud Room! The floor is thick quicksand. Use soap to slide across.",
+    );
   } else if (zone === FINAL) {
     narrate("You", "Stage 8: Upper Hallway! Almost at the restroom door.");
   }
@@ -509,14 +699,20 @@ function hintFor(zone: string): void {
 // Items
 // ---------------------------------------------------------------------------
 function useSoap(): void {
-  if (held !== "soap") { narrate("You", "My hands are empty."); return; }
+  if (held !== "soap") {
+    narrate("You", "My hands are empty.");
+    return;
+  }
   take("soap", 1);
   dispatch("player-jump", { player: "", multiplier: 1.5 });
   narrate("You", "Slippery! But I can jump higher now.");
 }
 
 function useHallPass(): void {
-  if (held !== "hall-pass") { narrate("You", "I do not have a hall pass."); return; }
+  if (held !== "hall-pass") {
+    narrate("You", "I do not have a hall pass.");
+    return;
+  }
   narrate("You", "The hall pass makes me feel slightly more legitimate.");
 }
 
@@ -540,8 +736,14 @@ function used(entityId: string, _item: string): void {
 }
 
 function usedItem(item: string): void {
-  if (item === "soap") { useSoap(); return; }
-  if (item === "hall-pass") { useHallPass(); return; }
+  if (item === "soap") {
+    useSoap();
+    return;
+  }
+  if (item === "hall-pass") {
+    useHallPass();
+    return;
+  }
   narrate("You", "Now is not the time.");
 }
 
@@ -550,13 +752,19 @@ function usedItem(item: string): void {
 // ---------------------------------------------------------------------------
 function talked(npcId: string): void {
   if (npcId === JANITOR) {
-    narrate("Janitor", "Wet floor ahead, kid. I just mopped it. Mind the sign.");
+    narrate(
+      "Janitor",
+      "Wet floor ahead, kid. I just mopped it. Mind the sign.",
+    );
     return;
   }
   if (npcId === BULLY) {
     if (flags.bullyTalked !== true) {
       flags.bullyTalked = true;
-      narrate("Bully", "Where do you think you're going? You better not make it.");
+      narrate(
+        "Bully",
+        "Where do you think you're going? You better not make it.",
+      );
     } else {
       narrate("Bully", "Still here. Still judging you.");
     }
@@ -566,7 +774,10 @@ function talked(npcId: string): void {
     if (held === "hall-pass") {
       narrate("Principal", "I see you have a hall pass. Very well — carry on.");
     } else {
-      narrate("Principal", "Running in the halls? This is not acceptable. Where is your hall pass?");
+      narrate(
+        "Principal",
+        "Running in the halls? This is not acceptable. Where is your hall pass?",
+      );
       if (flags.principalGavePass !== true) {
         flags.principalGavePass = true;
         give("hall-pass", "The principal sighs and hands you a hall pass.");
@@ -575,7 +786,10 @@ function talked(npcId: string): void {
     return;
   }
   if (npcId === TEACHER) {
-    narrate("Teacher", "You made it. Through that door — now. I will handle the paperwork.");
+    narrate(
+      "Teacher",
+      "You made it. Through that door — now. I will handle the paperwork.",
+    );
   }
 }
 
@@ -583,49 +797,72 @@ function talked(npcId: string): void {
 // Zone entry
 // ---------------------------------------------------------------------------
 function entered(zone: string): void {
-  if (flags.finished === true) { return; }
+  if (flags.finished === true) {
+    return;
+  }
 
   if (zone === BATHROOM) {
     ending(
       "Relieved",
       "You made it to the restroom just in time. " +
-      "The teacher's expression when you walked back into class was priceless."
+        "The teacher's expression when you walked back into class was priceless.",
     );
     return;
   }
 
   const spot = CHECKPOINTS[zone];
   if (spot !== undefined) {
-    dispatch("player-checkpoint", { player: "", x: spot[0], z: spot[1], y: spot[2] });
+    dispatch("player-checkpoint", {
+      player: "",
+      x: spot[0],
+      z: spot[1],
+      y: spot[2],
+    });
     showCheckpoint(zone);
   }
 
   if (zone === STAIRS && flags.stairBeat !== true) {
     flags.stairBeat = true;
     dispatch("camera", {
-      player: "", at: [30, 234, -8], look: [0, 210, -40],
-      durationMs: 2_000, holdMs: 600, ease: "smooth",
+      player: "",
+      at: [30, 234, -8],
+      look: [0, 210, -40],
+      durationMs: 2_000,
+      holdMs: 600,
+      ease: "smooth",
     });
   }
   if (zone === CAFETERIA && flags.cafeBeat !== true) {
     flags.cafeBeat = true;
     dispatch("camera", {
-      player: "", at: [30, 228, 88], look: [0, 218, 88],
-      durationMs: 1_500, holdMs: 500, ease: "smooth",
+      player: "",
+      at: [30, 228, 88],
+      look: [0, 218, 88],
+      durationMs: 1_500,
+      holdMs: 500,
+      ease: "smooth",
     });
   }
   if (zone === MUD_ROOM && flags.mudBeat !== true) {
     flags.mudBeat = true;
     dispatch("camera", {
-      player: "", at: [20, 228, 232], look: [0, 218, 232],
-      durationMs: 1_500, holdMs: 500, ease: "smooth",
+      player: "",
+      at: [20, 228, 232],
+      look: [0, 218, 232],
+      durationMs: 1_500,
+      holdMs: 500,
+      ease: "smooth",
     });
   }
   if (zone === BATHROOM && flags.bathBeat !== true) {
     flags.bathBeat = true;
     dispatch("camera", {
-      player: "", at: [30, 230, 280], look: [0, 218, 280],
-      durationMs: 1_200, holdMs: 800, ease: "smooth",
+      player: "",
+      at: [30, 230, 280],
+      look: [0, 218, 280],
+      durationMs: 1_200,
+      holdMs: 800,
+      ease: "smooth",
     });
   }
 }
@@ -684,7 +921,10 @@ export function bmsTick(_clockMs: number, eventsJson: string): void {
       usedItem(event.item);
     } else if (event.kind === "npc-talk" && event.npcId !== undefined) {
       talked(event.npcId);
-    } else if (event.kind === "player-touched" && event.entityId !== undefined) {
+    } else if (
+      event.kind === "player-touched" &&
+      event.entityId !== undefined
+    ) {
       touched(event.entityId);
     } else if (event.kind === "player-died") {
       died(event.cause ?? "");
