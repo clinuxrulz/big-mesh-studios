@@ -194,8 +194,9 @@ const LATE_TO_SCHOOL: BuiltinDemo = {
 };
 
 /**
- * The models the "Don't Poop Yourself at School" demo wears: the lobby pickup,
- * the hazard sign, and the two staff figures.
+ * The models the "Don't Poop Yourself at School" demo wears: lobby pickup,
+ * hazard props, the four school staff, and the platform models used throughout
+ * the nine-section course.
  */
 const DONT_POOP_MODELS = [
   "soap.zip",
@@ -203,17 +204,21 @@ const DONT_POOP_MODELS = [
   "platform.zip",
   "toilet-roll.zip",
   "npc-sable.zip",
-  "npc-rook.zip",
+  "npc-bully.zip",
+  "npc-brad.zip",
+  "npc-teacher.zip",
 ];
 
 /**
- * The "Don't Poop Yourself at School" demo: a classroom lobby lifted high over
- * the schoolyard, a staircase climbing east out of it while a giant toilet
- * roll tumbles back down, pads the moving plank, the spinning disc, and the
- * wet-floor sign carry the player past the gym, and a restroom at the far end
- * ends the run before the bladder meter does. It is the proof that a place's
- * script can set checkpoints, kill and respawn the player, hear a hazard
- * touch, and animate its world.
+ * The "Don't Poop Yourself at School" demo: a faithful port of the Roblox
+ * obby. The player is lifted from the yard to a classroom lobby and must reach
+ * the restroom at the far east end of the school before the bladder meter
+ * fills. The nine sections are: Lobby → Stairs (two rolling toilet rolls,
+ * moving plank) → Hallway (wet-floor sign hazard) → Cafeteria (conveyor-belt
+ * lunch trays) → Gym (sliding platform, spinning turntable, falling platform)
+ * → Library (floating book-pads, rolling globe hazard) → Mud Room (quicksand
+ * field) → Final Pads → Bathroom (win). Four NPCs: Janitor, Bully, Principal
+ * (gives a hall pass), and Teacher.
  */
 const DONT_POOP: BuiltinDemo = {
   id: "dont-poop-yourself-at-school",

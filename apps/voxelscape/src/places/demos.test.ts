@@ -677,10 +677,10 @@ describe("the Don't Poop Yourself at School demo", () => {
       region: planRegionAround(project.manifest.spawn),
     });
     const boxes = plan.flatMap((shape) => expandShape(shape));
-    // The lobby floor's east edge is at 202, and the first tread climbs a
-    // single step to 204 right where the floor ends, not across a gap.
+    // The lobby floor's east edge is at voxel z=-8 (world z=-16, surface 202),
+    // and the first stair tread starts there, climbing one step to 204.
     expect(columnSurfaces(boxes, 0, -12)).toContain(202);
-    expect(columnSurfaces(boxes, 0, -10)).toContain(204);
+    expect(columnSurfaces(boxes, 0, -7)).toContain(204);
   });
 
   it("puts every checkpoint on a solid surface", async () => {
@@ -696,16 +696,19 @@ describe("the Don't Poop Yourself at School demo", () => {
       columnSurfaces(boxes, worldX / 2, worldZ / 2);
     expect(surfacesAt(0, -40)).toContain(202); // the lobby
     expect(surfacesAt(0, 16)).toContain(218); // the staircase pedestal
-    expect(surfacesAt(0, 52)).toContain(218); // the hallway's first pad
-    expect(surfacesAt(0, 76)).toContain(218); // the gym's second pad
-    expect(surfacesAt(0, 96)).toContain(220); // the last pads
-    expect(surfacesAt(0, 120)).toContain(222); // the restroom floor
+    expect(surfacesAt(0, 42)).toContain(218); // the hallway corridor
+    expect(surfacesAt(0, 80)).toContain(218); // the cafeteria floor
+    expect(surfacesAt(0, 210)).toContain(218); // the mud room floor
+    expect(surfacesAt(0, 270)).toContain(220); // the bathroom floor
   });
 
   it("opens with the staff, the soap, the hazard sign, and a kill plane", async () => {
     const { host, voids } = await runDp();
+    // Four NPCs: Janitor, Bully, Principal, and Teacher.
     expect(host.npcList.map((npc) => npc.id).sort()).toEqual([
+      "bully",
       "janitor",
+      "principal",
       "teacher",
     ]);
     expect(host.prop("wet-floor")).toMatchObject({ hazard: true });
@@ -728,7 +731,7 @@ describe("the Don't Poop Yourself at School demo", () => {
     expect(host.cutsceneFor("")?.shots).toEqual([
       {
         at: [30, 234, -8],
-        look: [0, 206, -40],
+        look: [0, 210, -40],
         durationMs: 2_000,
         holdMs: 600,
         ease: "smooth",
@@ -739,7 +742,7 @@ describe("the Don't Poop Yourself at School demo", () => {
 
   it("sets a checkpoint and marks it when the player reaches a pad", async () => {
     const { host, checkpoints } = await runDp();
-    await host.movePlayer("", 0, 211, -18); // onto the staircase
+    await host.movePlayer("", 0, 211, -18); // onto the staircase zone
     expect(checkpoints).toContainEqual([0, 16, 218]);
     expect(host.hudFor("")).toContainEqual(
       expect.objectContaining({ id: "checkpoint", kind: "text" }),
@@ -750,15 +753,15 @@ describe("the Don't Poop Yourself at School demo", () => {
   it("shows a filling bladder meter and loses when it fills", async () => {
     const { host, endings } = await runDp();
     expect(host.hudFor("")).toContainEqual(
-      expect.objectContaining({ id: "bladder", kind: "bar", max: 10 }),
+      expect.objectContaining({ id: "bladder", kind: "bar", max: 12 }),
     );
     expect(host.hudFor("")[0]).toMatchObject({ value: 0 });
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 12; i++) {
       clockMs += 8_000;
       await host.pump();
     }
     expect(endings).toEqual(["Accident"]);
-    expect(host.hudFor("")[0]).toMatchObject({ value: 10 });
+    expect(host.hudFor("")[0]).toMatchObject({ value: 12 });
     host.dispose();
   });
 
@@ -789,7 +792,8 @@ describe("the Don't Poop Yourself at School demo", () => {
 
   it("ends with Relieved when the player reaches the restroom", async () => {
     const { host, endings } = await runDp();
-    await host.movePlayer("", 0, 223, 120);
+    // The bathroom zone now runs from world z=270 to z=310.
+    await host.movePlayer("", 0, 220, 280);
     expect(endings).toEqual(["Relieved"]);
     host.dispose();
   });
