@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BUILTIN_DEMOS, builtinDemo, loadBuiltinDemo } from "./demos";
 import { compilePlacePlan, planRegionAround } from "./plan";
 import { ScriptHost } from "./script-host";
+import { expandShape } from "../world/structure-fill";
 
 /** The bytes of a model under `public/models/`, as the demo loader fetches them. */
 const modelBytes = (file: string): ArrayBuffer => {
@@ -15,6 +16,28 @@ const modelBytes = (file: string): ArrayBuffer => {
     bytes.byteOffset + bytes.byteLength,
   ) as ArrayBuffer;
 };
+
+/**
+ * Every surface top the plan offers at one LOD-0 voxel column, in world units.
+ * The passed boxes are the plan's expanded shapes; the two `surfaceTops`
+ * helpers below sit on top of this and guard the demo against building a
+ * course whose pads or checkpoints float in the air.
+ */
+const columnSurfaces = (
+  boxes: Array<{ id: number; min: number[]; max: number[] }>,
+  voxelX: number,
+  voxelZ: number,
+): number[] =>
+  boxes
+    .filter(
+      (box) =>
+        box.id !== 0 &&
+        voxelX >= box.min[0] &&
+        voxelX <= box.max[0] &&
+        voxelZ >= box.min[2] &&
+        voxelZ <= box.max[2],
+    )
+    .map((box) => (box.max[1] + 1) * 2);
 
 /** Answers the loader's `<base>models/...` fetches from disk. */
 const stubModels = (): void => {
@@ -645,11 +668,45 @@ describe("the Don't Poop Yourself at School demo", () => {
     expect(plan.some((shape) => shape.kind === "stairs")).toBe(true);
   });
 
+  it("attaches the staircase to the lobby floor", async () => {
+    const { project, entry } = await dontPoop();
+    const plan = await compilePlacePlan({
+      files: project.scripts,
+      entry,
+      seed: project.manifest.seed,
+      region: planRegionAround(project.manifest.spawn),
+    });
+    const boxes = plan.flatMap((shape) => expandShape(shape));
+    // The lobby floor's east edge is at 202, and the first tread climbs a
+    // single step to 204 right where the floor ends, not across a gap.
+    expect(columnSurfaces(boxes, 0, -12)).toContain(202);
+    expect(columnSurfaces(boxes, 0, -10)).toContain(204);
+  });
+
+  it("puts every checkpoint on a solid surface", async () => {
+    const { project, entry } = await dontPoop();
+    const plan = await compilePlacePlan({
+      files: project.scripts,
+      entry,
+      seed: project.manifest.seed,
+      region: planRegionAround(project.manifest.spawn),
+    });
+    const boxes = plan.flatMap((shape) => expandShape(shape));
+    const surfacesAt = (worldX: number, worldZ: number): number[] =>
+      columnSurfaces(boxes, worldX / 2, worldZ / 2);
+    expect(surfacesAt(0, -40)).toContain(202); // the lobby
+    expect(surfacesAt(0, 16)).toContain(218); // the staircase pedestal
+    expect(surfacesAt(0, 52)).toContain(218); // the hallway's first pad
+    expect(surfacesAt(0, 76)).toContain(218); // the gym's second pad
+    expect(surfacesAt(0, 96)).toContain(220); // the last pads
+    expect(surfacesAt(0, 120)).toContain(222); // the restroom floor
+  });
+
   it("opens with the staff, the soap, the hazard sign, and a kill plane", async () => {
     const { host, voids } = await runDp();
     expect(host.npcList.map((npc) => npc.id).sort()).toEqual([
       "janitor",
-      "principal",
+      "teacher",
     ]);
     expect(host.prop("wet-floor")).toMatchObject({ hazard: true });
     expect(host.prop("soap")).toMatchObject({ model: "soap.zip" });
@@ -667,11 +724,11 @@ describe("the Don't Poop Yourself at School demo", () => {
 
   it("plays a camera beat when the climb begins", async () => {
     const { host } = await runDp();
-    await host.movePlayer("", 0, 219, -22); // onto the landing above the stairs
+    await host.movePlayer("", 0, 211, -18); // onto the staircase
     expect(host.cutsceneFor("")?.shots).toEqual([
       {
-        at: [18, 232, -34],
-        look: [0, 210, -22],
+        at: [30, 234, -8],
+        look: [0, 206, -40],
         durationMs: 2_000,
         holdMs: 600,
         ease: "smooth",
@@ -682,8 +739,8 @@ describe("the Don't Poop Yourself at School demo", () => {
 
   it("sets a checkpoint and marks it when the player reaches a pad", async () => {
     const { host, checkpoints } = await runDp();
-    await host.movePlayer("", 0, 219, -22); // the landing above the stairs
-    expect(checkpoints).toContainEqual([0, -22, 218]);
+    await host.movePlayer("", 0, 211, -18); // onto the staircase
+    expect(checkpoints).toContainEqual([0, 16, 218]);
     expect(host.hudFor("")).toContainEqual(
       expect.objectContaining({ id: "checkpoint", kind: "text" }),
     );
@@ -730,9 +787,9 @@ describe("the Don't Poop Yourself at School demo", () => {
     host.dispose();
   });
 
-  it("ends with Relieved when the player reaches the office", async () => {
+  it("ends with Relieved when the player reaches the restroom", async () => {
     const { host, endings } = await runDp();
-    await host.movePlayer("", 0, 227, 58);
+    await host.movePlayer("", 0, 223, 120);
     expect(endings).toEqual(["Relieved"]);
     host.dispose();
   });

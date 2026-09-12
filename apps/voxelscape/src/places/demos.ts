@@ -207,12 +207,13 @@ const DONT_POOP_MODELS = [
 ];
 
 /**
- * The "Don't Poop Yourself at School" demo: a school lobby lifted high over the
- * yard, a staircase and a run of floating pads climbing to the principal's
- * office, a hazard sign that kills on contact, a kill plane that returns a
- * fallen player to the last checkpoint, and moving planks and props that ride
- * the shared clock. It is the proof that a place's script can set checkpoints,
- * kill and respawn the player, hear a hazard touch, and animate its world.
+ * The "Don't Poop Yourself at School" demo: a classroom lobby lifted high over
+ * the schoolyard, a staircase climbing east out of it while a giant toilet
+ * roll tumbles back down, pads the moving plank, the spinning disc, and the
+ * wet-floor sign carry the player past the gym, and a restroom at the far end
+ * ends the run before the bladder meter does. It is the proof that a place's
+ * script can set checkpoints, kill and respawn the player, hear a hazard
+ * touch, and animate its world.
  */
 const DONT_POOP: BuiltinDemo = {
   id: "dont-poop-yourself-at-school",

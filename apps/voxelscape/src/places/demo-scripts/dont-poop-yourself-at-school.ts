@@ -25,10 +25,13 @@ interface Event {
   cause?: string;
 }
 
-// The structure plan is drawn in LOD-0 voxel coordinates, so `GROUND` is a
-// voxel row: the schoolyard's walkable surface sits at world y 60, the player's
-// feet at 62. The obby itself is built high above it, so a fall runs past the
-// kill plane before it ever reaches the ground.
+// The structure plan is drawn in LOD-0 voxel coordinates (two world units per
+// voxel), while zones, checkpoints, props and camera shots speak world units.
+// The school is a row of elevated floors over the yard: the classroom lobby
+// at the top of row 100, then a staircase climbing east out of it, then pads
+// and a restroom floating high enough that any fall ends below the kill
+// plane. The course runs from west to east: lobby, stairs, hallway, gym,
+// final pads, and the restroom's hallway beyond.
 const GROUND = 30;
 /** The voxel row whose top is the lobby floor; the player is put down on it. */
 const LOBBY_VOXEL = 100;
@@ -37,17 +40,17 @@ const LOBBY = (LOBBY_VOXEL + 1) * 2;
 /** Falling with the feet below this height is fatal, in world units. */
 const VOID_Y = 150;
 
-/** The points that count as the school's rooms and checkpoint pads. */
+/** The points that count as the school's floors and checkpoint pads. */
 const YARD = "yard";
 const LOBBY_ZONE = "lobby";
 const STAIRS = "stairs";
-const PLATFORM_ONE = "platform-one";
-const PLATFORM_TWO = "platform-two";
-const PLATFORM_THREE = "platform-three";
-const OFFICE = "office";
+const HALLWAY = "hallway";
+const GYM = "gym";
+const FINAL = "final";
+const BATHROOM = "bathroom";
 
 const JANITOR = "janitor";
-const PRINCIPAL = "principal";
+const TEACHER = "teacher";
 
 /** How many beats the bladder meter fills over before the game is lost. */
 const BLADDER_MAX = 10;
@@ -64,27 +67,44 @@ const inZone: Record<string, boolean> = {};
 const hinted: Record<string, boolean> = {};
 const flags: Record<string, boolean> = {};
 
-/** The rooms and pads as `[id, minX, minZ, maxX, maxZ, minY, maxY]`, in world units. */
+/**
+ * The floors and pads as `[id, minX, minY, minZ, maxX, maxY, maxZ]`, all in
+ * world units and covering the walkable surface plus the air over it. The
+ * ranges are disjoint after the stairs, so entering the restroom's zone is
+ * the win and not something touching the last pad already grants.
+ */
 const ZONES: Array<[string, number, number, number, number, number, number]> = [
-  [YARD, -120, -120, 120, 120, 0, 120],
-  [LOBBY_ZONE, -30, -10, 30, 30, LOBBY, LOBBY + 12],
-  [STAIRS, -10, -30, 10, -14, 218, 230],
-  [PLATFORM_ONE, -8, -4, 8, 8, 220, 232],
-  [PLATFORM_TWO, -8, 14, 8, 26, 222, 234],
-  [PLATFORM_THREE, -8, 32, 8, 44, 224, 236],
-  [OFFICE, -12, 50, 12, 66, 226, 238],
+  [YARD, -120, 0, -120, 120, 120, 120],
+  [LOBBY_ZONE, -60, 200, -80, 60, 216, -18],
+  [STAIRS, -16, 200, -20, 16, 222, 28],
+  [HALLWAY, -16, 216, 40, 16, 222, 63],
+  [GYM, -16, 216, 64, 16, 222, 87],
+  [FINAL, -16, 218, 88, 16, 226, 107],
+  [BATHROOM, -22, 218, 108, 22, 228, 138],
 ];
 
+/** What each checkpoint pad's HUD readout is called. */
+const CHECKPOINT_LABELS: Record<string, string> = {
+  [LOBBY_ZONE]: "The Lobby",
+  [STAIRS]: "The Stairs",
+  [HALLWAY]: "The Hallway",
+  [GYM]: "The Gym",
+  [FINAL]: "The Last Pads",
+  [BATHROOM]: "The Restroom",
+};
+
 /**
- * Where each checkpoint pad respawns the player, as `[x, z, feetY]`. The lobby
- * is the first checkpoint, so a fall before the first pad returns there.
+ * Where each checkpoint pad respawns the player, as `[x, z, feetY]`, every
+ * spot on a real surface. The lobby is the first checkpoint, so a fall before
+ * the first pad returns there.
  */
 const CHECKPOINTS: Record<string, [number, number, number]> = {
-  [LOBBY_ZONE]: [0, 10, LOBBY],
-  [STAIRS]: [0, -22, 218],
-  [PLATFORM_ONE]: [0, 2, 220],
-  [PLATFORM_TWO]: [0, 20, 222],
-  [PLATFORM_THREE]: [0, 38, 224],
+  [LOBBY_ZONE]: [0, -40, LOBBY],
+  [STAIRS]: [0, 16, 218],
+  [HALLWAY]: [0, 52, 218],
+  [GYM]: [0, 76, 218],
+  [FINAL]: [0, 96, 220],
+  [BATHROOM]: [0, 120, 222],
 };
 
 function dispatch(tag: string, payload: unknown): void {
@@ -146,7 +166,7 @@ function bladderBeat(): void {
   if (bladder >= BLADDER_MAX) {
     ending(
       "Accident",
-      "You did not make it. Whatever the principal was going to say, this is worse.",
+      "You did not make it. Whatever the teacher was going to say, this is worse.",
     );
     return;
   }
@@ -160,7 +180,7 @@ function showCheckpoint(name: string): void {
     id: "checkpoint",
     kind: "text",
     label: "Checkpoint",
-    text: name,
+    text: CHECKPOINT_LABELS[name] ?? name,
   });
 }
 
@@ -184,26 +204,28 @@ export function bmsPlan(): string {
     box(-160, 0, -160, 160, GROUND - 1, 160, b.dirt),
     box(-160, GROUND, -160, 160, GROUND, 160, b.grass),
     box(-160, GROUND + 1, -160, 160, 90, 160, 0),
-    // The lobby floor, high enough that a fall from the obby is fatal.
-    box(-30, LOBBY_VOXEL, -10, 30, LOBBY_VOXEL, 30, b.greystone),
-    // The staircase climbing out of the lobby to the first checkpoint.
+    // The classroom lobby, high above the yard: the course's west end.
+    box(-30, LOBBY_VOXEL, -40, 30, LOBBY_VOXEL, -11, b.greystone),
+    // The staircase climbing east out of the lobby's far edge: eight one-voxel
+    // treads, then a solid pedestal whose top is the first checkpoint, so the
+    // ascent is attached and every rise is exactly one step.
     {
       kind: "stairs",
-      at: [-5, LOBBY_VOXEL + 1, -30],
+      at: [-7, LOBBY_VOXEL + 1, -11],
       along: "z",
       steps: 8,
       rise: 1,
       run: 2,
-      width: 10,
+      width: 15,
       id: b.greystone,
     },
-    box(-10, 108, -30, 10, 108, -14, b.greystone),
-    // The floating pads, each a short jump past the last.
-    box(-8, 109, -4, 8, 109, 8, b.wood),
-    box(-8, 110, 14, 8, 110, 26, b.wood),
-    box(-8, 111, 32, 8, 111, 44, b.wood),
-    // The principal's office at the end of the course.
-    box(-12, 112, 50, 12, 112, 66, b.greystone),
+    box(-7, 101, 4, 7, 108, 12, b.greystone),
+    // The pads of the hallway and gym, each a short hop past the last.
+    box(-7, 108, 22, 7, 108, 30, b.wood),
+    box(-5, 108, 34, 5, 108, 42, b.wood),
+    box(-5, 109, 44, 5, 109, 52, b.wood),
+    // The restroom floor at the east end of the course.
+    box(-8, 110, 54, 8, 110, 67, b.greystone),
   ];
   return JSON.stringify(shapes);
 }
@@ -218,7 +240,7 @@ function open(): void {
     stackable: false,
   });
 
-  for (const [id, minX, minZ, maxX, maxZ, minY, maxY] of ZONES) {
+  for (const [id, minX, minY, minZ, maxX, maxY, maxZ] of ZONES) {
     dispatch("zone", {
       id,
       name: id,
@@ -231,41 +253,42 @@ function open(): void {
   dispatch("prop", {
     id: "soap",
     model: "soap.zip",
-    x: -12,
-    z: 10,
+    x: -10,
+    z: -30,
     y: LOBBY,
     name: "Soap",
     height: 0.4,
     solid: false,
   });
-  // The wet floor sign on the second pad: touching it is fatal.
+  // The wet floor sign in the middle of the first pad; touching it is fatal.
   dispatch("prop", {
     id: "wet-floor",
     model: "wet-floor.zip",
-    x: 0,
-    z: 20,
-    y: 222,
+    x: 4,
+    z: 52,
+    y: 218,
     name: "Wet Floor",
     height: 1.5,
     solid: false,
     hazard: true,
   });
 
-  // A plank that slides back and forth across the first gap, carrying whoever
-  // stands on it. Its path is an offset from where it sits.
+  // A plank that slides back and forth across the gap between the staircase
+  // pedestal and the first pad, carrying whoever stands on it. Its path is an
+  // offset from where it sits.
   dispatch("prop", {
     id: "moving-plank",
     model: "platform.zip",
     x: 0,
-    z: -9,
-    y: 218,
+    z: 26,
+    y: 216,
     name: "Moving Plank",
     height: 2,
     solid: true,
     motion: {
       path: [
         [0, 0, 0],
-        [0, 0, 10],
+        [0, 0, 14],
       ],
       loop: "pingpong",
       durationMs: 4_000,
@@ -277,8 +300,8 @@ function open(): void {
     id: "turntable",
     model: "platform.zip",
     x: 0,
-    z: 12,
-    y: 218,
+    z: 64,
+    y: 216,
     name: "Turntable",
     height: 2,
     solid: true,
@@ -289,12 +312,13 @@ function open(): void {
       spin: { axis: [0, 1, 0], turnsPerSecond: 0.08 },
     },
   });
-  // A toilet roll tumbling down the stairs beside the climb.
+  // A toilet roll tumbling down the staircase beside the climb, the school's
+  // famous hazard. It comes down the slope on its own clock.
   dispatch("prop", {
     id: "toilet-roll",
     model: "toilet-roll.zip",
     x: 2,
-    z: -16,
+    z: 18,
     y: 218,
     name: "Toilet Roll",
     height: 1,
@@ -302,7 +326,7 @@ function open(): void {
     motion: {
       path: [
         [0, 0, 0],
-        [0, -16, -14],
+        [0, -14, -48],
       ],
       loop: "loop",
       durationMs: 6_000,
@@ -314,27 +338,27 @@ function open(): void {
   dispatch("npc", {
     id: JANITOR,
     x: -20,
-    z: 10,
+    z: -30,
     y: LOBBY,
     name: "Janitor",
     model: "npc-sable.zip",
     yaw: Math.PI / 2,
   });
   dispatch("npc", {
-    id: PRINCIPAL,
+    id: TEACHER,
     x: 0,
-    z: 62,
-    y: 226,
-    name: "Principal",
+    z: 120,
+    y: 222,
+    name: "Teacher",
     model: "npc-rook.zip",
     yaw: Math.PI,
   });
 
   // The player spawns on the schoolyard ground; the game begins up in the
   // lobby. Teleport them up before the kill plane is armed.
-  dispatch("player-place", { player: "", x: 0, z: 10, y: LOBBY });
+  dispatch("player-place", { player: "", x: 0, z: -40, y: LOBBY });
   dispatch("void", { y: VOID_Y });
-  // The meter fills on its own clock; the player has to reach the office
+  // The meter fills on its own clock; the player has to reach the restroom
   // before it does.
   showBladder();
   dispatch("timer", { id: "bladder", afterMs: BLADDER_STEP_MS });
@@ -343,10 +367,15 @@ function open(): void {
   dispatch("cutscene", {
     player: "",
     shots: [
-      { at: [-60, 250, -60], look: [0, 202, 10], durationMs: 0, holdMs: 1_200 },
       {
-        at: [0, 226, -40],
-        look: [0, 204, 0],
+        at: [-60, 268, -140],
+        look: [0, 206, -10],
+        durationMs: 0,
+        holdMs: 1_200,
+      },
+      {
+        at: [0, 226, -66],
+        look: [0, 205, -18],
         durationMs: 3_000,
         holdMs: 600,
         ease: "smooth",
@@ -355,22 +384,24 @@ function open(): void {
   });
   narrate(
     "You",
-    "First day at school. I really, really need the bathroom — the principal's office is the only one that is not out of order.",
+    "My teacher will not give me a hall pass, and the restroom is the far end of the school. I have maybe a minute.",
   );
 }
 
 function hintFor(zone: string): void {
   if (zone === LOBBY_ZONE) {
-    narrate("You", "The stairs are through the doors. Do not look down.");
+    narrate("You", "The stairs are at the end of the lobby. Do not look down.");
   } else if (zone === STAIRS) {
     narrate(
       "You",
-      "Climbing. One slip and it is the schoolyard from very high.",
+      "Climbing. And look — the toilet paper is coming down. Let it pass.",
     );
-  } else if (zone === PLATFORM_ONE) {
-    narrate("You", "Almost there. Mind the wet floor sign.");
-  } else if (zone === PLATFORM_TWO) {
-    narrate("You", "The office is just past the last pad.");
+  } else if (zone === HALLWAY) {
+    narrate("You", "The janitor left the floor wet out here. Mind the sign.");
+  } else if (zone === GYM) {
+    narrate("You", "The gym keeps a spinning disc under its floor.");
+  } else if (zone === FINAL) {
+    narrate("You", "The restroom is just past these last pads.");
   }
 }
 
@@ -407,11 +438,14 @@ function usedItem(item: string): void {
 
 function talked(npcId: string): void {
   if (npcId === JANITOR) {
-    narrate("Janitor", "Wet floor. Watch your step up there.");
+    narrate("Janitor", "Wet floor on the first pad. Watch your step up there.");
     return;
   }
-  if (npcId === PRINCIPAL) {
-    narrate("Principal", "You made it. The bathroom is down the hall.");
+  if (npcId === TEACHER) {
+    narrate(
+      "Teacher",
+      "You made it. Through that door — go. I will cover for you.",
+    );
   }
 }
 
@@ -420,10 +454,10 @@ function entered(zone: string): void {
   if (flags.finished === true) {
     return;
   }
-  if (zone === OFFICE) {
+  if (zone === BATHROOM) {
     ending(
       "Relieved",
-      "You made it to the principal's office with your dignity intact. Class begins in five minutes.",
+      "You made it to the restroom in time. Class can wait — the teacher said so.",
     );
     return;
   }
@@ -437,14 +471,14 @@ function entered(zone: string): void {
     });
     showCheckpoint(zone);
   }
-  // A one-off camera beat when the climb first begins: look down the stairs
-  // at the roll tumbling past.
+  // A one-off camera beat when the climb begins: look back down the stairs at
+  // the roll tumbling past.
   if (zone === STAIRS && flags.stairBeat !== true) {
     flags.stairBeat = true;
     dispatch("camera", {
       player: "",
-      at: [18, 232, -34],
-      look: [0, 210, -22],
+      at: [30, 234, -8],
+      look: [0, 206, -40],
       durationMs: 2_000,
       holdMs: 600,
       ease: "smooth",
@@ -463,7 +497,7 @@ function touched(entityId: string): void {
 function died(cause: string): void {
   deaths += 1;
   if (cause === "void") {
-    narrate("You", "The schoolyard, from the top of the stairs. Ouch.");
+    narrate("You", "Down past the schoolyard again. Ouch.");
   } else {
     narrate("You", "Down you go. Deaths so far: " + deaths + ".");
   }
