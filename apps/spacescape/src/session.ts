@@ -435,7 +435,9 @@ export class Session {
     return {
       kind: "setModel",
       revision: this.revision,
-      operations: serialiseOperations(this.currentOperations),
+      operations: serialiseOperations(
+         this.currentOperations.filter((op) => op.visual !== false),
+       ),
       paint: [],
       // **One value, not a kind beside parameters.** The union carries its own parameters, so a
       // message cannot name a planet and arrive holding a landscape's four numbers.

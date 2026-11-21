@@ -239,6 +239,7 @@ const wallOptions = (
   orientation: part.orientation,
   ...(item.colour === undefined ? {} : { colour: item.colour }),
   ...materialOf(item.material),
+  ...(item.visual === "csg" ? { visual: false } : {}),
 });
 
 export const createLevelApplier = (target: LevelTarget) => {
@@ -337,6 +338,7 @@ export const createLevelApplier = (target: LevelTarget) => {
         : { orientation: quatOf(item.orientation) ?? IDENTITY }),
       ...(item.colour === undefined ? {} : { colour: item.colour }),
       ...materialOf(item.material),
+      ...(item.visual === "csg" ? { visual: false } : {}),
     });
 
   /**
@@ -502,8 +504,8 @@ export const createLevelApplier = (target: LevelTarget) => {
       if (target.csgGroup !== undefined) {
         for (const m of csgMeshes) target.csgGroup.remove(m);
         csgMeshes = [];
-        if (csgOperations.length > 0) {
-          const result = meshModel(csgOperations, DEFAULT_BUDGET, "csg");
+        for (const op of csgOperations) {
+          const result = meshModel([op], DEFAULT_BUDGET, "csg");
           const geo = result?.mesh === undefined ? undefined : toChunkGeometry(result.mesh);
           if (geo !== undefined) {
             const mat = target.material ?? new MeshBasicMaterial();

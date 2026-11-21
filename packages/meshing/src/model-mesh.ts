@@ -876,7 +876,6 @@ const meshModelCsg = (
   const csgOps: Operation[] = [];
   for (const op of operations) {
     if (op.combine === "Paint") continue;
-    if (op.softness !== 0) continue; // hard edges only
     const g = shapeToRmslGeometry(op.shape);
     bakeTransformIntoGeometry(g, op);
     ensureColorAttribute(g, op);
@@ -894,7 +893,7 @@ const meshModelCsg = (
   let current: Brush | null = null;
   let bi = 0;
   for (const op of operations) {
-    if (op.combine === "Paint" || op.softness !== 0) continue;
+    if (op.combine === "Paint") continue;
     const brush = brushes[bi++];
     if (current === null) {
       if (op.combine === "Add") current = brush;
