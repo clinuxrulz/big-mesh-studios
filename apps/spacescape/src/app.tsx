@@ -2595,6 +2595,7 @@ export default function App() {
           // model reader is the same seam — a host can be stood up in a test with two fixtures
           // and never touch a zip.
           figures,
+          material,
           models: modelLibrary,
           terrainHeight: groundHeightAt,
           solidAt: (x, y, z) => game.world.getSolidAt({ x, y, z }),

@@ -57,6 +57,8 @@ import type { Operation, OperationShape } from "@big-mesh-studios/csg";
 import { placeOperation } from "../place-registry";
 import type { PlaceRegistry } from "../place-registry";
 import type { Bounds, Quat, Vec3 } from "@big-mesh-studios/core";
+import { Group, Mesh, MeshBasicMaterial } from "@random-mesh/rmsl/scene";
+import type { Material } from "@random-mesh/rmsl/scene";
 import type { FigureSet } from "../../figures/figure-set";
 import type { FigureModel } from "../model-library";
 import { materialId } from "../../render/material-names";
@@ -75,6 +77,8 @@ import {
   LEVEL_PLACE,
 } from "./types";
 import { wallParts, type WallPart } from "./walls";
+import { meshModel, DEFAULT_BUDGET } from "@big-mesh-studios/meshing";
+import { toChunkGeometry } from "../../render/chunk-geometry";
 
 /** The turn a shape that names none has. `makeOperation` would have used it too. */
 const IDENTITY: Quat = { x: 0, y: 0, z: 0, w: 1 };
@@ -195,6 +199,10 @@ export interface LevelTarget {
   readonly models?: { get(name: string): FigureModel | undefined };
   /** Told the box that changed, or nothing when everything did. */
   readonly geometryChanged: (bounds: Bounds | undefined) => void;
+  /** The terrain's own material, for CSG visual meshes. */
+  readonly material?: Material;
+  /** Where CSG visual meshes are attached. */
+  readonly csgGroup?: Group;
 }
 
 /**
@@ -244,6 +252,8 @@ export const createLevelApplier = (target: LevelTarget) => {
   let appliedFigures = new Map<string, { signature: string; bounds: Bounds }>();
   /** The operations as they were last applied, by id — so an edit can be a `set` not a rebuild. */
   let applied = new Map<string, Operation>();
+  /** CSG visual meshes currently attached, removed on the next apply. */
+  let csgMeshes: Mesh[] = [];
 
   /**
    * The operations a plan makes, by id, in fold order.
@@ -401,6 +411,7 @@ export const createLevelApplier = (target: LevelTarget) => {
       const place = target.places.create(LEVEL_PLACE);
 
       const touched: Operation[] = [];
+      const csgOperations: Operation[] = [];
       /** What the last apply put in the place, because clearing it loses the box it reached. */
       let removed: readonly Operation[] = [];
 
@@ -434,6 +445,7 @@ export const createLevelApplier = (target: LevelTarget) => {
               if (operation === undefined) break rebuild;
               applied.set(part.id, operation);
               touched.push(operation);
+              if (item.visual === "csg") csgOperations.push(operation);
             }
             continue;
           }
@@ -441,6 +453,7 @@ export const createLevelApplier = (target: LevelTarget) => {
           if (operation === undefined) break rebuild;
           applied.set(item.id, operation);
           touched.push(operation);
+          if (item.visual === "csg") csgOperations.push(operation);
         }
       } else {
         // Not a rebuild: the shapes are all still here, so each one that changed is a
@@ -478,10 +491,28 @@ export const createLevelApplier = (target: LevelTarget) => {
           place.set(item.id, next);
           touched.push(previous, next);
           applied.set(item.id, next);
+          if (item.visual === "csg") csgOperations.push(next);
         }
       }
 
       const figureBounds = applyFigures(plan);
+
+      // **CSG visual meshes for items flagged `visual: "csg"`.** The shape stays in the field
+      // for collision; this mesh is the low-triangle visual on top.
+      if (target.csgGroup !== undefined) {
+        for (const m of csgMeshes) target.csgGroup.remove(m);
+        csgMeshes = [];
+        if (csgOperations.length > 0) {
+          const result = meshModel(csgOperations, DEFAULT_BUDGET, "csg");
+          const geo = result?.mesh === undefined ? undefined : toChunkGeometry(result.mesh);
+          if (geo !== undefined) {
+            const mat = target.material ?? new MeshBasicMaterial();
+            const mesh = new Mesh(geo, mat);
+            target.csgGroup.add(mesh);
+            csgMeshes.push(mesh);
+          }
+        }
+      }
 
       // The figures are not in the fold, so their boxes are not in `boundsOf` — but a
       // figure that moved still has to be re-meshed around it, and the host cannot know
@@ -525,6 +556,7 @@ const figureSignature = (item: LevelFigure): string =>
     item.yaw ?? null,
     item.scale ?? null,
     item.meshResolution ?? null,
+    item.meshMode ?? null,
     item.solid ?? null,
     item.name ?? null,
   ]);
@@ -565,6 +597,7 @@ const figureSpecOf = (
   ...(item.meshResolution === undefined
     ? {}
     : { meshResolution: item.meshResolution }),
+  ...(item.meshMode === undefined ? {} : { meshMode: item.meshMode }),
   ...(item.solid === undefined ? {} : { solid: item.solid }),
   ...(item.name === undefined ? {} : { name: item.name }),
 });

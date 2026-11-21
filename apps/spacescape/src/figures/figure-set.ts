@@ -48,6 +48,7 @@ import type { Material, Scene } from "@random-mesh/rmsl/scene";
 import type { Vec3 } from "@big-mesh-studios/core";
 
 import type { FigureModel } from "../places/model-library";
+import type { MeshMode } from "@big-mesh-studios/meshing";
 
 import {
   nearestFigureDistance,
@@ -103,6 +104,8 @@ export interface FigureSpec {
    * mesh. Absent means the model's own default (`FigureModel.resolution`).
    */
   readonly meshResolution?: number;
+  /** Which mesher to use for this figure's model. Absent means the model's own default. */
+  readonly meshMode?: MeshMode;
   /** Solid by default, because the common case is furniture and a coin is the exception. */
   readonly solid?: boolean;
   readonly name?: string;
@@ -174,7 +177,11 @@ export class FigureSet {
     // **`draw` and not the geometry**, so that every placement of a model shares one set of
     // buffers. See ADR 0047 — a readable `BufferGeometry` is a `BufferGeometry` somebody will
     // clone, and a clone copies every buffer and undoes the entire mechanism quietly.
-    const mesh = spec.model.draw(this.material, spec.meshResolution);
+    const mesh = spec.model.draw(
+      this.material,
+      spec.meshResolution,
+      spec.meshMode,
+    );
     if (mesh !== undefined) {
       this.applyTransform(mesh, transform);
       this.group.add(mesh);
